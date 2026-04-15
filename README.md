@@ -1,5 +1,7 @@
 # pi-extensions
 
+![pi-extensions banner](./assets/social-preview.png)
+
 A small collection of [pi](https://github.com/badlogic/pi-mono) extensions.
 
 ![minimal-footer preview](./assets/minimal-footer-preview.png)
