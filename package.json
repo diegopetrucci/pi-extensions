@@ -1,0 +1,16 @@
+{
+  "name": "pi-extensions",
+  "version": "0.1.0",
+  "description": "A collection of pi extensions.",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diegopetrucci/pi-extensions.git"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/minimal-footer/index.ts"
+    ]
+  }
+}
