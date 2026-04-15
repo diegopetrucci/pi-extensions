@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A collection of pi extensions, starting with a minimal custom footer.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",

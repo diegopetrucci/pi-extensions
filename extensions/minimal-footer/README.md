@@ -17,14 +17,14 @@ On wide terminals it renders two lines:
 
 ```text
 <git-branch>                                         <repo-name>
-<context-%>                                     <model> • <thinking>
+<context-%>                                     <model> <thinking>
 ```
 
 Example:
 
 ```text
 fix/remove-detached-image-tasks                     SendItToMy
-44.1%                                              gpt-5.4 • high
+44.1%                                              gpt-5.4 high
 ```
 
 On narrow terminals it falls back to one item per line.

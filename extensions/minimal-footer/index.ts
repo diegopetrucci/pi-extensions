@@ -19,7 +19,7 @@ export default function (pi: ExtensionAPI) {
 
 					const model = ctx.model?.id ?? "no-model";
 					const thinking = pi.getThinkingLevel();
-					const modelText = thinking === "off" ? model : `${model} • ${thinking}`;
+					const modelText = thinking === "off" ? model : `${model} ${thinking}`;
 
 					const branchStyled = theme.fg("dim", branch);
 					const repoStyled = theme.fg("dim", repo);
