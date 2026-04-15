@@ -1,7 +1,5 @@
 # pi-extensions
 
-![pi-extensions banner](https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/social-preview.png)
-
 A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I made.
 
 ## Included extensions
