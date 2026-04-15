@@ -1,7 +1,7 @@
 {
   "name": "pi-extensions",
-  "version": "0.1.0",
-  "description": "A collection of pi extensions.",
+  "version": "0.1.1",
+  "description": "A collection of pi extensions, starting with a minimal custom footer.",
   "keywords": ["pi-package"],
   "license": "MIT",
   "repository": {
@@ -11,6 +11,7 @@
   "pi": {
     "extensions": [
       "./extensions/minimal-footer/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/minimal-footer-preview.png"
   }
 }

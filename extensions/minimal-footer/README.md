@@ -2,6 +2,8 @@
 
 A minimal custom footer for pi.
 
+![minimal-footer preview](../../assets/minimal-footer-preview.png)
+
 It replaces pi's built-in footer with a cleaner two-line layout that focuses on the information I care about most:
 
 - current git branch
@@ -33,6 +35,12 @@ Install the repo:
 
 ```bash
 pi install git:github.com/diegopetrucci/pi-extensions
+```
+
+Or pin to the latest tagged version:
+
+```bash
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.1
 ```
 
 Then reload pi:

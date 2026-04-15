@@ -1,6 +1,6 @@
 {
   "name": "pi-minimal-footer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A minimal custom footer for pi.",
   "keywords": ["pi-package"],
   "license": "MIT",
@@ -12,7 +12,8 @@
   "pi": {
     "extensions": [
       "index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/minimal-footer-preview.png"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

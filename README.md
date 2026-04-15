@@ -2,6 +2,8 @@
 
 A small collection of [pi](https://github.com/badlogic/pi-mono) extensions.
 
+![minimal-footer preview](./assets/minimal-footer-preview.png)
+
 ## Included extensions
 
 | Extension | Description |
@@ -14,6 +16,12 @@ Install the repo as a pi package:
 
 ```bash
 pi install git:github.com/diegopetrucci/pi-extensions
+```
+
+Or pin to the latest tagged version:
+
+```bash
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.1
 ```
 
 Then reload pi:
