@@ -1,5 +1,7 @@
 # pi-extensions
 
+![pi-extensions banner](https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/social-preview.png)
+
 A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I made.
 
 ## Included extensions
@@ -10,16 +12,26 @@ A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I mad
 
 ## Install
 
+### GitHub
+
 Install the repo as a pi package:
 
 ```bash
 pi install git:github.com/diegopetrucci/pi-extensions
 ```
 
-Or pin to the latest tagged version:
+Or pin to a tagged version:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.1
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.2
+```
+
+### npm
+
+Install the full collection from npm:
+
+```bash
+pi install npm:@diegopetrucci/pi-extensions
 ```
 
 Then reload pi:
@@ -28,20 +40,37 @@ Then reload pi:
 /reload
 ```
 
-## Enable only specific extensions
+## Install only one extension
 
-If you only want one extension from this repo, filter it in your pi settings:
+If you only want one extension, you have two options.
+
+### Option 1: install the standalone npm package
+
+```bash
+pi install npm:@diegopetrucci/pi-minimal-footer
+```
+
+### Option 2: filter the repo package
+
+If you prefer the collection package, you can filter it in your pi settings:
 
 ```json
 {
   "packages": [
     {
-      "source": "git:github.com/diegopetrucci/pi-extensions",
+      "source": "npm:@diegopetrucci/pi-extensions",
       "extensions": ["extensions/minimal-footer/index.ts"]
     }
   ]
 }
 ```
+
+## npm publishing
+
+The repo is set up to support both:
+
+- the collection package: `@diegopetrucci/pi-extensions`
+- standalone extension packages like `@diegopetrucci/pi-minimal-footer`
 
 ## Repository structure
 

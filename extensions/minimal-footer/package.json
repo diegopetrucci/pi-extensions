@@ -1,13 +1,20 @@
 {
-  "name": "pi-minimal-footer",
-  "version": "0.1.1",
+  "name": "@diegopetrucci/pi-minimal-footer",
+  "version": "0.1.2",
   "description": "A minimal custom footer for pi.",
-  "keywords": ["pi-package"],
+  "keywords": ["pi-package", "pi", "terminal", "footer"],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/diegopetrucci/pi-extensions.git",
     "directory": "extensions/minimal-footer"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "pi": {
     "extensions": [

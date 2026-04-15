@@ -1,12 +1,28 @@
 {
-  "name": "pi-extensions",
-  "version": "0.1.1",
+  "name": "@diegopetrucci/pi-extensions",
+  "version": "0.1.2",
   "description": "A collection of pi extensions, starting with a minimal custom footer.",
-  "keywords": ["pi-package"],
+  "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/diegopetrucci/pi-extensions.git"
+  },
+  "files": [
+    "extensions",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "workspaces": [
+    "extensions/*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
   },
   "pi": {
     "extensions": [

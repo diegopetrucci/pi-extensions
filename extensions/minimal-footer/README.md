@@ -2,7 +2,7 @@
 
 A minimal custom footer for pi.
 
-![minimal-footer preview](../../assets/minimal-footer-preview.png)
+![minimal-footer preview](https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/minimal-footer-preview.png)
 
 It replaces pi's built-in footer with a cleaner two-line layout that focuses on the information I care about most:
 
@@ -31,16 +31,22 @@ On narrow terminals it falls back to one item per line.
 
 ## Install
 
-Install the repo:
+### Standalone npm package
+
+```bash
+pi install npm:@diegopetrucci/pi-minimal-footer
+```
+
+### Collection package
+
+```bash
+pi install npm:@diegopetrucci/pi-extensions
+```
+
+### GitHub package
 
 ```bash
 pi install git:github.com/diegopetrucci/pi-extensions
-```
-
-Or pin to the latest tagged version:
-
-```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.1
 ```
 
 Then reload pi:
@@ -55,6 +61,10 @@ Then reload pi:
 - **Top right:** current repo directory name
 - **Bottom left:** current context usage percentage
 - **Bottom right:** model id and thinking level
+
+## Publishing notes
+
+This extension also lives inside the broader [`pi-extensions`](../../README.md) collection, but it is set up to be publishable as its own npm package too.
 
 ## Notes
 
