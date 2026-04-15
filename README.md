@@ -1,10 +1,6 @@
 # pi-extensions
 
-![pi-extensions banner](./assets/social-preview.png)
-
 A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions.
-
-![minimal-footer preview](./assets/minimal-footer-preview.png)
 
 ## Included extensions
 
