@@ -1,6 +1,6 @@
 # pi-extensions
 
-A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions.
+A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I made.
 
 ## Included extensions
 
