@@ -89,7 +89,3 @@ The repo is set up to support both:
 
 - the collection package: `@diegopetrucci/pi-extensions`
 - standalone extension packages like `@diegopetrucci/pi-minimal-footer`
-
-## Repository structure
-
-Each extension lives in its own subdirectory under [`extensions/`](./extensions). This keeps the repo easy to grow while still letting each extension carry its own package metadata and documentation.
