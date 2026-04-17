@@ -1,0 +1,29 @@
+{
+  "name": "@diegopetrucci/pi-oracle",
+  "version": "0.1.5",
+  "description": "An Amp-style oracle extension for pi that consults the strongest reasoning model on your current provider.",
+  "keywords": ["pi-package", "pi", "oracle", "reasoning", "subagent"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/oracle"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ],
+    "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}

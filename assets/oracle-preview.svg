@@ -1,0 +1,46 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" fill="#071019"/>
+  <defs>
+    <linearGradient id="bg" x1="160" y1="120" x2="1400" y2="780" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F1F2F"/>
+      <stop offset="1" stop-color="#09131E"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="312" y1="210" x2="1220" y2="680" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C4DFF"/>
+      <stop offset="0.45" stop-color="#4EA8DE"/>
+      <stop offset="1" stop-color="#7AE582"/>
+    </linearGradient>
+    <filter id="glow" x="0" y="0" width="1600" height="900" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feBlend in="SourceGraphic" in2="blur" mode="screen"/>
+    </filter>
+  </defs>
+
+  <circle cx="1310" cy="180" r="210" fill="#7C4DFF" fill-opacity="0.12" filter="url(#glow)"/>
+  <circle cx="340" cy="740" r="240" fill="#4EA8DE" fill-opacity="0.1" filter="url(#glow)"/>
+
+  <rect x="150" y="110" width="1300" height="680" rx="28" fill="url(#bg)" stroke="#203245" stroke-width="2"/>
+  <rect x="150" y="110" width="1300" height="74" rx="28" fill="#0C1621"/>
+  <circle cx="197" cy="147" r="8" fill="#FF5F57"/>
+  <circle cx="225" cy="147" r="8" fill="#FEBC2E"/>
+  <circle cx="253" cy="147" r="8" fill="#28C840"/>
+  <text x="300" y="154" fill="#8AA1B5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">pi oracle</text>
+
+  <text x="230" y="278" fill="#E6EDF3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="30">&gt; use the oracle to review this refactor</text>
+
+  <rect x="230" y="330" width="1090" height="104" rx="18" fill="#0B1520" stroke="#22384D"/>
+  <text x="266" y="374" fill="#7AE582" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28">oracle</text>
+  <text x="390" y="374" fill="#8AA1B5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28">read-only · gpt-5.4 · xhigh</text>
+  <text x="266" y="416" fill="#A8C1D6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">selected via provider-specific ranking on the current subscription</text>
+
+  <rect x="230" y="470" width="1090" height="210" rx="20" fill="#08111A" stroke="#22384D"/>
+  <text x="266" y="522" fill="#B7C9D8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26">Bottom line:</text>
+  <text x="266" y="568" fill="#E6EDF3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28">The change looks safe. No write-path regressions found.</text>
+  <text x="266" y="614" fill="#8AA1B5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">Checked callsites, branching logic, and notification conditions.</text>
+
+  <rect x="230" y="718" width="1090" height="28" rx="14" fill="#101B27"/>
+  <rect x="230" y="718" width="690" height="28" rx="14" fill="url(#accent)"/>
+
+  <text x="230" y="835" fill="#E6EDF3" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700">Oracle for pi</text>
+  <text x="230" y="874" fill="#8AA1B5" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="28">Amp-style high-reasoning read-only subagent</text>
+</svg>
