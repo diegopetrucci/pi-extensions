@@ -93,15 +93,3 @@ The repo is set up to support both:
 ## Repository structure
 
 Each extension lives in its own subdirectory under [`extensions/`](./extensions). This keeps the repo easy to grow while still letting each extension carry its own package metadata and documentation.
-
-## Oracle docs
-
-- [Oracle provider matrix](./docs/oracle-provider-matrix.md)
-- [Release notes for v0.1.5](./docs/release-notes-v0.1.5.md)
-- [GitHub release body for v0.1.5](./docs/github-release-v0.1.5.md)
-- [Publish checklist for v0.1.5](./docs/publish-checklist-v0.1.5.md)
-- [Announcement copy for v0.1.5](./docs/announcement-v0.1.5.md)
-
-## License
-
-[MIT](./LICENSE)
