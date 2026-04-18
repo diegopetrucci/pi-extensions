@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-notify",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi extension that sends a notification when the agent is ready for input.",
   "keywords": ["pi-package", "pi", "notification", "terminal"],
   "license": "MIT",

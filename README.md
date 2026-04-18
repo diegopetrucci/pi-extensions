@@ -25,7 +25,7 @@ pi install git:github.com/diegopetrucci/pi-extensions
 Or pin to a tagged version:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.9
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.10
 ```
 
 ### npm
