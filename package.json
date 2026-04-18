@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.5",
-  "description": "A collection of pi extensions, including a minimal custom footer and an Amp-style oracle.",
+  "version": "0.1.6",
+  "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, and a permission gate for dangerous bash commands.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",
   "repository": {
@@ -27,7 +27,8 @@
   "pi": {
     "extensions": [
       "./extensions/minimal-footer/index.ts",
-      "./extensions/oracle/index.ts"
+      "./extensions/oracle/index.ts",
+      "./extensions/permission-gate/index.ts"
     ],
     "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
   }

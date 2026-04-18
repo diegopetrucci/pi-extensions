@@ -8,6 +8,7 @@ A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I mad
 |---|---|
 | [`minimal-footer`](./extensions/minimal-footer) | Replaces pi's built-in footer with a minimal two-line layout: branch/repo on the first line, context/model on the second. |
 | [`oracle`](./extensions/oracle) | Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running. |
+| [`permission-gate`](./extensions/permission-gate) | Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`. |
 
 ## Install
 
@@ -22,7 +23,7 @@ pi install git:github.com/diegopetrucci/pi-extensions
 Or pin to a tagged version:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.5
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.6
 ```
 
 ### npm
@@ -51,6 +52,10 @@ pi install npm:@diegopetrucci/pi-minimal-footer
 
 ```bash
 pi install npm:@diegopetrucci/pi-oracle
+```
+
+```bash
+pi install npm:@diegopetrucci/pi-permission-gate
 ```
 
 ### Option 2: filter the repo package
@@ -83,9 +88,22 @@ Oracle only:
 }
 ```
 
+Permission gate only:
+
+```json
+{
+  "packages": [
+    {
+      "source": "npm:@diegopetrucci/pi-extensions",
+      "extensions": ["extensions/permission-gate/index.ts"]
+    }
+  ]
+}
+```
+
 ## npm publishing
 
 The repo is set up to support both:
 
 - the collection package: `@diegopetrucci/pi-extensions`
-- standalone extension packages like `@diegopetrucci/pi-minimal-footer`
+- standalone extension packages like `@diegopetrucci/pi-minimal-footer`, `@diegopetrucci/pi-oracle`, and `@diegopetrucci/pi-permission-gate`

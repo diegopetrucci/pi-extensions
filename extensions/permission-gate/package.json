@@ -1,0 +1,27 @@
+{
+  "name": "@diegopetrucci/pi-permission-gate",
+  "version": "0.1.0",
+  "description": "A pi extension that prompts before dangerous bash commands.",
+  "keywords": ["pi-package", "pi", "security", "bash"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/permission-gate"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}
