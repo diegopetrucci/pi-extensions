@@ -1,0 +1,27 @@
+{
+  "name": "@diegopetrucci/pi-notify",
+  "version": "0.1.0",
+  "description": "A pi extension that sends a notification when the agent is ready for input.",
+  "keywords": ["pi-package", "pi", "notification", "terminal"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/notify"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}

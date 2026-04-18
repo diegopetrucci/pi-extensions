@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.7",
-  "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, a permission gate for dangerous bash commands, and confirm-before-destructive session actions.",
+  "version": "0.1.8",
+  "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",
   "repository": {
@@ -29,7 +29,8 @@
       "./extensions/minimal-footer/index.ts",
       "./extensions/oracle/index.ts",
       "./extensions/permission-gate/index.ts",
-      "./extensions/confirm-destructive/index.ts"
+      "./extensions/confirm-destructive/index.ts",
+      "./extensions/notify/index.ts"
     ],
     "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
   }

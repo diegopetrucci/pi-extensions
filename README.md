@@ -10,6 +10,7 @@ A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I mad
 | [`oracle`](./extensions/oracle) | Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running. |
 | [`permission-gate`](./extensions/permission-gate) | Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`. |
 | [`confirm-destructive`](./extensions/confirm-destructive) | Confirms before destructive session actions like clear, switch, and fork. |
+| [`notify`](./extensions/notify) | Sends a terminal or desktop notification when pi finishes and is ready for input. |
 
 ## Install
 
@@ -24,7 +25,7 @@ pi install git:github.com/diegopetrucci/pi-extensions
 Or pin to a tagged version:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.7
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.8
 ```
 
 ### npm
@@ -61,6 +62,10 @@ pi install npm:@diegopetrucci/pi-permission-gate
 
 ```bash
 pi install npm:@diegopetrucci/pi-confirm-destructive
+```
+
+```bash
+pi install npm:@diegopetrucci/pi-notify
 ```
 
 ### Option 2: filter the repo package
@@ -119,9 +124,22 @@ Confirm destructive only:
 }
 ```
 
+Notify only:
+
+```json
+{
+  "packages": [
+    {
+      "source": "npm:@diegopetrucci/pi-extensions",
+      "extensions": ["extensions/notify/index.ts"]
+    }
+  ]
+}
+```
+
 ## npm publishing
 
 The repo is set up to support both:
 
 - the collection package: `@diegopetrucci/pi-extensions`
-- standalone extension packages like `@diegopetrucci/pi-minimal-footer`, `@diegopetrucci/pi-oracle`, `@diegopetrucci/pi-permission-gate`, and `@diegopetrucci/pi-confirm-destructive`
+- standalone extension packages like `@diegopetrucci/pi-minimal-footer`, `@diegopetrucci/pi-oracle`, `@diegopetrucci/pi-permission-gate`, `@diegopetrucci/pi-confirm-destructive`, and `@diegopetrucci/pi-notify`
