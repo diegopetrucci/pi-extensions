@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+  "onlyWhenInteractive": true,
+  "title": "Pi",
+  "body": "Ready for input",
+  "channels": {
+    "terminal": true,
+    "desktop": true,
+    "bell": true,
+    "sound": true
+  },
+  "terminal": {
+    "backend": "auto"
+  },
+  "desktop": {
+    "backend": "auto"
+  },
+  "sound": {
+    "backend": "auto",
+    "name": "Glass",
+    "linuxSoundId": "complete",
+    "frequencyHz": 1000,
+    "durationMs": 250,
+    "command": ""
+  }
+}

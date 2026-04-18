@@ -10,7 +10,7 @@ A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I mad
 | [`oracle`](./extensions/oracle) | Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running. |
 | [`permission-gate`](./extensions/permission-gate) | Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`. |
 | [`confirm-destructive`](./extensions/confirm-destructive) | Confirms before destructive session actions like clear, switch, and fork. |
-| [`notify`](./extensions/notify) | Sends a terminal or desktop notification when pi finishes and is ready for input. |
+| [`notify`](./extensions/notify) | Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input. |
 
 ## Install
 
@@ -25,7 +25,7 @@ pi install git:github.com/diegopetrucci/pi-extensions
 Or pin to a tagged version:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.8
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.9
 ```
 
 ### npm
