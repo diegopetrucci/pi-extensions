@@ -59,7 +59,7 @@ const DEFAULT_CONFIG: NotifyConfig = {
 		terminal: true,
 		desktop: true,
 		bell: true,
-		sound: true,
+		sound: false,
 	},
 	terminal: {
 		backend: "auto",

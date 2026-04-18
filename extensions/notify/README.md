@@ -24,12 +24,13 @@ This started from the original `notify.ts` example in [`badlogic/pi-mono`](https
 - Linux sound playback via `canberra-gtk-play` or `paplay`
 - Windows beep via `powershell.exe`
 
-By default, all channels are enabled:
+By default, these channels are enabled:
 
 - terminal notification
 - desktop notification
 - bell
-- sound
+
+Sound remains available as an opt-in option via config.
 
 The extension automatically picks the appropriate backend for the current environment.
 
@@ -80,7 +81,7 @@ Example:
     "terminal": true,
     "desktop": true,
     "bell": true,
-    "sound": true
+    "sound": false
   },
   "terminal": {
     "backend": "auto"
@@ -98,6 +99,20 @@ Example:
   }
 }
 ```
+
+### Enable sound
+
+Minimal example:
+
+```json
+{
+  "channels": {
+    "sound": true
+  }
+}
+```
+
+You can also customize the sound backend and options if needed.
 
 ### Config fields
 
@@ -123,3 +138,4 @@ Example:
 - Hooks the `agent_end` event.
 - Default message is `Pi` / `Ready for input`.
 - Terminal, desktop, bell, and sound channels can be enabled independently.
+- To opt into sound playback, set `channels.sound` to `true`.
