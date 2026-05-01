@@ -25,6 +25,17 @@ export interface UsageSnapshot {
 	fetchedAt: number;
 }
 
+export interface UsageSummaryWindowsConfig {
+	primary: {
+		enabled: boolean;
+		label: string;
+	};
+	secondary: {
+		enabled: boolean;
+		label: string;
+	};
+}
+
 function normalizeUsedPercent(value?: number): number | undefined {
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
 	return Math.min(100, Math.max(0, value));
@@ -68,15 +79,18 @@ export function isOpenAICodexProvider(provider?: string): boolean {
 	return provider === PROVIDER_ID;
 }
 
-export function formatUsageSummary(snapshot?: UsageSnapshot): string | undefined {
+export function formatUsageSummary(
+	snapshot: UsageSnapshot | undefined,
+	windows: UsageSummaryWindowsConfig,
+): string | undefined {
 	if (!snapshot) return undefined;
 
 	const primary = formatUsagePercent(snapshot.primary?.usedPercent);
 	const secondary = formatUsagePercent(snapshot.secondary?.usedPercent);
 	const parts: string[] = [];
 
-	if (primary) parts.push(`5h ${primary}`);
-	if (secondary) parts.push(`7d ${secondary}`);
+	if (windows.primary.enabled && primary) parts.push(`${windows.primary.label} ${primary}`);
+	if (windows.secondary.enabled && secondary) parts.push(`${windows.secondary.label} ${secondary}`);
 
 	return parts.length > 0 ? parts.join(" · ") : undefined;
 }

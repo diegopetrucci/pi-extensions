@@ -1,0 +1,26 @@
+{
+  "context": {
+    "showPercent": true,
+    "dumbZone": {
+      "enabled": true,
+      "thresholdTokens": 200000,
+      "label": "DUMB ZONE",
+      "color": "error"
+    }
+  },
+  "codexUsage": {
+    "enabled": true,
+    "cacheTtlMs": 300000,
+    "requestTimeoutMs": 10000,
+    "windows": {
+      "primary": {
+        "enabled": true,
+        "label": "5h"
+      },
+      "secondary": {
+        "enabled": true,
+        "label": "7d"
+      }
+    }
+  }
+}

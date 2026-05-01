@@ -1,6 +1,8 @@
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
 	AuthStorage,
+	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
@@ -12,11 +14,77 @@ import {
 	type UsageSnapshot,
 } from "./openai-usage";
 
-const USAGE_CACHE_TTL_MS = 5 * 60 * 1000;
-const USAGE_REQUEST_TIMEOUT_MS = 10 * 1000;
+const DEFAULT_CONFIG: MinimalFooterConfig = {
+	context: {
+		showPercent: true,
+		dumbZone: {
+			enabled: true,
+			thresholdTokens: 200_000,
+			label: "DUMB ZONE",
+			color: "error",
+		},
+	},
+	codexUsage: {
+		enabled: true,
+		cacheTtlMs: 5 * 60 * 1000,
+		requestTimeoutMs: 10 * 1000,
+		windows: {
+			primary: {
+				enabled: true,
+				label: "5h",
+			},
+			secondary: {
+				enabled: true,
+				label: "7d",
+			},
+		},
+	},
+};
+
+const DUMB_ZONE_COLORS = new Set<DumbZoneColor>([
+	"error",
+	"warning",
+	"accent",
+	"text",
+	"dim",
+]);
+
+type RecursivePartial<T> = {
+	[P in keyof T]?: T[P] extends object ? RecursivePartial<T[P]> : T[P];
+};
+
+type DumbZoneColor = "error" | "warning" | "accent" | "text" | "dim";
+
+interface MinimalFooterConfig {
+	context: {
+		showPercent: boolean;
+		dumbZone: {
+			enabled: boolean;
+			thresholdTokens: number;
+			label: string;
+			color: DumbZoneColor;
+		};
+	};
+	codexUsage: {
+		enabled: boolean;
+		cacheTtlMs: number;
+		requestTimeoutMs: number;
+		windows: {
+			primary: {
+				enabled: boolean;
+				label: string;
+			};
+			secondary: {
+				enabled: boolean;
+				label: string;
+			};
+		};
+	};
+}
 
 type UsageSessionState = {
 	authStorage: AuthStorage;
+	config: MinimalFooterConfig;
 	snapshot?: UsageSnapshot;
 	lastFetchedAt?: number;
 	loading: boolean;
@@ -24,6 +92,115 @@ type UsageSessionState = {
 	inflight?: Promise<void>;
 	requestRender?: () => void;
 };
+
+function readConfigFile(path: string): RecursivePartial<MinimalFooterConfig> {
+	if (!existsSync(path)) return {};
+
+	try {
+		return JSON.parse(readFileSync(path, "utf-8")) as RecursivePartial<MinimalFooterConfig>;
+	} catch (error) {
+		console.error(`Warning: Could not parse ${path}: ${error}`);
+		return {};
+	}
+}
+
+function mergeConfig(
+	base: MinimalFooterConfig,
+	overrides: RecursivePartial<MinimalFooterConfig>,
+): MinimalFooterConfig {
+	const context = overrides.context;
+	const dumbZone = context?.dumbZone;
+	const codexUsage = overrides.codexUsage;
+	const primaryWindow = codexUsage?.windows?.primary;
+	const secondaryWindow = codexUsage?.windows?.secondary;
+
+	return {
+		context: {
+			showPercent: normalizeBoolean(context?.showPercent, base.context.showPercent),
+			dumbZone: {
+				enabled: normalizeBoolean(dumbZone?.enabled, base.context.dumbZone.enabled),
+				thresholdTokens: normalizeNonNegativeNumber(
+					dumbZone?.thresholdTokens,
+					base.context.dumbZone.thresholdTokens,
+				),
+				label: normalizeLabel(dumbZone?.label, base.context.dumbZone.label),
+				color: normalizeDumbZoneColor(dumbZone?.color, base.context.dumbZone.color),
+			},
+		},
+		codexUsage: {
+			enabled: normalizeBoolean(codexUsage?.enabled, base.codexUsage.enabled),
+			cacheTtlMs: normalizeNonNegativeNumber(
+				codexUsage?.cacheTtlMs,
+				base.codexUsage.cacheTtlMs,
+			),
+			requestTimeoutMs: normalizePositiveNumber(
+				codexUsage?.requestTimeoutMs,
+				base.codexUsage.requestTimeoutMs,
+			),
+			windows: {
+				primary: {
+					enabled: normalizeBoolean(
+						primaryWindow?.enabled,
+						base.codexUsage.windows.primary.enabled,
+					),
+					label: normalizeLabel(primaryWindow?.label, base.codexUsage.windows.primary.label),
+				},
+				secondary: {
+					enabled: normalizeBoolean(
+						secondaryWindow?.enabled,
+						base.codexUsage.windows.secondary.enabled,
+					),
+					label: normalizeLabel(secondaryWindow?.label, base.codexUsage.windows.secondary.label),
+				},
+			},
+		},
+	};
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeNonNegativeNumber(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function normalizePositiveNumber(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function normalizeLabel(value: unknown, fallback: string): string {
+	return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeDumbZoneColor(value: unknown, fallback: DumbZoneColor): DumbZoneColor {
+	return DUMB_ZONE_COLORS.has(value as DumbZoneColor) ? (value as DumbZoneColor) : fallback;
+}
+
+function findProjectConfigPath(cwd: string): string {
+	let current = cwd;
+	while (true) {
+		const candidate = join(current, ".pi", "minimal-footer.json");
+		if (existsSync(candidate)) return candidate;
+
+		const parent = dirname(current);
+		if (parent === current) return join(cwd, ".pi", "minimal-footer.json");
+		current = parent;
+	}
+}
+
+function loadConfig(cwd: string): MinimalFooterConfig {
+	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "minimal-footer.json"));
+	const projectConfig = readConfigFile(findProjectConfigPath(cwd));
+	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
+}
+
+function shouldShowCodexUsage(config: MinimalFooterConfig): boolean {
+	return (
+		config.codexUsage.enabled &&
+		(config.codexUsage.windows.primary.enabled || config.codexUsage.windows.secondary.enabled)
+	);
+}
 
 function clearUsageState(state: UsageSessionState): void {
 	state.snapshot = undefined;
@@ -37,7 +214,8 @@ async function refreshUsageIfNeeded(
 	state: UsageSessionState,
 	force = false,
 ): Promise<void> {
-	if (!isOpenAICodexProvider(ctx.model?.provider)) {
+	const config = state.config;
+	if (!shouldShowCodexUsage(config) || !isOpenAICodexProvider(ctx.model?.provider)) {
 		clearUsageState(state);
 		state.requestRender?.();
 		return;
@@ -47,7 +225,7 @@ async function refreshUsageIfNeeded(
 	if (
 		!force &&
 		state.lastFetchedAt &&
-		now - state.lastFetchedAt < USAGE_CACHE_TTL_MS
+		now - state.lastFetchedAt < config.codexUsage.cacheTtlMs
 	) {
 		return;
 	}
@@ -61,7 +239,7 @@ async function refreshUsageIfNeeded(
 	state.inflight = (async () => {
 		try {
 			const snapshot = await fetchOpenAICodexUsage(state.authStorage, {
-				timeoutMs: USAGE_REQUEST_TIMEOUT_MS,
+				timeoutMs: config.codexUsage.requestTimeoutMs,
 			});
 			if (snapshot) {
 				state.snapshot = snapshot;
@@ -90,6 +268,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		const state: UsageSessionState = {
 			authStorage: AuthStorage.create(),
+			config: loadConfig(ctx.cwd),
 			loading: false,
 		};
 		states.set(ctx.sessionManager, state);
@@ -111,10 +290,11 @@ export default function (pi: ExtensionAPI) {
 
 					const usage = ctx.getContextUsage();
 					const context = usage?.percent == null ? "?" : `${usage.percent.toFixed(1)}%`;
-					const usageSummary = isOpenAICodexProvider(ctx.model?.provider)
-						? formatUsageSummary(state.snapshot)
+					const dumbZone = state.config.context.dumbZone;
+					const inDumbZone = dumbZone.enabled && (usage?.tokens ?? 0) > dumbZone.thresholdTokens;
+					const usageSummary = shouldShowCodexUsage(state.config) && isOpenAICodexProvider(ctx.model?.provider)
+						? formatUsageSummary(state.snapshot, state.config.codexUsage.windows)
 						: undefined;
-					const contextText = usageSummary ? `${context} · ${usageSummary}` : context;
 
 					const model = ctx.model?.id ?? "no-model";
 					const thinking = pi.getThinkingLevel();
@@ -122,7 +302,11 @@ export default function (pi: ExtensionAPI) {
 
 					const branchStyled = theme.fg("dim", branch);
 					const repoStyled = theme.fg("dim", repo);
-					const contextStyled = theme.fg("dim", contextText);
+					const contextParts: string[] = [];
+					if (state.config.context.showPercent) contextParts.push(theme.fg("dim", context));
+					if (inDumbZone) contextParts.push(theme.fg(dumbZone.color, dumbZone.label));
+					if (usageSummary) contextParts.push(theme.fg("dim", usageSummary));
+					const contextStyled = contextParts.join(theme.fg("dim", " · "));
 					const modelStyled = theme.fg("dim", modelText);
 
 					const renderSplitLine = (left: string, right: string): string => {
