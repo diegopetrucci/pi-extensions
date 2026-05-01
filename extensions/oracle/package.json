@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-oracle",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "An Amp-style oracle extension for pi that consults the strongest reasoning model on your current provider.",
   "keywords": ["pi-package", "pi", "oracle", "reasoning", "subagent"],
   "license": "MIT",

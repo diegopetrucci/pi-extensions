@@ -27,7 +27,7 @@ By default, the extension:
 4. tries a provider-specific hardcoded priority list first
 5. falls back to a heuristic that favors stronger tiers like `opus`, `pro`, newer versions, and penalizes `mini`, `flash`, `haiku`, `spark`, etc.
 
-The hardcoded rankings now cover pi's built-in provider set, including OpenAI/Codex, Anthropic, Google variants, GitHub Copilot, Bedrock, Azure OpenAI Responses, Groq, Hugging Face, Kimi, MiniMax, Mistral, OpenCode, OpenRouter, Vercel AI Gateway, xAI, ZAI, and Cerebras.
+The hardcoded rankings now cover pi's built-in provider set, including OpenAI/Codex, Anthropic, Google variants, GitHub Copilot, Bedrock, Azure OpenAI Responses, Cloudflare, DeepSeek, Fireworks, Groq, Hugging Face, Kimi/Moonshot, MiniMax, Mistral, OpenCode, OpenRouter, Vercel AI Gateway, xAI, ZAI, and Cerebras.
 
 If no reasoning model exists on the current provider, it falls back to the best available model on that provider.
 
@@ -43,7 +43,7 @@ Use `/oracle-model` inside pi to see what it would pick right now.
 
 See also:
 - [Oracle provider matrix](../../docs/oracle-provider-matrix.md)
-- [v0.1.5 release notes](../../docs/release-notes-v0.1.5.md)
+- [v0.1.12 release notes](../../docs/release-notes-v0.1.12.md)
 
 ## Install
 
