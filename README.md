@@ -2,8 +2,6 @@
 
 A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I made. For the full list of pi extensions I use, [check out my dotfiles](https://github.com/diegopetrucci/dot/blob/main/.pi/agent/settings.json)
 
-## Included extensions
-
 | Extension | Description |
 |---|---|
 | [`minimal-footer`](./extensions/minimal-footer) | Replaces pi's built-in footer with a minimal two-line layout: branch/repo on the first line, context/model on the second. |
@@ -14,26 +12,16 @@ A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I mad
 
 ## Install
 
-### GitHub
-
-Install the repo as a pi package:
-
-```bash
-pi install git:github.com/diegopetrucci/pi-extensions
-```
-
-Or pin to a tagged version:
-
-```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.10
-```
-
-### npm
-
-Install the full collection from npm:
+Full collection:
 
 ```bash
 pi install npm:@diegopetrucci/pi-extensions
+```
+
+Or a specific extension:
+
+```bash
+pi install npm:@diegopetrucci/pi-oracle
 ```
 
 Then reload pi:
@@ -41,105 +29,3 @@ Then reload pi:
 ```text
 /reload
 ```
-
-## Install only one extension
-
-If you only want one extension, you have two options.
-
-### Option 1: install the standalone npm package
-
-```bash
-pi install npm:@diegopetrucci/pi-minimal-footer
-```
-
-```bash
-pi install npm:@diegopetrucci/pi-oracle
-```
-
-```bash
-pi install npm:@diegopetrucci/pi-permission-gate
-```
-
-```bash
-pi install npm:@diegopetrucci/pi-confirm-destructive
-```
-
-```bash
-pi install npm:@diegopetrucci/pi-notify
-```
-
-### Option 2: filter the repo package
-
-If you prefer the collection package, you can filter it in your pi settings.
-
-Minimal footer only:
-
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@diegopetrucci/pi-extensions",
-      "extensions": ["extensions/minimal-footer/index.ts"]
-    }
-  ]
-}
-```
-
-Oracle only:
-
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@diegopetrucci/pi-extensions",
-      "extensions": ["extensions/oracle/index.ts"]
-    }
-  ]
-}
-```
-
-Permission gate only:
-
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@diegopetrucci/pi-extensions",
-      "extensions": ["extensions/permission-gate/index.ts"]
-    }
-  ]
-}
-```
-
-Confirm destructive only:
-
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@diegopetrucci/pi-extensions",
-      "extensions": ["extensions/confirm-destructive/index.ts"]
-    }
-  ]
-}
-```
-
-Notify only:
-
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@diegopetrucci/pi-extensions",
-      "extensions": ["extensions/notify/index.ts"]
-    }
-  ]
-}
-```
-
-## npm publishing
-
-The repo is set up to support both:
-
-- the collection package: `@diegopetrucci/pi-extensions`
-- standalone extension packages like `@diegopetrucci/pi-minimal-footer`, `@diegopetrucci/pi-oracle`, `@diegopetrucci/pi-permission-gate`, `@diegopetrucci/pi-confirm-destructive`, and `@diegopetrucci/pi-notify`
