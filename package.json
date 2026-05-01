@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",

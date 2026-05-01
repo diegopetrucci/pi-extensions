@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-minimal-footer",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A minimal custom footer for pi.",
   "keywords": ["pi-package", "pi", "terminal", "footer"],
   "license": "MIT",
@@ -11,6 +11,7 @@
   },
   "files": [
     "index.ts",
+    "openai-usage.ts",
     "README.md"
   ],
   "publishConfig": {
