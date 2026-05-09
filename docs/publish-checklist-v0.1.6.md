@@ -33,7 +33,7 @@ pi -e ./extensions/permission-gate/index.ts
 - [ ] confirm collection package exposes all three extensions in root `package.json`
 - [ ] confirm standalone permission gate package has correct metadata in `extensions/permission-gate/package.json`
 - [ ] confirm root README includes install instructions for `permission-gate`
-- [ ] confirm `extensions/permission-gate/README.md` links to the original `badlogic/pi-mono` example
+- [ ] confirm `extensions/permission-gate/README.md` links to the original `earendil-works/pi-mono` example
 
 ## Commit and tag
 

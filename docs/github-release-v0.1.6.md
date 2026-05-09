@@ -13,7 +13,7 @@ This release adds a small `permission-gate` extension to the collection.
   - `sudo`
   - `chmod` / `chown` with `777`
 - blocks matching commands by default when no interactive UI is available
-- keeps the extension very close to the original example from `badlogic/pi-mono`
+- keeps the extension very close to the original example from `earendil-works/pi-mono`
 
 ### Included docs
 

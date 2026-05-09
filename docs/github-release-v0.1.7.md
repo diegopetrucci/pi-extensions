@@ -13,7 +13,7 @@ This release adds a small `confirm-destructive` extension to the collection.
   - switching sessions when the current session has user messages
   - forking from an entry
 - cancels the action when the user declines
-- keeps the extension very close to the original example from `badlogic/pi-mono`
+- keeps the extension very close to the original example from `earendil-works/pi-mono`
 
 ### Included docs
 

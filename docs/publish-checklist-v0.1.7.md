@@ -34,7 +34,7 @@ pi -e ./extensions/confirm-destructive/index.ts
 - [ ] confirm collection package exposes all four extensions in root `package.json`
 - [ ] confirm standalone confirm-destructive package has correct metadata in `extensions/confirm-destructive/package.json`
 - [ ] confirm root README includes install instructions for `confirm-destructive`
-- [ ] confirm `extensions/confirm-destructive/README.md` links to the original `badlogic/pi-mono` example
+- [ ] confirm `extensions/confirm-destructive/README.md` links to the original `earendil-works/pi-mono` example
 
 ## Commit and tag
 

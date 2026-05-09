@@ -2,7 +2,7 @@
 
 A pi extension that sends notifications when the agent finishes and is waiting for input.
 
-This started from the original `notify.ts` example in [`badlogic/pi-mono`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/notify.ts), but now supports multiple notification channels and JSON configuration.
+This started from the original `notify.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/notify.ts), but now supports multiple notification channels and JSON configuration.
 
 ## Supported notification channels
 

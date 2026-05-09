@@ -1,6 +1,6 @@
 # pi-extensions
 
-A collection of [pi](https://github.com/badlogic/pi-mono) agent extensions I made:
+A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions I made:
 
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch/repo on the first line, context/model on the second, optional `DUMB ZONE`, plus OpenAI Codex 5-hour and 7-day usage when available.
 - [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running.
@@ -21,7 +21,7 @@ pi install npm:@diegopetrucci/pi-extensions
 Or pin the GitHub package to this release:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.13
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.14
 ```
 
 Or a specific extension:

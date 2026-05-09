@@ -35,7 +35,7 @@ pi -e ./extensions/notify/index.ts
 - [ ] confirm collection package exposes all five extensions in root `package.json`
 - [ ] confirm standalone notify package has correct metadata in `extensions/notify/package.json`
 - [ ] confirm root README includes install instructions for `notify`
-- [ ] confirm `extensions/notify/README.md` links to the original `badlogic/pi-mono` example
+- [ ] confirm `extensions/notify/README.md` links to the original `earendil-works/pi-mono` example
 
 ## Commit and tag
 

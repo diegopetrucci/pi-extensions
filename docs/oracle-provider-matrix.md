@@ -16,8 +16,6 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | Then Kimi, GLM, MiniMax, Qwen, and GPT OSS. |
 | `github-copilot` | `claude-opus-4.7` | Then Opus 4.6/4.5, GPT-5.x, Gemini, Sonnet. |
 | `google` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.1/3 Pro / Gemini 2.5 Pro variants. |
-| `google-antigravity` | `claude-opus-4-6-thinking` | Prefers the strongest explicit thinking model. |
-| `google-gemini-cli` | `gemini-3-pro-preview` | Then Gemini 2.5 Pro. |
 | `google-vertex` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3 Pro / 2.5 Pro. |
 | `groq` | `openai/gpt-oss-120b` | Then Groq compound/qwen/kimi/llama options. |
 | `huggingface` | `zai-org/GLM-5.1` | Then DeepSeek/Kimi/MiniMax/Qwen reasoning models. |
@@ -34,6 +32,10 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `openrouter` | `anthropic/claude-opus-4.7` | Then Claude Opus, OpenAI GPT-5.x, Gemini Pro, Kimi, DeepSeek, MiniMax. |
 | `vercel-ai-gateway` | `anthropic/claude-opus-4.7` | Then Claude, OpenAI GPT-5.x, Kimi, DeepSeek, Qwen, Gemini, xAI, ZAI. |
 | `xai` | `grok-4.3` | Then Grok 4.20 reasoning / Grok 4 fast variants. |
+| `xiaomi` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
+| `xiaomi-token-plan-ams` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
+| `xiaomi-token-plan-cn` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
+| `xiaomi-token-plan-sgp` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
 | `zai` | `glm-5.1` | Then GLM-5 Turbo / GLM-5V Turbo / GLM-4.7 / older variants. |
 
 ## Validation checklist

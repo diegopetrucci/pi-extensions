@@ -16,7 +16,7 @@ This release adds a small `confirm-destructive` extension to the collection.
 
 ## Notes
 
-- the extension is intentionally kept very close to the original example from `badlogic/pi-mono`
+- the extension is intentionally kept very close to the original example from `earendil-works/pi-mono`
 - extension README links back to the original source example
 - in non-interactive mode, it does nothing
 

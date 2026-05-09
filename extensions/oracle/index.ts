@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { StringEnum } from "@mariozechner/pi-ai";
-import { getMarkdownTheme, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -171,14 +171,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gemini-2.5-flash-lite-preview",
 		"gemini-2.5-flash-lite",
 	],
-	"google-antigravity": [
-		"claude-opus-4-6-thinking",
-		"claude-sonnet-4-5-thinking",
-		"gemini-3.1-pro-low",
-		"gemini-3-flash",
-		"gemini-2.0-flash",
-	],
-	"google-gemini-cli": ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-1.5-flash"],
 	"google-vertex": [
 		"gemini-3.1-pro-preview-customtools",
 		"gemini-3.1-pro-preview",
@@ -335,6 +327,28 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"grok-3-mini-fast",
 		"grok-3-latest",
 	],
+	xiaomi: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash"],
+	"xiaomi-token-plan-ams": [
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"mimo-v2-pro",
+		"mimo-v2-omni",
+		"mimo-v2-flash",
+	],
+	"xiaomi-token-plan-cn": [
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"mimo-v2-pro",
+		"mimo-v2-omni",
+		"mimo-v2-flash",
+	],
+	"xiaomi-token-plan-sgp": [
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"mimo-v2-pro",
+		"mimo-v2-omni",
+		"mimo-v2-flash",
+	],
 	zai: [
 		"glm-5.1",
 		"glm-5-turbo",
@@ -348,7 +362,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	],
 	moonshotai: ["kimi-k2.6", "kimi-k2-thinking-turbo", "kimi-k2-thinking", "kimi-k2.5"],
 	"moonshotai-cn": ["kimi-k2.6", "kimi-k2-thinking-turbo", "kimi-k2-thinking", "kimi-k2.5"],
-	"gemini-cli": ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-1.5-flash"],
 };
 
 const ORACLE_SYSTEM_PROMPT = [

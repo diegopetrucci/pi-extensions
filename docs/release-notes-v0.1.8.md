@@ -16,7 +16,7 @@ This release adds a small `notify` extension to the collection.
 
 ## Notes
 
-- the extension is intentionally kept very close to the original example from `badlogic/pi-mono`
+- the extension is intentionally kept very close to the original example from `earendil-works/pi-mono`
 - extension README links back to the original source example
 - by default it sends `Pi` / `Ready for input`
 

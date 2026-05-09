@@ -13,7 +13,7 @@ This release adds a small `notify` extension to the collection.
   - OSC 99: Kitty
   - Windows toast: Windows Terminal / WSL
 - chooses the backend from the current terminal environment
-- keeps the extension very close to the original example from `badlogic/pi-mono`
+- keeps the extension very close to the original example from `earendil-works/pi-mono`
 
 ### Included docs
 

@@ -2,7 +2,7 @@
 
 ![oracle preview](https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg)
 
-An Amp-style oracle for [pi](https://github.com/badlogic/pi-mono).
+An Amp-style oracle for [pi](https://github.com/earendil-works/pi-mono).
 
 It adds an `oracle` tool that spins up a separate read-only pi subprocess and sends it to the strongest reasoning model available on the **same provider/subscription** the user is currently using.
 

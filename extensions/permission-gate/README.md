@@ -2,7 +2,7 @@
 
 A small pi extension that prompts for confirmation before running potentially dangerous bash commands.
 
-This is adapted from the original `permission-gate.ts` example in [`badlogic/pi-mono`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts) and kept basically the same.
+This is adapted from the original `permission-gate.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts) and kept basically the same.
 
 ## What it checks
 

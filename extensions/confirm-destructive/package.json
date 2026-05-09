@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-confirm-destructive",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that confirms destructive session actions.",
   "keywords": ["pi-package", "pi", "session", "safety"],
   "license": "MIT",
@@ -22,6 +22,6 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*"
   }
 }

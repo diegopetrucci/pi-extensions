@@ -28,7 +28,7 @@ pi --no-extensions --extension ./extensions/oracle/index.ts --version
 - [ ] run a TypeScript/bundling sanity check for the oracle extension
 
 ```bash
-bun build extensions/oracle/index.ts --external @mariozechner/pi-ai --external @mariozechner/pi-coding-agent --external @mariozechner/pi-tui --external @sinclair/typebox --outfile /tmp/oracle.js
+bun build extensions/oracle/index.ts --external @earendil-works/pi-ai --external @earendil-works/pi-coding-agent --external @earendil-works/pi-tui --external typebox --outfile /tmp/oracle.js
 ```
 
 - [ ] verify every provider in pi's installed model catalog has an oracle preference entry
