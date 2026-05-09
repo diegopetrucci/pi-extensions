@@ -1,6 +1,6 @@
 # context-cap
 
-A pi extension that treats large-context models as having an effective 200k-token context window, so pi's built-in auto-compaction starts earlier.
+A pi extension that treats large-context models as having an effective 200k-token context window, so pi's built-in auto-compaction starts earlier, and avoids the dumb zone.
 
 By default, pi auto-compacts when:
 
