@@ -1,5 +1,11 @@
 # Publish checklist — v0.1.14
 
+## Automation boundary
+
+- The agent should run every checklist section through **Push and GitHub release** automatically.
+- The agent must stop before **Publish**. `npm publish` requires the user's npm login/session and must be run manually by the user.
+- After the user confirms npm publishing is complete, the agent should resume with **Post-publish validation**.
+
 ## Preflight
 
 - [x] confirm working tree contains only intended changes
@@ -102,23 +108,25 @@ git tag v0.1.14
 
 ## Push and GitHub release
 
-> Recommended order: push the commit and tag first, create the GitHub release second, and publish npm packages last. That keeps the published npm versions aligned with a public commit and tag.
+> Agent-run section. Recommended order: push the commit and tag first, create the GitHub release second, and publish npm packages last. That keeps the published npm versions aligned with a public commit and tag.
 
-- [ ] push commit and tag
+- [x] push commit and tag
 
 ```bash
 git push origin main
 git push origin v0.1.14
 ```
 
-- [ ] create GitHub release for `v0.1.14`
-- [ ] paste contents of `docs/github-release-v0.1.14.md`
+- [x] create GitHub release for `v0.1.14`
+- [x] paste contents of `docs/github-release-v0.1.14.md`
 
 ## Publish
 
+> Manual user section. The agent should not run `npm publish`. Stop here and ask the user to publish these packages manually.
+
 ### Collection package
 
-- [ ] publish root package
+- [x] publish root package
 
 ```bash
 npm publish
@@ -126,7 +134,7 @@ npm publish
 
 ### Standalone packages
 
-- [ ] publish standalone minimal footer package
+- [x] publish standalone minimal footer package
 
 ```bash
 cd extensions/minimal-footer
@@ -134,7 +142,7 @@ npm publish
 cd ../..
 ```
 
-- [ ] publish standalone oracle package
+- [x] publish standalone oracle package
 
 ```bash
 cd extensions/oracle
@@ -142,7 +150,7 @@ npm publish
 cd ../..
 ```
 
-- [ ] publish standalone notify package
+- [x] publish standalone notify package
 
 ```bash
 cd extensions/notify
@@ -150,7 +158,7 @@ npm publish
 cd ../..
 ```
 
-- [ ] publish standalone permission gate package
+- [x] publish standalone permission gate package
 
 ```bash
 cd extensions/permission-gate
@@ -158,7 +166,7 @@ npm publish
 cd ../..
 ```
 
-- [ ] publish standalone confirm destructive package
+- [x] publish standalone confirm destructive package
 
 ```bash
 cd extensions/confirm-destructive
@@ -168,18 +176,20 @@ cd ../..
 
 ## Post-publish validation
 
-- [ ] verify npm package pages show expected versions
-  - [ ] `@diegopetrucci/pi-extensions@0.1.14`
-  - [ ] `@diegopetrucci/pi-minimal-footer@0.1.6`
-  - [ ] `@diegopetrucci/pi-oracle@0.1.7`
-  - [ ] `@diegopetrucci/pi-notify@0.1.3`
-  - [ ] `@diegopetrucci/pi-permission-gate@0.1.1`
-  - [ ] `@diegopetrucci/pi-confirm-destructive@0.1.1`
-- [ ] test install from npm
+> Agent-run section after the user confirms npm publishing is complete.
+
+- [x] verify npm package pages show expected versions
+  - [x] `@diegopetrucci/pi-extensions@0.1.14`
+  - [x] `@diegopetrucci/pi-minimal-footer@0.1.6`
+  - [x] `@diegopetrucci/pi-oracle@0.1.7`
+  - [x] `@diegopetrucci/pi-notify@0.1.3`
+  - [x] `@diegopetrucci/pi-permission-gate@0.1.1`
+  - [x] `@diegopetrucci/pi-confirm-destructive@0.1.1`
+- [x] test temporary load from npm
 
 ```bash
-pi install npm:@diegopetrucci/pi-extensions
-pi install npm:@diegopetrucci/pi-oracle
+pi --no-extensions -e npm:@diegopetrucci/pi-extensions --list-models
+pi --no-extensions -e npm:@diegopetrucci/pi-oracle --list-models
 ```
 
 - [ ] reload pi and confirm extensions are available
