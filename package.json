@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.15",
-  "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, a 200k context cap for auto-compaction, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
+  "version": "0.1.16",
+  "description": "A collection of pi extensions, including a minimal custom footer, an Amp-style oracle, a 200k context cap for auto-compaction, one-line collapsed bash previews, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",
   "repository": {
@@ -31,6 +31,7 @@
       "./extensions/minimal-footer/index.ts",
       "./extensions/oracle/index.ts",
       "./extensions/context-cap/index.ts",
+      "./extensions/compact-bash/index.ts",
       "./extensions/permission-gate/index.ts",
       "./extensions/confirm-destructive/index.ts",
       "./extensions/notify/index.ts"

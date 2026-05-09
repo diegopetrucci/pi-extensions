@@ -1,0 +1,28 @@
+{
+  "name": "@diegopetrucci/pi-compact-bash",
+  "version": "0.1.0",
+  "description": "A pi extension that renders collapsed bash tool output as a one-line preview.",
+  "keywords": ["pi-package", "pi", "bash", "terminal"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/compact-bash"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
