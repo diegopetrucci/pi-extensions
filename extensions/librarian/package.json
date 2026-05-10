@@ -1,0 +1,29 @@
+{
+  "name": "@diegopetrucci/pi-librarian",
+  "version": "0.1.0",
+  "description": "A pi GitHub research scout that can optionally cache local repo checkouts under the user's OS cache directory.",
+  "keywords": ["pi-package", "pi", "github", "research", "subagent", "cache"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/librarian"
+  },
+  "files": [
+    "*.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
