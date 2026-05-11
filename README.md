@@ -10,7 +10,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.
 - [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running.
 - [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
-- [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as quiet one-line previews without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
+- [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
 
 (For the full list of pi extensions I use, [check out my dotfiles](https://github.com/diegopetrucci/dot/blob/main/.pi/agent/settings.json).)
 
@@ -25,7 +25,7 @@ pi install npm:@diegopetrucci/pi-extensions
 Or pin the GitHub package to this release:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.19
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.20
 ```
 
 Or a specific extension:

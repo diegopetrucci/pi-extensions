@@ -2,7 +2,7 @@
 
 A pi extension that makes collapsed built-in tool rows much quieter in the TUI.
 
-When enabled, collapsed tool output renders as one output line plus an inline hidden-line count and `Ctrl+O` expand hint. Expanding with `Ctrl+O` still shows pi's full rendered output.
+When enabled, each collapsed tool row renders as one invocation line plus a separate `(Ctrl+O to expand)` hint line. Tool output is hidden until expanded. Expanding with `Ctrl+O` still shows pi's full rendered output.
 
 `quiet-tools` only changes the visual renderer. It does not truncate, summarize, or rewrite the actual tool results sent to the model.
 
@@ -16,7 +16,7 @@ When enabled, collapsed tool output renders as one output line plus an inline hi
 - `edit`
 - `write`
 
-For `edit` and `write`, the collapsed call preview is also shortened so large diffs or file contents do not fill the TUI. Expanding restores pi's normal renderer.
+For every covered tool, the collapsed invocation is truncated to a single visual line so long paths, commands, diffs, or file contents do not fill the TUI. Expanding restores pi's normal renderer.
 
 ## Commands
 
@@ -61,3 +61,4 @@ Then reload pi:
 - It reuses pi's built-in implementations and preserves `shellPath`, `shellCommandPrefix`, and image autoresize settings when they are available from settings files.
 - If another extension also overrides built-in tool execution, pi's extension load order determines which override wins.
 - It affects assistant-invoked tool rows. User `!`/`!!` bash commands are rendered by a separate pi component and keep pi's default preview behavior.
+- Pi renders image attachments outside tool result renderers, so inline image display for image reads is still controlled by pi's image settings.

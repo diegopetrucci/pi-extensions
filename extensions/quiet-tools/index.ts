@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 import {
 	createBashToolDefinition,
 	createEditToolDefinition,
@@ -6,19 +8,15 @@ import {
 	createLsToolDefinition,
 	createReadToolDefinition,
 	createWriteToolDefinition,
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-	formatSize,
 	keyHint,
 	SettingsManager,
 	type ExtensionAPI,
 	type ToolDefinition as PiToolDefinition,
 	type ToolsOptions,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
-const COLLAPSED_PREVIEW_LINES = 1;
-const QUIET_CALL_TOOL_NAMES = new Set(["edit", "write"]);
+const QUIET_CALL_TOOL_NAMES = new Set(["bash", "edit", "find", "grep", "ls", "read", "write"]);
 
 type ToolDefinition = PiToolDefinition<any, any, any>;
 type ToolRenderCall = NonNullable<ToolDefinition["renderCall"]>;
@@ -34,206 +32,193 @@ type TimerRenderState = {
 	interval?: ReturnType<typeof setInterval>;
 };
 
-type TruncationLike = {
-	truncated?: boolean;
-	truncatedBy?: "lines" | "bytes";
-	firstLineExceedsLimit?: boolean;
-	outputLines?: number;
-	totalLines?: number;
-	maxBytes?: number;
-	maxLines?: number;
-};
+class QuietLinesRenderComponent extends Container {
+	private linesRenderer: ((width: number) => string[]) | undefined;
 
-class QuietResultRenderComponent extends Container {}
+	setLinesRenderer(linesRenderer: (width: number) => string[]): void {
+		this.linesRenderer = linesRenderer;
+		this.invalidate();
+	}
 
-function sanitizePreviewText(text: string): string {
+	render(width: number): string[] {
+		return this.linesRenderer?.(width).filter((line) => line) ?? [];
+	}
+}
+
+class QuietCallRenderComponent extends QuietLinesRenderComponent {}
+class QuietResultRenderComponent extends QuietLinesRenderComponent {}
+
+function sanitizeInlineText(text: string): string {
 	return text
 		.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
 		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+		.replace(/[\r\n\t]+/g, " ")
 		.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
 }
 
-function getTextOutput(result: ToolRenderResultParams[0]): string {
-	return sanitizePreviewText(
-		result.content
-			.filter((content) => content.type === "text")
-			.map((content) => content.text ?? "")
-			.join("\n")
-			.trim(),
-	);
+function str(value: unknown): string | null {
+	if (typeof value === "string") return sanitizeInlineText(value);
+	if (value == null) return "";
+	return null;
 }
 
-function visibleLength(text: string): number {
-	return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length;
+function asRecord(args: unknown): Record<string, unknown> | undefined {
+	return args && typeof args === "object" ? (args as Record<string, unknown>) : undefined;
 }
 
-function plural(count: number, singular: string): string {
-	return `${count} ${singular}${count === 1 ? "" : "s"}`;
-}
-
-function formatDuration(ms: number): string {
-	return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function renderCollapsedLine(line: string, hiddenLines: number, theme: RenderTheme, width: number): string {
-	if (width <= 0) return "";
-
-	const styledLine = theme.fg("toolOutput", line);
-	if (hiddenLines <= 0) {
-		return truncateToWidth(styledLine, width, "...");
-	}
-
-	const hint = theme.fg(
-		"muted",
-		`  ... ${plural(hiddenLines, "more line")} (${keyHint("app.tools.expand", "to expand")})`,
-	);
-	const hintWidth = visibleLength(hint);
-	if (hintWidth + 8 > width) {
-		return truncateToWidth(`${styledLine}${hint}`, width, "...");
-	}
-
-	return `${truncateToWidth(styledLine, width - hintWidth, "...")}${hint}`;
-}
-
-function formatLimitWarning(label: string, count: unknown): string | undefined {
-	return typeof count === "number" ? `${count} ${label} limit` : undefined;
-}
-
-function getTruncationWarnings(result: ToolRenderResultParams[0]): string[] {
-	const details = result.details as
-		| {
-				truncation?: TruncationLike;
-				fullOutputPath?: string;
-				matchLimitReached?: number;
-				resultLimitReached?: number;
-				entryLimitReached?: number;
-				linesTruncated?: boolean;
-		  }
-		| undefined;
-	const truncation = details?.truncation;
-	const warnings: string[] = [];
-
-	if (details?.fullOutputPath) {
-		warnings.push(`Full output: ${details.fullOutputPath}`);
-	}
-
-	if (truncation?.truncated) {
-		if (truncation.firstLineExceedsLimit) {
-			warnings.push(`First line exceeds ${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit`);
-		} else if (truncation.truncatedBy === "lines") {
-			warnings.push(
-				`Truncated: showing ${truncation.outputLines ?? "some"} of ${truncation.totalLines ?? "?"} lines (${truncation.maxLines ?? DEFAULT_MAX_LINES} line limit)`,
-			);
-		} else {
-			warnings.push(
-				`Truncated: ${truncation.outputLines ?? "some"} lines shown (${formatSize(truncation.maxBytes ?? DEFAULT_MAX_BYTES)} limit)`,
-			);
+function firstStringArg(args: unknown, names: string[]): string | null {
+	const record = asRecord(args);
+	if (!record) return "";
+	for (const name of names) {
+		if (Object.prototype.hasOwnProperty.call(record, name)) {
+			return str(record[name]);
 		}
 	}
-
-	const matchLimitWarning = formatLimitWarning("matches", details?.matchLimitReached);
-	if (matchLimitWarning) warnings.push(matchLimitWarning);
-
-	const resultLimitWarning = formatLimitWarning("results", details?.resultLimitReached);
-	if (resultLimitWarning) warnings.push(resultLimitWarning);
-
-	const entryLimitWarning = formatLimitWarning("entries", details?.entryLimitReached);
-	if (entryLimitWarning) warnings.push(entryLimitWarning);
-
-	if (details?.linesTruncated) warnings.push("Some lines truncated");
-
-	return warnings;
+	return "";
 }
 
-function syncElapsedTimer(options: ToolRenderResultParams[1], context: ToolRenderContext): TimerRenderState {
+function numberArg(args: unknown, name: string): number | undefined {
+	const value = asRecord(args)?.[name];
+	return typeof value === "number" ? value : undefined;
+}
+
+function invalidArgText(theme: RenderTheme): string {
+	return theme.fg("error", "[invalid arg]");
+}
+
+function shortenPath(path: string): string {
+	const home = homedir();
+	return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+}
+
+function formatToolTitle(toolName: string, theme: RenderTheme): string {
+	return theme.fg("toolTitle", theme.bold(toolName));
+}
+
+function formatPathArg(args: unknown, theme: RenderTheme, placeholder = "..."): string {
+	const path = firstStringArg(args, ["file_path", "path"]);
+	if (path === null) return invalidArgText(theme);
+	return path ? theme.fg("accent", shortenPath(path)) : theme.fg("toolOutput", placeholder);
+}
+
+function formatReadLineRange(args: unknown, theme: RenderTheme): string {
+	const offset = numberArg(args, "offset");
+	const limit = numberArg(args, "limit");
+	if (offset === undefined && limit === undefined) return "";
+	const startLine = offset ?? 1;
+	const endLine = limit !== undefined ? startLine + limit - 1 : "";
+	return theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+}
+
+function formatQuietReadCall(args: unknown, theme: RenderTheme): string {
+	return `${formatToolTitle("read", theme)} ${formatPathArg(args, theme)}${formatReadLineRange(args, theme)}`;
+}
+
+function formatQuietBashCall(args: unknown, theme: RenderTheme): string {
+	const command = str(asRecord(args)?.command);
+	const timeout = numberArg(args, "timeout");
+	const commandDisplay = command === null
+		? invalidArgText(theme)
+		: command
+			? theme.fg("toolTitle", theme.bold(command))
+			: theme.fg("toolOutput", "...");
+	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
+	return `${theme.fg("toolTitle", theme.bold("$"))} ${commandDisplay}${timeoutSuffix}`;
+}
+
+function formatSearchPath(rawPath: string | null, theme: RenderTheme): string {
+	return rawPath === null ? invalidArgText(theme) : shortenPath(rawPath || ".");
+}
+
+function formatQuietGrepCall(args: unknown, theme: RenderTheme): string {
+	const pattern = str(asRecord(args)?.pattern);
+	const rawPath = str(asRecord(args)?.path);
+	const glob = str(asRecord(args)?.glob);
+	const limit = numberArg(args, "limit");
+	let text = `${formatToolTitle("grep", theme)} ${
+		pattern === null ? invalidArgText(theme) : theme.fg("accent", `/${pattern || ""}/`)
+	}${theme.fg("toolOutput", ` in ${formatSearchPath(rawPath, theme)}`)}`;
+	if (glob) text += theme.fg("toolOutput", ` (${glob})`);
+	if (glob === null) text += ` ${invalidArgText(theme)}`;
+	if (limit !== undefined) text += theme.fg("toolOutput", ` limit ${limit}`);
+	return text;
+}
+
+function formatQuietFindCall(args: unknown, theme: RenderTheme): string {
+	const pattern = str(asRecord(args)?.pattern);
+	const rawPath = str(asRecord(args)?.path);
+	const limit = numberArg(args, "limit");
+	let text = `${formatToolTitle("find", theme)} ${
+		pattern === null ? invalidArgText(theme) : theme.fg("accent", pattern || "")
+	}${theme.fg("toolOutput", ` in ${formatSearchPath(rawPath, theme)}`)}`;
+	if (limit !== undefined) text += theme.fg("toolOutput", ` (limit ${limit})`);
+	return text;
+}
+
+function formatQuietLsCall(args: unknown, theme: RenderTheme): string {
+	const rawPath = str(asRecord(args)?.path);
+	const limit = numberArg(args, "limit");
+	let text = `${formatToolTitle("ls", theme)} ${
+		rawPath === null ? invalidArgText(theme) : theme.fg("accent", shortenPath(rawPath || "."))
+	}`;
+	if (limit !== undefined) text += theme.fg("toolOutput", ` (limit ${limit})`);
+	return text;
+}
+
+function formatQuietPathOnlyCall(toolName: "edit" | "write", args: unknown, theme: RenderTheme): string {
+	return `${formatToolTitle(toolName, theme)} ${formatPathArg(args, theme)}`;
+}
+
+function formatQuietCallLine(toolName: string, args: unknown, theme: RenderTheme): string {
+	switch (toolName) {
+		case "bash":
+			return formatQuietBashCall(args, theme);
+		case "edit":
+			return formatQuietPathOnlyCall("edit", args, theme);
+		case "find":
+			return formatQuietFindCall(args, theme);
+		case "grep":
+			return formatQuietGrepCall(args, theme);
+		case "ls":
+			return formatQuietLsCall(args, theme);
+		case "read":
+			return formatQuietReadCall(args, theme);
+		case "write":
+			return formatQuietPathOnlyCall("write", args, theme);
+		default:
+			return formatToolTitle(toolName, theme);
+	}
+}
+
+function formatExpandHint(theme: RenderTheme): string {
+	return `${theme.fg("muted", "(")}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+}
+
+function markToolTiming(options: ToolRenderResultParams[1], context: ToolRenderContext): void {
 	const state = context.state as TimerRenderState;
 
-	if (state.startedAt !== undefined && options.isPartial && !state.interval) {
-		state.interval = setInterval(() => context.invalidate(), 1000);
-	}
-
-	if (!options.isPartial || context.isError) {
+	if ((!options.isPartial || context.isError) && state.startedAt !== undefined) {
 		state.endedAt ??= Date.now();
-		if (state.interval) {
-			clearInterval(state.interval);
-			state.interval = undefined;
-		}
 	}
 
-	return state;
+	if ((!options.isPartial || context.isError) && state.interval) {
+		clearInterval(state.interval);
+		state.interval = undefined;
+	}
 }
 
 function renderQuietCollapsedResult(
-	result: ToolRenderResultParams[0],
+	_result: ToolRenderResultParams[0],
 	options: ToolRenderResultParams[1],
-	theme: RenderTheme,
+	_theme: RenderTheme,
 	context: ToolRenderContext,
-): Container {
-	const state = syncElapsedTimer(options, context);
+): QuietResultRenderComponent {
+	markToolTiming(options, context);
 	const component = context.lastComponent instanceof QuietResultRenderComponent
 		? context.lastComponent
 		: new QuietResultRenderComponent();
-	component.clear();
-
-	const output = getTextOutput(result);
-	const outputLines = output ? output.split("\n") : [];
-
-	if (outputLines.length > 0) {
-		const firstLine = outputLines[0] ?? "";
-		const hiddenLines = Math.max(0, outputLines.length - COLLAPSED_PREVIEW_LINES);
-		component.addChild({
-			render: (width) => [renderCollapsedLine(firstLine, hiddenLines, theme, width)],
-			invalidate: () => undefined,
-		});
-	} else if (options.isPartial) {
-		component.addChild(new Text(theme.fg("muted", "Running..."), 0, 0));
-	}
-
-	const warnings = getTruncationWarnings(result);
-	if (warnings.length > 0) {
-		component.addChild(new Text(theme.fg("warning", `[${warnings.join(". ")}]`), 0, 0));
-	}
-
-	if (state.startedAt !== undefined && options.isPartial) {
-		component.addChild(new Text(theme.fg("muted", `Elapsed ${formatDuration(Date.now() - state.startedAt)}`), 0, 0));
-	}
-
-	component.invalidate();
+	component.setLinesRenderer(() => []);
 	return component;
-}
-
-function getPathArg(args: unknown): string | undefined {
-	if (!args || typeof args !== "object") return undefined;
-	const values = args as { path?: unknown; file_path?: unknown };
-	return typeof values.file_path === "string"
-		? values.file_path
-		: typeof values.path === "string"
-			? values.path
-			: undefined;
-}
-
-function formatQuietEditCall(args: unknown, theme: ToolRenderCallParams[1]): string {
-	const path = getPathArg(args);
-	const edits = args && typeof args === "object" && Array.isArray((args as { edits?: unknown }).edits)
-		? (args as { edits: unknown[] }).edits.length
-		: undefined;
-	const editSummary = typeof edits === "number" && edits > 0 ? `${plural(edits, "edit block")} hidden` : "preview hidden";
-	return `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", path ?? "...")}${theme.fg(
-		"muted",
-		`  ... ${editSummary} (${keyHint("app.tools.expand", "to expand")})`,
-	)}`;
-}
-
-function formatQuietWriteCall(args: unknown, theme: ToolRenderCallParams[1]): string {
-	const path = getPathArg(args);
-	const content = args && typeof args === "object" ? (args as { content?: unknown }).content : undefined;
-	const contentSummary = typeof content === "string"
-		? `${plural(content.split("\n").length, "line")}, ${formatSize(Buffer.byteLength(content, "utf8"))} hidden`
-		: "content hidden";
-	return `${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", path ?? "...")}${theme.fg(
-		"muted",
-		`  ... ${contentSummary} (${keyHint("app.tools.expand", "to expand")})`,
-	)}`;
 }
 
 function renderQuietCall(
@@ -243,27 +228,29 @@ function renderQuietCall(
 	theme: ToolRenderCallParams[1],
 	context: ToolRenderCallParams[2],
 ) {
+	const state = context.state as TimerRenderState;
+	if (context.executionStarted && state.startedAt === undefined) {
+		state.startedAt = Date.now();
+		state.endedAt = undefined;
+	}
+
 	if (context.expanded || !QUIET_CALL_TOOL_NAMES.has(toolName)) {
-		return base.renderCall?.(args, theme, context) ?? new Text(theme.fg("toolTitle", theme.bold(toolName)), 0, 0);
+		const delegateContext = context.lastComponent instanceof QuietCallRenderComponent
+			? { ...context, lastComponent: undefined }
+			: context;
+		return base.renderCall?.(args, theme, delegateContext) ?? new Text(theme.fg("toolTitle", theme.bold(toolName)), 0, 0);
 	}
 
-	if (toolName === "edit") {
-		const component = context.lastComponent instanceof Box ? context.lastComponent : new Box(1, 1);
-		const bgColor = context.isError
-			? "toolErrorBg"
-			: context.executionStarted && !context.isPartial
-				? "toolSuccessBg"
-				: "toolPendingBg";
-		component.setBgFn((text) => theme.bg(bgColor, text));
-		component.clear();
-		component.addChild(new Text(formatQuietEditCall(args, theme), 0, 0));
-		component.invalidate();
-		return component;
-	}
-
-	const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-	text.setText(formatQuietWriteCall(args, theme));
-	return text;
+	const component = context.lastComponent instanceof QuietCallRenderComponent
+		? context.lastComponent
+		: new QuietCallRenderComponent();
+	const line = formatQuietCallLine(toolName, args, theme);
+	const hint = formatExpandHint(theme);
+	component.setLinesRenderer((width) => [
+		truncateToWidth(line, width, "..."),
+		truncateToWidth(hint, width, "..."),
+	]);
+	return component;
 }
 
 function createQuietToolDefinition(base: ToolDefinition): ToolDefinition {
@@ -334,7 +321,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("quiet-tools", {
-		description: "Toggle compact collapsed previews for built-in tool rows",
+		description: "Toggle one-line collapsed invocations for built-in tool rows",
 		getArgumentCompletions: (prefix) => {
 			const commands = ["on", "off", "toggle", "status"];
 			const query = prefix.trim().toLowerCase();
@@ -347,7 +334,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
 			if (action === "on" || action === "enable") {
 				enabled = true;
 				registerTools(ctx.cwd);
-				ctx.ui.notify("Quiet tool previews enabled: collapsed built-in tool rows show one-line output.", "info");
+				ctx.ui.notify("Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint.", "info");
 				return;
 			}
 
@@ -363,7 +350,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
 				registerTools(ctx.cwd);
 				ctx.ui.notify(
 					enabled
-						? "Quiet tool previews enabled: collapsed built-in tool rows show one-line output."
+						? "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint."
 						: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
 					"info",
 				);
@@ -372,7 +359,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
 
 			if (action === "status") {
 				ctx.ui.notify(
-					`Quiet tool previews are ${enabled ? "enabled" : "disabled"}. Collapsed preview lines: ${enabled ? COLLAPSED_PREVIEW_LINES : "pi default"}. Model-visible tool results are unchanged.`,
+					`Quiet tool previews are ${enabled ? "enabled" : "disabled"}. Collapsed tool rows ${enabled ? "show a one-line invocation and hide output until expanded" : "use pi's default rendering"}. Model-visible tool results are unchanged.`,
 					"info",
 				);
 				return;
