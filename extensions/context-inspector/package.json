@@ -1,0 +1,27 @@
+{
+  "name": "@diegopetrucci/pi-context-inspector",
+  "version": "0.1.0",
+  "description": "A pi extension that opens a local HTML dashboard explaining where the current session context is going.",
+  "keywords": ["pi-package", "pi", "context", "tokens", "html"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/context-inspector"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
