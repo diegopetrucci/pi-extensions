@@ -25,6 +25,7 @@ Fast mode is only injected when all of these are true:
 ## Commands
 
 ```text
+/fast
 /fast status
 /fast on
 /fast off
@@ -32,7 +33,7 @@ Fast mode is only injected when all of these are true:
 /fast toggle
 ```
 
-`/fast on` and `/fast off` are temporary session/runtime overrides. Use `/fast auto` to reload and follow config defaults again.
+Run `/fast` without arguments to pick an action from a menu. `/fast on` and `/fast off` are temporary session/runtime overrides. Use `/fast auto` to reload and follow config defaults again.
 
 The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits.
 

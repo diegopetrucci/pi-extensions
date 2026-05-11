@@ -26,7 +26,7 @@ pi install npm:@diegopetrucci/pi-extensions
 Or pin the GitHub package to this release:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.21
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.22
 ```
 
 Or a specific extension:

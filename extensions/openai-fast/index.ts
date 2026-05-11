@@ -249,7 +249,17 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 		},
 		handler: async (args, ctx) => {
 			const state = getState(ctx);
-			const action = args.trim().toLowerCase() || "status";
+			let action = args.trim().toLowerCase();
+
+			if (!action) {
+				if (!ctx.hasUI) {
+					action = "status";
+				} else {
+					const selection = await ctx.ui.select("OpenAI Fast mode", COMMANDS);
+					if (!selection) return;
+					action = selection;
+				}
+			}
 
 			if (action === "on" || action === "enable") {
 				state.override = "on";
