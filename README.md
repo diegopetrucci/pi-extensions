@@ -8,6 +8,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`librarian`](./extensions/librarian): Adds a GitHub research scout that asks whether to use an opt-in local repo checkout cache under the OS user cache directory, with cached repos expiring after 30 days of non-use.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch/repo on the first line, context/model on the second, optional `DUMB ZONE`, plus OpenAI Codex 5-hour and 7-day usage when available.
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.
+- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.
 - [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, covers pi’s built-in providers with hardcoded rankings, sets reasoning to xhigh by default, and shows live status while running.
 - [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
 - [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
@@ -25,7 +26,7 @@ pi install npm:@diegopetrucci/pi-extensions
 Or pin the GitHub package to this release:
 
 ```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.20
+pi install git:github.com/diegopetrucci/pi-extensions@v0.1.21
 ```
 
 Or a specific extension:

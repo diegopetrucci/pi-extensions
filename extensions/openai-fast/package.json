@@ -1,0 +1,28 @@
+{
+  "name": "@diegopetrucci/pi-openai-fast",
+  "version": "0.1.0",
+  "description": "A pi extension that enables OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.",
+  "keywords": ["pi-package", "pi", "openai", "codex", "fast"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/openai-fast"
+  },
+  "files": [
+    "index.ts",
+    "openai-fast.example.json",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
