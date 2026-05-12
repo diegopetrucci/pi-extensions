@@ -25,10 +25,13 @@ const CACHE_TTL_DAYS = 30;
 const CACHE_TTL_MS = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
 const CACHE_METADATA_FILE = ".pi-librarian-cache.json";
 const CACHE_MARKER_FILE = ".pi-librarian-cache-used";
+const CACHE_CONFIG_FILE = "librarian.json";
 
 type LibrarianStatus = "running" | "done" | "error" | "aborted";
 
 type CacheMode = "disabled" | "enabled";
+
+const DEFAULT_CACHE_MODE: CacheMode = "enabled";
 
 type ToolCall = {
 	id: string;
@@ -252,30 +255,72 @@ async function cleanupExpiredCache(cacheRoot: string): Promise<{ deleted: number
 	}
 }
 
-async function askForCache(ctx: ExtensionContext, cacheRoot: string): Promise<{ enabled: boolean; reason: string }> {
-	if (!ctx.hasUI) return { enabled: false, reason: "no UI available; using GitHub API/temp files only" };
+function getCacheConfigPath(): string {
+	return path.join(getAgentDir(), "extensions", CACHE_CONFIG_FILE);
+}
 
-	try {
-		const enabled = await ctx.ui.confirm(
-			"Librarian repo cache",
-			[
-				"Cache/reuse local GitHub repo checkouts for this Librarian call?",
-				"",
-				`Cache directory: ${cacheRoot}`,
-				`Repos unused for ${CACHE_TTL_DAYS} days are removed lazily on future Librarian calls.`,
-				"",
-				"Choose No to use GitHub API and temporary fetched files only.",
-			].join("\n"),
-			{ timeout: 30_000 },
-		);
-
-		return enabled
-			? { enabled: true, reason: "user opted into cached local checkouts" }
-			: { enabled: false, reason: "user declined or prompt timed out" };
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { enabled: false, reason: `cache prompt failed (${message}); using GitHub API/temp files only` };
+function parseCacheMode(value: unknown): CacheMode | undefined {
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === "enabled" || normalized === "on" || normalized === "true") return "enabled";
+		if (normalized === "disabled" || normalized === "off" || normalized === "false") return "disabled";
 	}
+	if (value === true) return "enabled";
+	if (value === false) return "disabled";
+	return undefined;
+}
+
+async function readCachePreference(): Promise<CacheMode> {
+	try {
+		const raw = await fs.readFile(getCacheConfigPath(), "utf8");
+		const parsed = JSON.parse(raw) as {
+			cacheMode?: unknown;
+			cacheEnabled?: unknown;
+			cache?: { mode?: unknown; enabled?: unknown };
+		};
+		return (
+			parseCacheMode(parsed.cacheMode) ??
+			parseCacheMode(parsed.cache?.mode) ??
+			parseCacheMode(parsed.cacheEnabled) ??
+			parseCacheMode(parsed.cache?.enabled) ??
+			DEFAULT_CACHE_MODE
+		);
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT" ? DEFAULT_CACHE_MODE : "disabled";
+	}
+}
+
+async function writeCachePreference(preference: CacheMode): Promise<void> {
+	const configPath = getCacheConfigPath();
+	const config = {
+		cacheMode: preference,
+		cacheEnabled: preference === "enabled",
+		updatedAt: new Date().toISOString(),
+	};
+
+	await fs.mkdir(path.dirname(configPath), { recursive: true });
+	await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function resolveCacheDecision(preference: CacheMode): { enabled: boolean; reason: string } {
+	if (preference === "enabled") {
+		return { enabled: true, reason: "cache preference enabled; using cached local checkouts" };
+	}
+
+	return { enabled: false, reason: "cache preference disabled; using GitHub API/temp files only" };
+}
+
+function formatCachePreference(preference: CacheMode): string {
+	return preference === "enabled" ? "on" : "off";
+}
+
+function notifyCommand(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error" = "info"): void {
+	if (ctx.hasUI) {
+		ctx.ui.notify(message, type);
+		return;
+	}
+
+	console.error(message);
 }
 
 function resolveToolPath(cwd: string, rawPath: string): string {
@@ -284,7 +329,12 @@ function resolveToolPath(cwd: string, rawPath: string): string {
 }
 
 function getBlockedBashReason(command: string, options: { workspace: string; cacheRoot: string; cacheEnabled: boolean }): string | undefined {
-	const scan = command.split(options.workspace).join("<WORKSPACE>").split(options.cacheRoot).join("<CACHE>");
+	if (!options.cacheEnabled && command.includes(options.cacheRoot)) {
+		return "Local repo checkout cache is disabled for this Librarian call.";
+	}
+
+	let scan = command.split(options.workspace).join("<WORKSPACE>");
+	if (options.cacheEnabled) scan = scan.split(options.cacheRoot).join("<CACHE>");
 	if (/(^|[\n;&|()])\s*\//.test(scan)) return "Librarian bash blocks absolute-path executables.";
 
 	const destructiveLocal = /(^|[\n;&|()])\s*(?:sudo|su|rm|rmdir|mv|cp|chmod|chown|dd|truncate|killall|pkill|launchctl|osascript|pbcopy|pbpaste|eval|exec|xargs)(?=$|[\s;&|()])/;
@@ -438,13 +488,81 @@ function isAbortLikeError(error: unknown): boolean {
 }
 
 export default function librarianExtension(pi: ExtensionAPI) {
+	let cachePreference: CacheMode = DEFAULT_CACHE_MODE;
+
+	pi.on("session_start", async () => {
+		cachePreference = await readCachePreference();
+	});
+
+	pi.registerCommand("librarian-cache", {
+		description: "Toggle Librarian local checkout cache for future librarian calls",
+		getArgumentCompletions: (prefix) => {
+			const commands = ["on", "off", "toggle", "status"];
+			const query = prefix.trim().toLowerCase();
+			const matches = commands.filter((command) => command.startsWith(query));
+			return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+		},
+		handler: async (args, ctx) => {
+			const action = args.trim().toLowerCase() || "status";
+			const cacheRoot = getUserCacheReposRoot();
+			const configPath = getCacheConfigPath();
+
+			const setPreference = async (mode: CacheMode): Promise<string | undefined> => {
+				cachePreference = mode;
+				try {
+					await writeCachePreference(mode);
+					return undefined;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return `Preference changed for this process, but could not save ${configPath}: ${message}`;
+				}
+			};
+
+			const formatSetMessage = (mode: CacheMode, warning?: string): string => {
+				const main = mode === "enabled"
+					? `Librarian cache enabled. Future librarian calls will reuse local checkouts under ${cacheRoot}.`
+					: "Librarian cache disabled. Future librarian calls will use GitHub API/search and temporary fetched files only.";
+				return warning ? `${main} ${warning}` : main;
+			};
+
+			if (action === "on" || action === "enable") {
+				const warning = await setPreference("enabled");
+				notifyCommand(ctx, formatSetMessage("enabled", warning), warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "off" || action === "disable") {
+				const warning = await setPreference("disabled");
+				notifyCommand(ctx, formatSetMessage("disabled", warning), warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "toggle") {
+				const next = cachePreference === "enabled" ? "disabled" : "enabled";
+				const warning = await setPreference(next);
+				notifyCommand(ctx, formatSetMessage(next, warning), warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "status") {
+				notifyCommand(
+					ctx,
+					`Librarian cache is ${formatCachePreference(cachePreference)}. Cache directory: ${cacheRoot}. Config: ${configPath}. Repos unused for ${CACHE_TTL_DAYS} days are removed lazily.`,
+				);
+				return;
+			}
+
+			notifyCommand(ctx, "Usage: /librarian-cache on | off | toggle | status", "warning");
+		},
+	});
+
 	pi.registerTool({
 		name: "librarian",
 		label: "Librarian",
 		description:
-			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian asks whether to use an optional 30-day local checkout cache, otherwise it behaves like API-only pi-librarian.",
+			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 30-day local checkout cache by default; toggle it with /librarian-cache.",
 		promptSnippet:
-			"Research GitHub repositories with evidence-first path and line citations; optionally ask the user to cache local repo checkouts.",
+			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is enabled by default and user-toggleable with /librarian-cache.",
 		promptGuidelines: [
 			"Use librarian when the answer likely requires exploratory GitHub repository search or line-cited evidence from external repos.",
 			"Do not use librarian for files already present in the current workspace unless the user asks for external GitHub research.",
@@ -472,9 +590,21 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			await fs.mkdir(path.join(workspace, "repos"), { recursive: true });
 
 			const cacheRoot = getUserCacheReposRoot();
-			const cacheDecision = await askForCache(ctx, cacheRoot);
-			if (cacheDecision.enabled) await fs.mkdir(cacheRoot, { recursive: true });
-			const cleanup = cacheDecision.enabled ? await cleanupExpiredCache(cacheRoot) : { deleted: 0, errors: [] };
+			let cacheDecision = resolveCacheDecision(cachePreference);
+			let cleanup: { deleted: number; errors: string[] } = { deleted: 0, errors: [] };
+			if (cacheDecision.enabled) {
+				try {
+					await fs.mkdir(cacheRoot, { recursive: true });
+					cleanup = await cleanupExpiredCache(cacheRoot);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					cacheDecision = {
+						enabled: false,
+						reason: `cache setup failed (${message}); using GitHub API/temp files only`,
+					};
+					cleanup = { deleted: 0, errors: [`cache setup: ${message}`] };
+				}
+			}
 
 			const details: LibrarianDetails = {
 				status: "running",
