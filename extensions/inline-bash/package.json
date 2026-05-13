@@ -1,0 +1,27 @@
+{
+  "name": "@diegopetrucci/pi-inline-bash",
+  "version": "0.1.0",
+  "description": "A pi extension that expands inline bash commands in user prompts.",
+  "keywords": ["pi-package", "pi", "bash", "input", "prompt"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/inline-bash"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
