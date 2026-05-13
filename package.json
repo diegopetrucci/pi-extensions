@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.24",
-  "description": "A collection of pi extensions, including a GitHub librarian with toggleable local repo checkout caching, a minimal custom footer, an Amp-style oracle, a 200k context cap for auto-compaction, a local HTML context inspector, a dirty repository guard for session changes, OpenAI Codex Fast mode controls, quiet one-line collapsed invocation previews, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
+  "version": "0.1.25",
+  "description": "A collection of pi extensions, including a GitHub librarian with toggleable local repo checkout caching, a minimal custom footer, an Amp-style oracle, a 200k context cap for auto-compaction, a local HTML context inspector, a dirty repository guard for session changes, a branch-aware todo tool, OpenAI Codex Fast mode controls, quiet one-line collapsed invocation previews, a permission gate for dangerous bash commands, confirm-before-destructive session actions, and terminal notifications when pi is ready for input.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",
   "repository": {
@@ -38,7 +38,8 @@
       "./extensions/permission-gate/index.ts",
       "./extensions/confirm-destructive/index.ts",
       "./extensions/notify/index.ts",
-      "./extensions/openai-fast/index.ts"
+      "./extensions/openai-fast/index.ts",
+      "./extensions/todo/index.ts"
     ],
     "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
   }

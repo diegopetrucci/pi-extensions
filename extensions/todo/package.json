@@ -1,0 +1,30 @@
+{
+  "name": "@diegopetrucci/pi-todo",
+  "version": "0.1.0",
+  "description": "A pi extension that adds a branch-aware todo tool and /todos viewer.",
+  "keywords": ["pi-package", "pi", "todo", "tool", "session"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/todo"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
