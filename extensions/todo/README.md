@@ -2,13 +2,13 @@
 
 A pi extension that adds a branch-aware todo list managed by the agent.
 
-This is copied from the original `todo.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/todo.ts) and kept basically the same.
+This started from the original `todo.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/todo.ts), with small packaging and snapshot-safety tweaks.
 
 ## What it adds
 
 - a `todo` tool for the agent to list, add, toggle, and clear todos
 - a `/todos` command for users to view todos on the current branch
-- todo state stored in tool result details, so session branches reconstruct the right todo list for that point in history
+- todo state stored as snapshots in tool result details, so session branches reconstruct the right todo list for that point in history
 
 ## Install
 

@@ -9,8 +9,8 @@
  *   The current branch is !{git branch --show-current} and status: !{git status --short}
  *   My node version is !{node --version}
  *
- * The !{command} patterns are executed and replaced with their output before
- * the prompt is sent to the agent.
+ * The !{command} patterns are executed and replaced with their trimmed output
+ * before the prompt is sent to the agent. Very large expansions are truncated.
  *
  * Note: Regular !command syntax (whole-line bash) is preserved and works as before.
  */
@@ -19,9 +19,22 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export default function (pi: ExtensionAPI) {
 	const PATTERN = /!\{([^}]+)\}/g;
 	const TIMEOUT_MS = 30000;
+	const MAX_OUTPUT_CHARS = 50000;
+
+	const trimAndLimit = (output: string) => {
+		const trimmed = output.trim();
+		if (trimmed.length <= MAX_OUTPUT_CHARS) return trimmed;
+		return `${trimmed.slice(0, MAX_OUTPUT_CHARS)}\n[inline-bash output truncated after ${MAX_OUTPUT_CHARS} characters]`;
+	};
 
 	pi.on("input", async (event, ctx) => {
 		const text = event.text;
+
+		// Only expand prompts supplied by the user/client. Extension-injected follow-ups
+		// should not get an implicit path to local shell execution.
+		if (event.source === "extension") {
+			return { action: "continue" };
+		}
 
 		// Don't process if it's a whole-line bash command (starts with !)
 		// This preserves the existing !command behavior
@@ -56,7 +69,7 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				const output = bashResult.stdout || bashResult.stderr || "";
-				const trimmed = output.trim();
+				const trimmed = trimAndLimit(output);
 
 				if (bashResult.code !== 0 && bashResult.stderr) {
 					expansions.push({
