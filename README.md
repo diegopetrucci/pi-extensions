@@ -16,8 +16,6 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
 - [`todo`](./extensions/todo): Adds a branch-aware `todo` tool for the agent and a `/todos` viewer for users.
 
-> Security note: the full collection includes `inline-bash`, which executes `!{...}` snippets from prompt text through your local shell before the agent sees them. Treat pasted prompts as shell code; `permission-gate` does not intercept these user-prompt expansions.
-
 (For the full list of pi extensions I use, [check out my dotfiles](https://github.com/diegopetrucci/dot/blob/main/.pi/agent/settings.json).)
 
 ## Install
@@ -26,12 +24,6 @@ Full collection:
 
 ```bash
 pi install npm:@diegopetrucci/pi-extensions
-```
-
-Or pin the GitHub package to this release:
-
-```bash
-pi install git:github.com/diegopetrucci/pi-extensions@v0.1.25
 ```
 
 Or a specific extension:
