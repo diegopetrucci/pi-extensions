@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.13
-
-## v0.1.13
-
 This release makes `minimal-footer` configurable and adds an optional high-context warning.
 
-### Highlights
+## Highlights
 
 - added a red `DUMB ZONE` footer indicator when context usage is above 200k tokens
 - added JSON config for `minimal-footer`
@@ -14,18 +10,12 @@ This release makes `minimal-footer` configurable and adds an optional high-conte
 - Codex usage fetches are skipped when usage display is disabled
 - added `minimal-footer.example.json` and expanded README configuration docs
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.13.md`](./release-notes-v0.1.13.md)
-- [`docs/publish-checklist-v0.1.13.md`](./publish-checklist-v0.1.13.md)
-- [`docs/announcement-v0.1.13.md`](./announcement-v0.1.13.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone minimal footer package: `@diegopetrucci/pi-minimal-footer`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.13`
-- standalone minimal footer package: `@diegopetrucci/pi-minimal-footer@0.1.5`
-
-### Install
+## Install
 
 Collection:
 

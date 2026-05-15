@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.17
-
-## v0.1.17
-
 This release replaces `compact-bash` with `quiet-tools`, a broader visual-only extension for quieter collapsed built-in tool rows.
 
-### Highlights
+## Highlights
 
 - replaces `compact-bash` with the new `quiet-tools` extension in the collection
 - renders collapsed `bash`, `read`, `grep`, `find`, `ls`, `edit`, and `write` tool rows as compact one-line previews
@@ -12,20 +8,14 @@ This release replaces `compact-bash` with `quiet-tools`, a broader visual-only e
 - leaves actual tool results/model context unchanged
 - also shortens collapsed `edit` and `write` call previews so large diffs/content do not fill the TUI
 - adds `/quiet-tools status`, `/quiet-tools off`, `/quiet-tools on`, and `/quiet-tools toggle`
-- publishes `quiet-tools` as a standalone package: `@diegopetrucci/pi-quiet-tools@0.1.0`
+- publishes `quiet-tools` as a standalone package: `@diegopetrucci/pi-quiet-tools`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.17.md`](./release-notes-v0.1.17.md)
-- [`docs/publish-checklist-v0.1.17.md`](./publish-checklist-v0.1.17.md)
-- [`docs/announcement-v0.1.17.md`](./announcement-v0.1.17.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- new standalone quiet tools package: `@diegopetrucci/pi-quiet-tools`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.17`
-- new standalone quiet tools package: `@diegopetrucci/pi-quiet-tools@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

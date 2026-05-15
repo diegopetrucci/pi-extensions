@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.6
-
-## v0.1.6
-
 This release adds a small `permission-gate` extension to the collection.
 
-### Highlights
+## Highlights
 
 - adds a `permission-gate` extension for pi
 - prompts before potentially dangerous bash commands
@@ -15,18 +11,12 @@ This release adds a small `permission-gate` extension to the collection.
 - blocks matching commands by default when no interactive UI is available
 - keeps the extension very close to the original example from `earendil-works/pi-mono`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.6.md`](./release-notes-v0.1.6.md)
-- [`docs/publish-checklist-v0.1.6.md`](./publish-checklist-v0.1.6.md)
-- [`docs/announcement-v0.1.6.md`](./announcement-v0.1.6.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone permission gate package: `@diegopetrucci/pi-permission-gate`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.6`
-- standalone permission gate package: `@diegopetrucci/pi-permission-gate@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

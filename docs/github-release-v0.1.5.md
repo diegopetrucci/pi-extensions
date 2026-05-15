@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.5
-
-## v0.1.5
-
 This release rounds out the new `oracle` extension and makes its model selection much more predictable across providers.
 
-### Highlights
+## Highlights
 
 - adds an Amp-style `oracle` extension for pi
 - runs the oracle in a separate read-only pi subprocess
@@ -18,14 +14,7 @@ This release rounds out the new `oracle` extension and makes its model selection
 - adds provider-specific hardcoded model rankings across pi’s built-in providers
 - adds oracle preview art and provider matrix docs
 
-### Included docs
-
-- [`docs/oracle-provider-matrix.md`](./oracle-provider-matrix.md)
-- [`docs/release-notes-v0.1.5.md`](./release-notes-v0.1.5.md)
-- [`docs/publish-checklist-v0.1.5.md`](./publish-checklist-v0.1.5.md)
-- [`docs/announcement-v0.1.5.md`](./announcement-v0.1.5.md)
-
-### Providers covered by hardcoded oracle rankings
+## Providers covered by hardcoded oracle rankings
 
 - amazon-bedrock
 - anthropic
@@ -51,12 +40,12 @@ This release rounds out the new `oracle` extension and makes its model selection
 - xai
 - zai
 
-### Packages
+## Packages
 
-- collection package: `@diegopetrucci/pi-extensions@0.1.5`
-- standalone oracle package: `@diegopetrucci/pi-oracle@0.1.5`
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone oracle package: `@diegopetrucci/pi-oracle`
 
-### Install
+## Install
 
 Collection:
 

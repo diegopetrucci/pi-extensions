@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.11
-
-## v0.1.11
-
 This release adds OpenAI Codex subscription usage to `minimal-footer`.
 
-### Highlights
+## Highlights
 
 - `minimal-footer` now shows `5h` and `7d` usage percentages when the active provider is `openai-codex`
 - usage is fetched from ChatGPT's backend usage endpoint using pi's stored OpenAI Codex OAuth login
@@ -13,18 +9,12 @@ This release adds OpenAI Codex subscription usage to `minimal-footer`.
 - non-OpenAI providers keep the previous footer behavior
 - `extensions/minimal-footer/README.md` and package metadata were updated accordingly
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.11.md`](./release-notes-v0.1.11.md)
-- [`docs/publish-checklist-v0.1.11.md`](./publish-checklist-v0.1.11.md)
-- [`docs/announcement-v0.1.11.md`](./announcement-v0.1.11.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone minimal footer package: `@diegopetrucci/pi-minimal-footer`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.11`
-- standalone minimal footer package: `@diegopetrucci/pi-minimal-footer@0.1.4`
-
-### Install
+## Install
 
 Collection:
 

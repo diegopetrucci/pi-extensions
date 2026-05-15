@@ -1,36 +1,25 @@
-# GitHub release body — v0.1.25
-
-## v0.1.25
-
 This release adds two new packaged pi extensions: `todo` and `inline-bash`.
 
-### Highlights
+## Highlights
 
 - adds `todo`, a branch-aware agent todo tool with `list`, `add`, `toggle`, and `clear` actions
 - adds `/todos`, an interactive viewer for the current branch's todo list
 - adds `inline-bash`, which expands trusted `!{command}` snippets in user prompts through `bash -c`
 - keeps whole-line `!command` prompts reserved for pi's built-in shell command behavior
-- publishes standalone `@diegopetrucci/pi-todo@0.1.0`
-- publishes standalone `@diegopetrucci/pi-inline-bash@0.1.0`
+- publishes standalone `@diegopetrucci/pi-todo`
+- publishes standalone `@diegopetrucci/pi-inline-bash`
 - corrects copied-example attribution links to the upstream `earendil-works/pi-mono` repository
 
-### Security note
+> [!CAUTION]
+> `inline-bash` executes `!{...}` prompt snippets locally before the agent sees the prompt. Treat pasted prompts as shell code. `permission-gate` does not intercept these expansions because they are user-prompt transformations, not agent tool calls.
 
-`inline-bash` executes `!{...}` prompt snippets locally before the agent sees the prompt. Treat pasted prompts as shell code. `permission-gate` does not intercept these expansions because they are user-prompt transformations, not agent tool calls.
+## Packages
 
-### Included docs
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone todo package: `@diegopetrucci/pi-todo`
+- standalone inline-bash package: `@diegopetrucci/pi-inline-bash`
 
-- [`docs/release-notes-v0.1.25.md`](./release-notes-v0.1.25.md)
-- [`docs/publish-checklist-v0.1.25.md`](./publish-checklist-v0.1.25.md)
-- [`docs/announcement-v0.1.25.md`](./announcement-v0.1.25.md)
-
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.25`
-- standalone todo package: `@diegopetrucci/pi-todo@0.1.0`
-- standalone inline-bash package: `@diegopetrucci/pi-inline-bash@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

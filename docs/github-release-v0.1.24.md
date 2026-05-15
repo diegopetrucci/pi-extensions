@@ -1,29 +1,19 @@
-# GitHub release body — v0.1.24
-
-## v0.1.24
-
 This release adds `dirty-repo-guard`, a session-safety extension copied from the upstream pi example.
 
-### Highlights
+## Highlights
 
 - checks `git status --porcelain` before new sessions, session switches, and forks
 - prompts before proceeding when the current git repo has uncommitted changes
 - allows actions outside git repositories
 - cancels matching actions by default when running without an interactive UI
-- publishes standalone `@diegopetrucci/pi-dirty-repo-guard@0.1.0`
+- publishes standalone `@diegopetrucci/pi-dirty-repo-guard`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.24.md`](./release-notes-v0.1.24.md)
-- [`docs/publish-checklist-v0.1.24.md`](./publish-checklist-v0.1.24.md)
-- [`docs/announcement-v0.1.24.md`](./announcement-v0.1.24.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone dirty-repo-guard package: `@diegopetrucci/pi-dirty-repo-guard`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.24`
-- standalone dirty-repo-guard package: `@diegopetrucci/pi-dirty-repo-guard@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

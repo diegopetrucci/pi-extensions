@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.21
-
-## v0.1.21
-
 This release adds `openai-fast`, a new pi extension that exposes `/fast` controls for OpenAI Codex Fast mode on ChatGPT-auth GPT-5.4 and GPT-5.5.
 
-### Highlights
+## Highlights
 
 - adds `/fast status`, `/fast on`, `/fast off`, `/fast auto`, and `/fast toggle`
 - injects `service_tier: "priority"` into eligible OpenAI Codex request payloads
@@ -12,20 +8,14 @@ This release adds `openai-fast`, a new pi extension that exposes `/fast` control
 - only targets `gpt-5.4` and `gpt-5.5`
 - skips payloads that already define `service_tier`, so future native pi support or another extension can win
 - defaults off to avoid accidentally spending Fast-mode credits
-- publishes standalone `@diegopetrucci/pi-openai-fast@0.1.0`
+- publishes standalone `@diegopetrucci/pi-openai-fast`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.21.md`](./release-notes-v0.1.21.md)
-- [`docs/publish-checklist-v0.1.21.md`](./publish-checklist-v0.1.21.md)
-- [`docs/announcement-v0.1.21.md`](./announcement-v0.1.21.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone openai-fast package: `@diegopetrucci/pi-openai-fast`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.21`
-- standalone openai-fast package: `@diegopetrucci/pi-openai-fast@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

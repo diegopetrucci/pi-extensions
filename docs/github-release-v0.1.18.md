@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.18
-
-## v0.1.18
-
 This release adds `librarian`, a GitHub research scout for pi with an opt-in local repository checkout cache.
 
-### Highlights
+## Highlights
 
 - adds the new `librarian` extension to the collection
 - registers a `librarian` tool for evidence-first GitHub code research
@@ -12,20 +8,14 @@ This release adds `librarian`, a GitHub research scout for pi with an opt-in loc
 - defaults to no persistent checkout/cache when declined, timed out, or running without UI
 - stores opt-in checkouts under the OS user cache directory
 - lazily removes marked librarian repo caches after 30 days of non-use
-- publishes `librarian` as a standalone package: `@diegopetrucci/pi-librarian@0.1.0`
+- publishes `librarian` as a standalone package: `@diegopetrucci/pi-librarian`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.18.md`](./release-notes-v0.1.18.md)
-- [`docs/publish-checklist-v0.1.18.md`](./publish-checklist-v0.1.18.md)
-- [`docs/announcement-v0.1.18.md`](./announcement-v0.1.18.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- new standalone librarian package: `@diegopetrucci/pi-librarian`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.18`
-- new standalone librarian package: `@diegopetrucci/pi-librarian@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

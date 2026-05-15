@@ -126,6 +126,7 @@ git push origin v0.1.25
 
 - [ ] create GitHub release for `v0.1.25`
 - [ ] paste contents of `docs/github-release-v0.1.25.md`
+- [ ] verify the rendered GitHub release uses a descriptive title, starts with the summary (not an internal title or redundant version heading), and has no broken links
 
 ## Publish
 

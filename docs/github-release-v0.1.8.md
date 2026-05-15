@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.8
-
-## v0.1.8
-
 This release adds a small `notify` extension to the collection.
 
-### Highlights
+## Highlights
 
 - adds a `notify` extension for pi
 - sends a notification when the agent finishes and is waiting for input
@@ -15,18 +11,12 @@ This release adds a small `notify` extension to the collection.
 - chooses the backend from the current terminal environment
 - keeps the extension very close to the original example from `earendil-works/pi-mono`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.8.md`](./release-notes-v0.1.8.md)
-- [`docs/publish-checklist-v0.1.8.md`](./publish-checklist-v0.1.8.md)
-- [`docs/announcement-v0.1.8.md`](./announcement-v0.1.8.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone notify package: `@diegopetrucci/pi-notify`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.8`
-- standalone notify package: `@diegopetrucci/pi-notify@0.1.0`
-
-### Install
+## Install
 
 Collection:
 

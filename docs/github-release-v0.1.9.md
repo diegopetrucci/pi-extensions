@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.9
-
-## v0.1.9
-
 This release upgrades the `notify` extension with configurable multi-channel notifications.
 
-### Highlights
+## Highlights
 
 - `notify` now supports:
   - terminal notifications
@@ -19,18 +15,12 @@ This release upgrades the `notify` extension with configurable multi-channel not
   - `<project>/.pi/notify.json`
 - includes a sample config file at `extensions/notify/notify.example.json`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.9.md`](./release-notes-v0.1.9.md)
-- [`docs/publish-checklist-v0.1.9.md`](./publish-checklist-v0.1.9.md)
-- [`docs/announcement-v0.1.9.md`](./announcement-v0.1.9.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone notify package: `@diegopetrucci/pi-notify`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.9`
-- standalone notify package: `@diegopetrucci/pi-notify@0.1.1`
-
-### Install
+## Install
 
 Collection:
 

@@ -1,10 +1,6 @@
-# GitHub release body — v0.1.7
-
-## v0.1.7
-
 This release adds a small `confirm-destructive` extension to the collection.
 
-### Highlights
+## Highlights
 
 - adds a `confirm-destructive` extension for pi
 - asks for confirmation before destructive session actions
@@ -15,18 +11,12 @@ This release adds a small `confirm-destructive` extension to the collection.
 - cancels the action when the user declines
 - keeps the extension very close to the original example from `earendil-works/pi-mono`
 
-### Included docs
+## Packages
 
-- [`docs/release-notes-v0.1.7.md`](./release-notes-v0.1.7.md)
-- [`docs/publish-checklist-v0.1.7.md`](./publish-checklist-v0.1.7.md)
-- [`docs/announcement-v0.1.7.md`](./announcement-v0.1.7.md)
+- collection package: `@diegopetrucci/pi-extensions`
+- standalone confirm-destructive package: `@diegopetrucci/pi-confirm-destructive`
 
-### Packages
-
-- collection package: `@diegopetrucci/pi-extensions@0.1.7`
-- standalone confirm-destructive package: `@diegopetrucci/pi-confirm-destructive@0.1.0`
-
-### Install
+## Install
 
 Collection:
 
