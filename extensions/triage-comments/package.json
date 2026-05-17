@@ -1,0 +1,29 @@
+{
+  "name": "@diegopetrucci/pi-triage-comments",
+  "version": "0.1.0",
+  "description": "A pi extension that adds /triage-comments and a read-only triage_comments subagent tool for review-comment triage.",
+  "keywords": ["pi-package", "pi", "triage", "comments", "review", "subagent"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/triage-comments"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
