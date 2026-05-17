@@ -20,9 +20,34 @@ const MAX_RUN_MS = 8 * 60 * 1000;
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 const COLLAPSED_PREVIEW_LINES = 18;
 const GH_COMMAND_TIMEOUT_MS = 30_000;
+const GH_PR_METADATA_FIELDS = 'number,title,url,headRefName,headRefOid,baseRefName,baseRefOid';
+const GH_REVIEW_THREADS_GRAPHQL_QUERY = `
+query TriageCommentsReviewThreads($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              id
+              databaseId
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
 const COMMENT_DISPLAY_BODY_LIMIT = 1200;
 const TRIAGE_COMMAND_USAGE =
-	"Usage: /triage-comments [paste | pr <PR URL or number>]\nInteractive UI mode lets you paste feedback or fetch PR comments, then confirm all comments or choose a subset such as 1,3-5.";
+	"Usage: /triage-comments [paste | pr [<PR URL or number>] | <PR URL or number>]\nInteractive UI mode lets you paste feedback or fetch PR comments, optionally hide resolved/outdated inline review comments, then confirm all displayed comments or choose a subset such as 1,3-5. PR mode without a target first tries to detect an open PR for the current non-main branch.";
 const IMPLEMENTATION_NOTE =
 	"Do not implement changes from this triage automatically; ask the parent/user which option to take before implementation.";
 
@@ -183,6 +208,10 @@ function asFiniteNumber(value: unknown): number | undefined {
 		if (Number.isFinite(parsed)) return parsed;
 	}
 	return undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined;
 }
 
 function normalizeComment(raw: unknown, index: number): NormalizedComment | undefined {
@@ -855,6 +884,34 @@ type PullRequestContext = {
 	baseSha?: string;
 };
 
+type ReviewThreadState = {
+	threadId?: string;
+	isResolved?: boolean;
+	isOutdated?: boolean;
+	metadataAvailable: boolean;
+};
+
+type ReviewThreadStateLookup = {
+	byDatabaseId: Map<number, ReviewThreadState>;
+	byNodeId: Map<string, ReviewThreadState>;
+};
+
+type InlineCommentFilter = {
+	hideResolved: boolean;
+	hideOutdated: boolean;
+	label: string;
+};
+
+type AppliedInlineCommentFilter = {
+	filter: InlineCommentFilter;
+	originalCount: number;
+	displayedCount: number;
+	hiddenInlineCount: number;
+	hiddenResolvedInlineCount: number;
+	hiddenOutdatedInlineCount: number;
+	keptInlineWithoutThreadMetadataCount: number;
+};
+
 type CommandComment = {
 	id: string;
 	body: string;
@@ -866,6 +923,7 @@ type CommandComment = {
 	author?: string;
 	url?: string;
 	createdAt?: string;
+	reviewThread?: ReviewThreadState;
 	metadata: Record<string, unknown>;
 	sourceLabel: string;
 	displayNumber?: number;
@@ -1097,7 +1155,107 @@ function reviewHtmlUrl(record: Record<string, unknown>): string | undefined {
 	return asTrimmedString(record.html_url ?? record.htmlUrl ?? html?.href);
 }
 
-function normalizeReviewComment(raw: unknown, pr: PullRequestContext, sortIndex: number): CommandComment | undefined {
+function createReviewThreadStateLookup(): ReviewThreadStateLookup {
+	return { byDatabaseId: new Map(), byNodeId: new Map() };
+}
+
+function reviewThreadStateForComment(raw: unknown, lookup: ReviewThreadStateLookup): ReviewThreadState {
+	const record = asRecord(raw);
+	const databaseId = asFiniteNumber(record?.id);
+	const nodeId = asTrimmedString(record?.node_id ?? record?.nodeId);
+	return (
+		(databaseId !== undefined ? lookup.byDatabaseId.get(databaseId) : undefined) ??
+		(nodeId ? lookup.byNodeId.get(nodeId) : undefined) ??
+		{ metadataAvailable: false }
+	);
+}
+
+async function fetchReviewThreadStateLookup(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	pr: PullRequestContext,
+): Promise<ReviewThreadStateLookup> {
+	const [owner, repo] = pr.repository.split('/');
+	if (!owner || !repo) throw new Error(`Could not build GitHub GraphQL variables from repository ${pr.repository}.`);
+
+	const lookup = createReviewThreadStateLookup();
+	let after: string | undefined;
+
+	while (true) {
+		const args = ['api'];
+		if (pr.host) args.push('--hostname', pr.host);
+		args.push(
+			'graphql',
+			'-f',
+			`owner=${owner}`,
+			'-f',
+			`name=${repo}`,
+			'-F',
+			`number=${pr.number}`,
+			'-f',
+			`query=${GH_REVIEW_THREADS_GRAPHQL_QUERY}`,
+		);
+		if (after) args.push('-f', `after=${after}`);
+
+		const label = 'Fetching review thread resolved/outdated metadata with gh';
+		const stdout = await execChecked(pi, ctx, 'gh', args, label);
+		const raw = parseJsonOutput(stdout, label);
+		const data = asRecord(raw)?.data;
+		const repository = asRecord(asRecord(data)?.repository);
+		const pullRequest = asRecord(repository?.pullRequest);
+		const reviewThreads = asRecord(pullRequest?.reviewThreads);
+		if (!reviewThreads) throw new Error('GitHub GraphQL response did not include reviewThreads.');
+
+		const nodes = Array.isArray(reviewThreads.nodes) ? reviewThreads.nodes : [];
+		for (const rawThread of nodes) {
+			const thread = asRecord(rawThread);
+			if (!thread) continue;
+			const state: ReviewThreadState = {
+				threadId: asTrimmedString(thread.id),
+				isResolved: asBoolean(thread.isResolved),
+				isOutdated: asBoolean(thread.isOutdated),
+				metadataAvailable: true,
+			};
+			const comments = asRecord(thread.comments);
+			const commentNodes = Array.isArray(comments?.nodes) ? comments.nodes : [];
+			for (const rawComment of commentNodes) {
+				const comment = asRecord(rawComment);
+				if (!comment) continue;
+				const databaseId = asFiniteNumber(comment.databaseId);
+				const nodeId = asTrimmedString(comment.id);
+				if (databaseId !== undefined) lookup.byDatabaseId.set(databaseId, state);
+				if (nodeId) lookup.byNodeId.set(nodeId, state);
+			}
+		}
+
+		const pageInfo = asRecord(reviewThreads.pageInfo);
+		if (!asBoolean(pageInfo?.hasNextPage)) break;
+		const endCursor = asTrimmedString(pageInfo?.endCursor);
+		if (!endCursor) break;
+		after = endCursor;
+	}
+
+	return lookup;
+}
+
+async function fetchReviewThreadStateLookupBestEffort(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	pr: PullRequestContext,
+): Promise<ReviewThreadStateLookup> {
+	try {
+		return await fetchReviewThreadStateLookup(pi, ctx, pr);
+	} catch (error) {
+		notifyCommand(
+			ctx,
+			`Could not fetch inline review-thread resolved/outdated metadata; inline review comments without thread metadata will stay visible. ${formatErrorMessage(error)}`,
+			'warning',
+		);
+		return createReviewThreadStateLookup();
+	}
+}
+
+function normalizeReviewComment(raw: unknown, pr: PullRequestContext, sortIndex: number, reviewThread: ReviewThreadState): CommandComment | undefined {
 	const record = asRecord(raw);
 	if (!record) return undefined;
 	const body = asTrimmedString(record.body);
@@ -1123,6 +1281,7 @@ function normalizeReviewComment(raw: unknown, pr: PullRequestContext, sortIndex:
 		author: githubLogin(record.user),
 		url: asTrimmedString(record.html_url ?? record.htmlUrl),
 		createdAt,
+		reviewThread,
 		metadata: compactRecord({
 			source: 'pull_request_review_comment',
 			repository: pr.repository,
@@ -1130,6 +1289,12 @@ function normalizeReviewComment(raw: unknown, pr: PullRequestContext, sortIndex:
 			host: pr.host,
 			databaseId,
 			nodeId,
+			reviewThread: compactRecord({
+				threadId: reviewThread.threadId,
+				isResolved: reviewThread.isResolved,
+				isOutdated: reviewThread.isOutdated,
+				metadataAvailable: reviewThread.metadataAvailable,
+			}),
 			pullRequestReviewId: asFiniteNumber(record.pull_request_review_id ?? record.pullRequestReviewId),
 			commitId: asTrimmedString(record.commit_id ?? record.commitId),
 			originalCommitId: asTrimmedString(record.original_commit_id ?? record.originalCommitId),
@@ -1234,6 +1399,78 @@ function assignDisplayNumbers(comments: CommandComment[]): CommandComment[] {
 	}));
 }
 
+function prContextFallbackTarget(raw: unknown, explicitTarget?: string): string {
+	const record = asRecord(raw);
+	const number = asFiniteNumber(record?.number);
+	return explicitTarget ?? asTrimmedString(record?.url) ?? (number ? String(number) : '');
+}
+
+async function fetchPullRequestMetadata(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	label: string,
+	target?: string,
+): Promise<PullRequestContext> {
+	const args = ['pr', 'view'];
+	if (target) args.push(target);
+	args.push('--json', GH_PR_METADATA_FIELDS);
+
+	const stdout = await execChecked(pi, ctx, 'gh', args, label);
+	const raw = parseJsonOutput(stdout, label);
+	return normalizePullRequestContext(raw, prContextFallbackTarget(raw, target));
+}
+
+async function detectCurrentBranchPullRequest(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+): Promise<PullRequestContext | undefined> {
+	try {
+		const branch = await pi.exec('git', ['branch', '--show-current'], {
+			cwd: ctx.cwd,
+			signal: ctx.signal,
+			timeout: GH_COMMAND_TIMEOUT_MS,
+		});
+		if (branch.killed || branch.code !== 0) return undefined;
+
+		const branchName = branch.stdout.trim();
+		if (!branchName || branchName === 'main') return undefined;
+
+		return await fetchPullRequestMetadata(pi, ctx, 'Detecting current branch PR with gh');
+	} catch {
+		return undefined;
+	}
+}
+
+async function fetchCommentsForPullRequest(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	pr: PullRequestContext,
+): Promise<CommandComment[]> {
+	const reviewComments = await ghApiArray(pi, ctx, pr, `pulls/${pr.number}/comments?per_page=100`, 'review comments');
+	const reviewThreadLookup = reviewComments.length > 0
+		? await fetchReviewThreadStateLookupBestEffort(pi, ctx, pr)
+		: createReviewThreadStateLookup();
+	const issueComments = await ghApiArray(pi, ctx, pr, `issues/${pr.number}/comments?per_page=100`, 'issue comments');
+	const reviews = await ghApiArray(pi, ctx, pr, `pulls/${pr.number}/reviews?per_page=100`, 'review bodies');
+
+	let sortIndex = 0;
+	const comments: CommandComment[] = [];
+	for (const raw of reviewComments) {
+		const comment = normalizeReviewComment(raw, pr, ++sortIndex, reviewThreadStateForComment(raw, reviewThreadLookup));
+		if (comment) comments.push(comment);
+	}
+	for (const raw of issueComments) {
+		const comment = normalizeIssueComment(raw, pr, ++sortIndex);
+		if (comment) comments.push(comment);
+	}
+	for (const raw of reviews) {
+		const comment = normalizeReviewBody(raw, pr, ++sortIndex);
+		if (comment) comments.push(comment);
+	}
+
+	return assignDisplayNumbers(comments.sort(compareCommandComments));
+}
+
 async function fetchPrCommentsForTriage(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
@@ -1247,34 +1484,9 @@ async function fetchPrCommentsForTriage(
 	await assertGitRepo(pi, ctx);
 	await assertGhReady(pi, ctx);
 
-	const prStdout = await execChecked(
-		pi,
-		ctx,
-		'gh',
-		['pr', 'view', normalizedTarget, '--json', 'number,title,url,headRefName,headRefOid,baseRefName,baseRefOid'],
-		'Fetching PR metadata with gh',
-	);
-	const pr = normalizePullRequestContext(parseJsonOutput(prStdout, 'Fetching PR metadata with gh'), normalizedTarget);
-	const reviewComments = await ghApiArray(pi, ctx, pr, `pulls/${pr.number}/comments?per_page=100`, 'review comments');
-	const issueComments = await ghApiArray(pi, ctx, pr, `issues/${pr.number}/comments?per_page=100`, 'issue comments');
-	const reviews = await ghApiArray(pi, ctx, pr, `pulls/${pr.number}/reviews?per_page=100`, 'review bodies');
-
-	let sortIndex = 0;
-	const comments: CommandComment[] = [];
-	for (const raw of reviewComments) {
-		const comment = normalizeReviewComment(raw, pr, ++sortIndex);
-		if (comment) comments.push(comment);
-	}
-	for (const raw of issueComments) {
-		const comment = normalizeIssueComment(raw, pr, ++sortIndex);
-		if (comment) comments.push(comment);
-	}
-	for (const raw of reviews) {
-		const comment = normalizeReviewBody(raw, pr, ++sortIndex);
-		if (comment) comments.push(comment);
-	}
-
-	return { pr, comments: assignDisplayNumbers(comments.sort(compareCommandComments)) };
+	const pr = await fetchPullRequestMetadata(pi, ctx, 'Fetching PR metadata with gh', normalizedTarget);
+	const comments = await fetchCommentsForPullRequest(pi, ctx, pr);
+	return { pr, comments };
 }
 
 function truncateForDisplay(text: string, max: number): string {
@@ -1294,19 +1506,137 @@ function formatCommentLocation(comment: CommandComment): string {
 	return lineRange ? `${comment.path}:${lineRange}` : comment.path;
 }
 
-function formatFetchedCommentsForSelection(pr: PullRequestContext, comments: CommandComment[]): string {
+function isInlineReviewComment(comment: CommandComment): boolean {
+	return asTrimmedString(comment.metadata.source) === 'pull_request_review_comment';
+}
+
+function formatReviewThreadState(comment: CommandComment): string | undefined {
+	if (!isInlineReviewComment(comment)) return undefined;
+	const reviewThread = comment.reviewThread;
+	if (!reviewThread?.metadataAvailable) return 'thread: resolved/outdated state unavailable (kept visible)';
+	const resolved = reviewThread.isResolved === true
+		? 'resolved'
+		: reviewThread.isResolved === false
+			? 'unresolved'
+			: 'resolved state unavailable';
+	const outdated = reviewThread.isOutdated === true
+		? 'outdated'
+		: reviewThread.isOutdated === false
+			? 'current'
+			: 'outdated state unavailable';
+	return `thread: ${resolved}, ${outdated}`;
+}
+
+function formatInlineFilterNotice(summary: AppliedInlineCommentFilter): string {
+	const scope = 'Only inline review comments can be filtered; PR issue comments, review bodies, and inline comments without thread metadata remain visible.';
+	if (!summary.filter.hideResolved && !summary.filter.hideOutdated) {
+		return `Filter: showing all fetched comments. ${scope}`;
+	}
+	const hiddenParts = [
+		summary.hiddenResolvedInlineCount > 0 ? `${summary.hiddenResolvedInlineCount} resolved` : undefined,
+		summary.hiddenOutdatedInlineCount > 0 ? `${summary.hiddenOutdatedInlineCount} outdated` : undefined,
+	]
+		.filter(Boolean)
+		.join(', ');
+	const hiddenDetail = hiddenParts ? ` (${hiddenParts})` : '';
+	return `Filter: ${summary.filter.label}. Hidden ${summary.hiddenInlineCount} inline review comment(s)${hiddenDetail}; displaying ${summary.displayedCount} of ${summary.originalCount} fetched comment(s). ${scope}`;
+}
+
+function formatInlineFilterContext(summary: AppliedInlineCommentFilter): string {
+	return `${formatInlineFilterNotice(summary)} Inline comments kept without thread metadata: ${summary.keptInlineWithoutThreadMetadataCount}.`;
+}
+
+function formatFetchedCommentsForSelection(pr: PullRequestContext, comments: CommandComment[], filterSummary?: AppliedInlineCommentFilter): string {
 	const title = pr.title ? ` — ${pr.title}` : '';
 	const limitNotice = comments.length > MAX_COMMENTS
 		? `\n\ntriage_comments can investigate at most ${MAX_COMMENTS} comments per run, so choose a subset.`
 		: '\n\nChoose whether to investigate all displayed comments or select a subset.';
-	const header = `Fetched ${comments.length} numbered comment(s) from ${pr.repository}#${pr.number}${title}.${limitNotice}`;
+	const fetchedCount = filterSummary?.originalCount ?? comments.length;
+	const displayedCount = comments.length;
+	const countSummary = filterSummary
+		? `Fetched ${fetchedCount} comment(s) from ${pr.repository}#${pr.number}${title}; displaying ${displayedCount} numbered comment(s) after filtering.`
+		: `Fetched ${displayedCount} numbered comment(s) from ${pr.repository}#${pr.number}${title}.`;
+	const filterNotice = filterSummary ? `\n\n${formatInlineFilterNotice(filterSummary)}` : '';
+	const header = `${countSummary}${filterNotice}${limitNotice}`;
 	const body = comments.map((comment) => {
 		const author = comment.author ? ` by @${comment.author}` : '';
 		const url = comment.url ? `\n   url: ${comment.url}` : '';
+		const threadState = formatReviewThreadState(comment);
+		const threadLine = threadState ? `\n   ${threadState}` : '';
 		const preview = indentLines(truncateForDisplay(comment.body, COMMENT_DISPLAY_BODY_LIMIT), '   ');
-		return `${comment.displayNumber ?? '?'}. ${comment.sourceLabel}${author} — ${formatCommentLocation(comment)}\n   id: ${comment.id}${url}\n${preview}`;
+		return `${comment.displayNumber ?? '?'}. ${comment.sourceLabel}${author} — ${formatCommentLocation(comment)}\n   id: ${comment.id}${url}${threadLine}\n${preview}`;
 	});
 	return [header, ...body].join('\n\n');
+}
+
+async function promptForInlineCommentFilter(ctx: ExtensionCommandContext): Promise<InlineCommentFilter | undefined> {
+	const prompt = [
+		'/triage-comments: filter inline review comments before display',
+		'GitHub exposes resolved/outdated state only for inline review threads. PR issue comments and review bodies will stay visible, and inline comments without thread metadata will stay visible.',
+	].join('\n\n');
+	const showAll = 'Show all fetched comments';
+	const hideResolved = 'Hide resolved inline review comments';
+	const hideOutdated = 'Hide outdated inline review comments';
+	const hideBoth = 'Hide resolved and outdated inline review comments';
+	const cancel = 'Cancel';
+	const decision = await ctx.ui.select(prompt, [showAll, hideResolved, hideOutdated, hideBoth, cancel]);
+	if (!decision || decision === cancel) return undefined;
+	if (decision === hideResolved) return { hideResolved: true, hideOutdated: false, label: 'hiding resolved inline review comments' };
+	if (decision === hideOutdated) return { hideResolved: false, hideOutdated: true, label: 'hiding outdated inline review comments' };
+	if (decision === hideBoth) return { hideResolved: true, hideOutdated: true, label: 'hiding resolved or outdated inline review comments' };
+	return { hideResolved: false, hideOutdated: false, label: 'showing all fetched comments' };
+}
+
+function applyInlineCommentFilter(
+	comments: CommandComment[],
+	filter: InlineCommentFilter,
+): { comments: CommandComment[]; summary: AppliedInlineCommentFilter } {
+	const kept: CommandComment[] = [];
+	let hiddenInlineCount = 0;
+	let hiddenResolvedInlineCount = 0;
+	let hiddenOutdatedInlineCount = 0;
+	let keptInlineWithoutThreadMetadataCount = 0;
+
+	for (const comment of comments) {
+		if (!isInlineReviewComment(comment)) {
+			kept.push(comment);
+			continue;
+		}
+
+		const reviewThread = comment.reviewThread;
+		const hasThreadMetadata = Boolean(reviewThread?.metadataAvailable);
+		const hideForResolved = filter.hideResolved && reviewThread?.isResolved === true;
+		const hideForOutdated = filter.hideOutdated && reviewThread?.isOutdated === true;
+		if (hideForResolved || hideForOutdated) {
+			hiddenInlineCount += 1;
+			if (hideForResolved) hiddenResolvedInlineCount += 1;
+			if (hideForOutdated) hiddenOutdatedInlineCount += 1;
+			continue;
+		}
+
+		if (!hasThreadMetadata) keptInlineWithoutThreadMetadataCount += 1;
+		kept.push(comment);
+	}
+
+	const commentsWithFilterMetadata = kept.map((comment) => ({
+		...comment,
+		metadata: compactRecord({
+			...comment.metadata,
+			preFilterDisplayNumber: comment.displayNumber,
+		}),
+	}));
+
+	const summary: AppliedInlineCommentFilter = {
+		filter,
+		originalCount: comments.length,
+		displayedCount: kept.length,
+		hiddenInlineCount,
+		hiddenResolvedInlineCount,
+		hiddenOutdatedInlineCount,
+		keptInlineWithoutThreadMetadataCount,
+	};
+
+	return { comments: assignDisplayNumbers(commentsWithFilterMetadata), summary };
 }
 
 function parseSelectionList(input: string, max: number): SelectionParseResult {
@@ -1384,11 +1714,12 @@ async function choosePrComments(
 	ctx: ExtensionCommandContext,
 	pr: PullRequestContext,
 	comments: CommandComment[],
+	filterSummary?: AppliedInlineCommentFilter,
 ): Promise<CommandComment[] | undefined> {
 	const options = comments.length <= MAX_COMMENTS
 		? ['Investigate all displayed comments', 'Choose a subset', 'Cancel']
 		: ['Choose a subset', 'Cancel'];
-	const selectionPrompt = formatFetchedCommentsForSelection(pr, comments);
+	const selectionPrompt = formatFetchedCommentsForSelection(pr, comments, filterSummary);
 	const decision = await ctx.ui.select(selectionPrompt, options);
 	if (!decision || decision === 'Cancel') return undefined;
 	if (decision === 'Investigate all displayed comments') return comments;
@@ -1428,13 +1759,16 @@ function toPayloadComment(comment: CommandComment): Record<string, unknown> {
 
 function buildCommandPayload(
 	comments: CommandComment[],
-	options: { pr?: PullRequestContext; totalDisplayed: number; source: 'paste' | 'pr' },
+	options: { pr?: PullRequestContext; totalDisplayed: number; source: 'paste' | 'pr'; filterSummary?: AppliedInlineCommentFilter },
 ): TriageCommandPayload {
+	const prSelectionContext = options.filterSummary
+		? `Selected by /triage-comments after fetching ${options.filterSummary.originalCount} PR comment(s), applying the inline review-comment filter, displaying ${options.totalDisplayed} comment(s), and receiving explicit user selection. ${formatInlineFilterContext(options.filterSummary)}`
+		: `Selected by /triage-comments after displaying ${options.totalDisplayed} fetched PR comment(s) and receiving explicit user selection.`;
 	const payload: TriageCommandPayload = {
 		comments: comments.map(toPayloadComment),
 		context:
 			options.source === 'pr'
-				? `Selected by /triage-comments after displaying ${options.totalDisplayed} fetched PR comment(s) and receiving explicit user selection. Do not implement changes until the user chooses a handling option.`
+				? `${prSelectionContext} Do not implement changes until the user chooses a handling option.`
 				: 'Pasted feedback captured by /triage-comments. Do not implement changes until the user chooses a handling option.',
 	};
 
@@ -1490,6 +1824,18 @@ async function runPasteMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, pref
 
 async function runPrMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, target?: string): Promise<void> {
 	let prTarget = target?.trim();
+	let detectedPr: PullRequestContext | undefined;
+
+	if (!prTarget) {
+		ctx.ui.setStatus('triage-comments', 'triage-comments: checking current branch PR…');
+		detectedPr = await detectCurrentBranchPullRequest(pi, ctx);
+		ctx.ui.setStatus('triage-comments', undefined);
+		if (detectedPr) {
+			prTarget = detectedPr.url ?? String(detectedPr.number);
+			notifyCommand(ctx, `Detected PR ${detectedPr.repository}#${detectedPr.number} from the current branch.`, 'info');
+		}
+	}
+
 	if (!prTarget) {
 		const input = await ctx.ui.input('PR URL or number', 'For example: 123, #123, or https://github.com/owner/repo/pull/123');
 		if (input === undefined) return;
@@ -1504,16 +1850,26 @@ async function runPrMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, target?
 	ctx.ui.setStatus('triage-comments', 'triage-comments: fetching PR comments…');
 	try {
 		notifyCommand(ctx, 'Fetching PR comments with gh (read-only)…', 'info');
-		const { pr, comments } = await fetchPrCommentsForTriage(pi, ctx, prTarget);
+		const { pr, comments } = detectedPr
+			? { pr: detectedPr, comments: await fetchCommentsForPullRequest(pi, ctx, detectedPr) }
+			: await fetchPrCommentsForTriage(pi, ctx, prTarget);
 		if (comments.length === 0) {
 			notifyCommand(ctx, `No review comments, issue comments, or review bodies were found for ${pr.repository}#${pr.number}.`, 'info');
 			return;
 		}
 
-		const selected = await choosePrComments(ctx, pr, comments);
+		const filter = await promptForInlineCommentFilter(ctx);
+		if (!filter) return;
+		const filtered = applyInlineCommentFilter(comments, filter);
+		if (filtered.comments.length === 0) {
+			notifyCommand(ctx, `${formatInlineFilterNotice(filtered.summary)} No comments remain to send to triage_comments.`, 'info');
+			return;
+		}
+
+		const selected = await choosePrComments(ctx, pr, filtered.comments, filtered.summary);
 		if (!selected || selected.length === 0) return;
-		const payload = buildCommandPayload(selected, { pr, totalDisplayed: comments.length, source: 'pr' });
-		sendTriageUserMessage(pi, ctx, payload, selected.length, comments.length);
+		const payload = buildCommandPayload(selected, { pr, totalDisplayed: filtered.comments.length, source: 'pr', filterSummary: filtered.summary });
+		sendTriageUserMessage(pi, ctx, payload, selected.length, filtered.comments.length);
 	} catch (error) {
 		notifyCommand(ctx, formatErrorMessage(error), 'error');
 	} finally {

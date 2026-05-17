@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "A collection of pi extensions for context management, review-comment triage, notifications, safety guards, GitHub research, todos, tool rendering, and model/provider helpers.",
   "keywords": ["pi-package", "pi", "terminal", "agent"],
   "license": "MIT",

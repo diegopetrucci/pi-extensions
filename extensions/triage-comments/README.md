@@ -37,6 +37,7 @@ The extension registers `/triage-comments` as an interactive intake flow.
 ```text
 /triage-comments
 /triage-comments paste
+/triage-comments pr
 /triage-comments pr 123
 /triage-comments pr https://github.com/owner/repo/pull/123
 /triage-comments 123
@@ -44,8 +45,10 @@ The extension registers `/triage-comments` as an interactive intake flow.
 
 - With no arguments, The Last Harness asks whether to paste feedback or fetch PR comments.
 - `paste` opens an editor for multiline reviewer feedback, then sends one selected feedback item to the main agent.
-- `pr <PR URL or number>` fetches PR review comments, PR issue comments, and review bodies with `gh`, displays them as numbered items with stable IDs, and asks whether to investigate all displayed comments or an explicit subset such as `1,3-5`.
-- If more than 50 comments are fetched, you must choose a subset of at most 50 comments.
+- `pr` with no explicit target first tries to detect an existing PR for the current named non-`main` git branch using read-only `git` and `gh pr view` calls. If the branch is `main`, detached, outside a git repository, `gh` is unavailable or unauthenticated, or no PR is found, it falls back to the PR URL/number prompt.
+- `pr <PR URL or number>` and a bare PR URL/number fetch that explicit PR directly, display PR review comments, PR issue comments, and review bodies with `gh` as numbered items with stable IDs, and ask whether to investigate all displayed comments or an explicit subset such as `1,3-5`.
+- Before displaying fetched PR comments, PR mode asks whether to show all comments or hide resolved inline review comments, outdated inline review comments, or both. This filter applies only to inline review comments because GitHub exposes resolved/outdated state at the review-thread level; PR issue comments and review bodies always remain visible, and inline comments without thread metadata remain visible.
+- If more than 50 comments are displayed after filtering, you must choose a subset of at most 50 comments.
 - The command sends a normal user message instructing the main agent to call `triage_comments` with the selected payload. It does not directly edit files or post GitHub replies.
 
 The slash command requires interactive UI mode for the editor, PR comment display, and all/subset confirmation. In non-UI modes it prints usage instead of running the intake flow.
@@ -57,9 +60,9 @@ PR mode requires:
 - running inside a git checkout;
 - GitHub CLI `gh` installed and on `PATH`;
 - `gh auth login` completed for the target host/repository, including private repositories;
-- a PR number that `gh pr view` can resolve from the current checkout, or a full GitHub PR URL.
+- a PR number that `gh pr view` can resolve from the current checkout, a full GitHub PR URL, or a current non-`main` branch with an existing PR that `gh pr view` can resolve.
 
-The command uses read-only `gh` calls to fetch PR metadata, review comments, issue comments, and review bodies. It does not post comments, submit reviews, checkout branches, or mutate GitHub.
+The command uses read-only `git`/`gh` calls to detect the current branch PR when no target is supplied, then read-only `gh` calls to fetch PR metadata, review comments, PR issue comments, review bodies, and best-effort review-thread resolved/outdated metadata. It does not post comments, submit reviews, checkout branches, or mutate GitHub.
 
 ## `triage_comments` tool behavior
 
@@ -131,5 +134,6 @@ Do not implement changes from this triage automatically; ask the parent/user whi
 - At most 50 comments can be triaged in one tool call.
 - The subagent has an 8-turn and 8-minute budget.
 - PR mode depends on the GitHub API data available to `gh`; authentication, permissions, host configuration, and API availability can affect what is fetched.
+- Resolved/outdated filtering is best effort and only applies to inline review comments. If GitHub does not return review-thread metadata for an inline comment, `/triage-comments` keeps it visible and labels the thread state as unavailable.
 - The tool validates against the current local checkout. If the checkout does not match the PR head/base or supplied diff context, the result may be `needs clarification` or call out stale/missing evidence.
 - Paste mode treats the editor contents as one feedback item; use PR mode or direct tool calls for multiple separately numbered comments.
