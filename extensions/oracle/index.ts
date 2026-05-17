@@ -7,6 +7,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
 
 type PiModel = {
 	provider: string;
@@ -15,6 +16,7 @@ type PiModel = {
 	reasoning?: boolean;
 	contextWindow?: number;
 	maxTokens?: number;
+	thinkingLevelMap?: ThinkingLevelMap;
 };
 
 interface UsageStats {
@@ -33,6 +35,8 @@ interface OracleSelection {
 	modelId: string;
 	modelName?: string;
 	thinkingLevel: ThinkingLevel;
+	requestedThinkingLevel?: ThinkingLevel;
+	thinkingLevelClamped?: boolean;
 	autoSelected: boolean;
 	selectionReason: string;
 }
@@ -294,6 +298,20 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"minimax/minimax-m2.1",
 		"z-ai/glm-5.1",
 	],
+	together: [
+		"deepseek-ai/DeepSeek-V4-Pro",
+		"zai-org/GLM-5.1",
+		"moonshotai/Kimi-K2.6",
+		"Qwen/Qwen3.6-Plus",
+		"MiniMaxAI/MiniMax-M2.7",
+		"Qwen/Qwen3.5-397B-A17B",
+		"Qwen/Qwen3-Coder-Next-FP8",
+		"Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
+		"openai/gpt-oss-120b",
+		"moonshotai/Kimi-K2.5",
+		"deepseek-ai/DeepSeek-V3-1",
+		"MiniMaxAI/MiniMax-M2.5",
+	],
 	"vercel-ai-gateway": [
 		"anthropic/claude-opus-4.7",
 		"anthropic/claude-opus-4.6",
@@ -393,7 +411,7 @@ const OracleParams = Type.Object({
 	thinkingLevel: Type.Optional(
 		StringEnum(THINKING_LEVELS, {
 			description:
-				"Optional reasoning level override for the oracle subprocess. Default: xhigh for reasoning models, off for non-reasoning models.",
+				"Optional reasoning level override for the oracle subprocess. Defaults request xhigh for reasoning models and off for non-reasoning models, then clamp to matched model capabilities.",
 		}),
 	),
 	cwd: Type.Optional(Type.String({ description: "Optional working directory for the oracle subprocess." })),
@@ -530,9 +548,48 @@ function withThinking(modelRef: string, thinkingLevel: ThinkingLevel): string {
 	return `${modelRef}:${thinkingLevel}`;
 }
 
-function resolveThinkingLevel(model: PiModel | undefined, override: ThinkingLevel | undefined): ThinkingLevel {
-	if (override) return override;
-	return model?.reasoning ? DEFAULT_THINKING_LEVEL : "off";
+// Keep these local so the extension stays compatible with older pi peer installs that do not export clamp helpers.
+function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean {
+	if (!model.reasoning) return level === "off";
+
+	const map = model.thinkingLevelMap;
+	if (level === "xhigh") {
+		return !!map && Object.prototype.hasOwnProperty.call(map, "xhigh") && map.xhigh != null;
+	}
+	return map?.[level] !== null;
+}
+
+function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingLevel {
+	if (isThinkingLevelSupported(model, requested)) return requested;
+
+	const requestedIndex = THINKING_LEVELS.indexOf(requested);
+	for (let index = requestedIndex + 1; index < THINKING_LEVELS.length; index++) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+	for (let index = requestedIndex - 1; index >= 0; index--) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+
+	return "off";
+}
+
+function resolveThinkingLevel(
+	model: PiModel | undefined,
+	override: ThinkingLevel | undefined,
+): { requested: ThinkingLevel; effective: ThinkingLevel; clamped: boolean } {
+	const requested = override ?? (model?.reasoning ? DEFAULT_THINKING_LEVEL : "off");
+	const effective = model ? clampThinkingLevel(model, requested) : requested;
+	return { requested, effective, clamped: effective !== requested };
+}
+
+function appendThinkingLevelClampReason(
+	reason: string,
+	resolution: { requested: ThinkingLevel; effective: ThinkingLevel; clamped: boolean },
+): string {
+	if (!resolution.clamped) return reason;
+	return `${reason} Requested thinking level ${resolution.requested} was clamped to ${resolution.effective} based on the matched model's capabilities.`;
 }
 
 async function findAvailableModel(
@@ -599,9 +656,11 @@ async function selectOracleModel(
 
 	const preferred = selectPreferredModel(candidates, providerForPreferences);
 	const winner = preferred ?? [...candidates].sort((a, b) => rankModel(b) - rankModel(a))[0];
-	const selectionReason = preferred
-		? `Selected ${winner.id} via the hardcoded preference list for ${winner.provider}.`
-		: reason;
+	const thinking = resolveThinkingLevel(winner, thinkingLevelOverride);
+	const selectionReason = appendThinkingLevelClampReason(
+		preferred ? `Selected ${winner.id} via the hardcoded preference list for ${winner.provider}.` : reason,
+		thinking,
+	);
 
 	return {
 		ok: true,
@@ -610,7 +669,8 @@ async function selectOracleModel(
 			provider: winner.provider,
 			modelId: winner.id,
 			modelName: winner.name,
-			thinkingLevel: resolveThinkingLevel(winner, thinkingLevelOverride),
+			thinkingLevel: thinking.effective,
+			...(thinking.clamped ? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true } : {}),
 			autoSelected: true,
 			selectionReason,
 		},
@@ -867,7 +927,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 			"Use this tool sparingly when you want a second opinion, deeper analysis, code review, debugging help, or a higher-reasoning pass.",
 			"Do not use it for routine low-value work; it is slower than the main agent.",
 			"The oracle is read-only by default. Set includeBash only when shell-based inspection is genuinely useful.",
-			"The oracle sets thinking to xhigh by default for reasoning models, unless the tool call explicitly overrides thinkingLevel.",
+			"The oracle requests xhigh by default for reasoning models; defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
 		],
 		parameters: OracleParams,
 
@@ -888,16 +948,21 @@ export default function oracleExtension(pi: ExtensionAPI) {
 					const provider =
 						matched?.provider ?? (modelRef.includes("/") ? modelRef.split("/")[0] : ctx.model?.provider ?? "unknown");
 					const modelId = matched?.id ?? (modelRef.includes("/") ? modelRef.split("/").slice(1).join("/") : modelRef);
+					const thinking = resolveThinkingLevel(matched, params.thinkingLevel);
+					const selectionReason = matched
+						? appendThinkingLevelClampReason("Used the explicit model override provided in the tool call.", thinking)
+						: "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.";
 					selection = {
 						modelRef: matched ? `${matched.provider}/${matched.id}` : modelRef,
 						provider,
 						modelId,
 						modelName: matched?.name,
-						thinkingLevel: resolveThinkingLevel(matched, params.thinkingLevel),
+						thinkingLevel: thinking.effective,
+						...(matched && thinking.clamped
+							? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true }
+							: {}),
 						autoSelected: false,
-						selectionReason: matched
-							? "Used the explicit model override provided in the tool call."
-							: "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.",
+						selectionReason,
 					};
 				} else {
 					const selectionResult = await selectOracleModel(ctx, params.thinkingLevel);

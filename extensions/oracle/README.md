@@ -11,7 +11,7 @@ It adds an `oracle` tool that spins up a separate read-only pi subprocess and se
 - creates an isolated read-only subprocess
 - auto-picks the strongest reasoning model on the current provider
 - uses provider-specific hardcoded rankings first, then a heuristic fallback
-- sets reasoning/thinking to `xhigh` by default for reasoning models
+- requests `xhigh` by default for reasoning models, then clamps to the model-supported thinking level
 - defaults to `read,grep,find,ls`
 - can optionally allow non-mutating `bash` inspection
 - shows a live oracle status line and widget while the subprocess is running
@@ -27,7 +27,7 @@ By default, the extension:
 4. tries a provider-specific hardcoded priority list first
 5. falls back to a heuristic that favors stronger tiers like `opus`, `pro`, newer versions, and penalizes `mini`, `flash`, `haiku`, `spark`, etc.
 
-The hardcoded rankings now cover pi's built-in provider set, including OpenAI/Codex, Anthropic, Google variants, GitHub Copilot, Bedrock, Azure OpenAI Responses, Cloudflare, DeepSeek, Fireworks, Groq, Hugging Face, Kimi/Moonshot, MiniMax, Mistral, OpenCode, OpenRouter, Vercel AI Gateway, xAI, ZAI, and Cerebras.
+The hardcoded rankings now cover pi's built-in provider set, including Together; see the provider matrix for the current provider-by-provider top picks.
 
 If no reasoning model exists on the current provider, it falls back to the best available model on that provider.
 
@@ -35,9 +35,9 @@ If no reasoning model exists on the current provider, it falls back to the best 
 
 Yes — the extension explicitly sets the oracle reasoning level.
 
-- reasoning models default to `xhigh`
+- reasoning models request `xhigh` by default, then use the Pi-compatible effective thinking level supported by the matched model
 - non-reasoning models default to `off`
-- you can override it with the tool's optional `thinkingLevel` parameter
+- you can override it with the tool's optional `thinkingLevel` parameter; matched models still clamp unsupported overrides and report the effective level
 
 Use `/oracle-model` inside pi to see what it would pick right now.
 

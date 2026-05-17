@@ -30,6 +30,7 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `opencode` | `gpt-5.5-pro` | Then GPT-5.5/5.4, Claude Opus, GPT Codex, Gemini, GLM, Kimi, Qwen, MiniMax. |
 | `opencode-go` | `deepseek-v4-pro` | Then GLM, Qwen, MiMo, MiniMax, and Kimi. |
 | `openrouter` | `anthropic/claude-opus-4.7` | Then Claude Opus, OpenAI GPT-5.x, Gemini Pro, Kimi, DeepSeek, MiniMax. |
+| `together` | `deepseek-ai/DeepSeek-V4-Pro` | Then GLM, Kimi, Qwen, MiniMax, GPT OSS, and older reasoning fallbacks. |
 | `vercel-ai-gateway` | `anthropic/claude-opus-4.7` | Then Claude, OpenAI GPT-5.x, Kimi, DeepSeek, Qwen, Gemini, xAI, ZAI. |
 | `xai` | `grok-4.3` | Then Grok 4.20 reasoning / Grok 4 fast variants. |
 | `xiaomi` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
