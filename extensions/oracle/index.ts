@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -58,6 +59,11 @@ interface OracleUiRun {
 	preview?: string;
 }
 
+interface OraclePreferences {
+	model?: string;
+	thinkingLevel?: ThinkingLevel;
+}
+
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 const READ_ONLY_PLUS_BASH_TOOLS = [...READ_ONLY_TOOLS, "bash"];
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "xhigh";
@@ -65,6 +71,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as 
 const COLLAPSED_LINE_LIMIT = 8;
 const ORACLE_STATUS_ID = "oracle";
 const ORACLE_WIDGET_ID = "oracle";
+const ORACLE_CONFIG_FILE = "oracle.json";
 
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
@@ -429,6 +436,74 @@ function createEmptyUsage(): UsageStats {
 	};
 }
 
+function getOracleConfigPath(): string {
+	return path.join(getAgentDir(), "extensions", ORACLE_CONFIG_FILE);
+}
+
+function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim().toLowerCase();
+	return (THINKING_LEVELS as readonly string[]).includes(normalized) ? (normalized as ThinkingLevel) : undefined;
+}
+
+function normalizeModelPreference(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function parseModelPreference(value: unknown): { model?: string; thinkingLevel?: ThinkingLevel } {
+	const model = normalizeModelPreference(value);
+	if (!model) return {};
+	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh)$/i);
+	if (!match?.[1]) return { model };
+	return { model: match[1], thinkingLevel: parseThinkingLevel(match[2]) };
+}
+
+async function readOraclePreferences(): Promise<OraclePreferences> {
+	try {
+		const raw = await fs.readFile(getOracleConfigPath(), "utf8");
+		const parsed = JSON.parse(raw) as {
+			model?: unknown;
+			defaultModel?: unknown;
+			thinkingLevel?: unknown;
+			defaultThinkingLevel?: unknown;
+		};
+		return {
+			model: parseModelPreference(parsed.model).model ?? parseModelPreference(parsed.defaultModel).model,
+			thinkingLevel:
+				parseThinkingLevel(parsed.thinkingLevel) ??
+				parseThinkingLevel(parsed.defaultThinkingLevel) ??
+				parseModelPreference(parsed.model).thinkingLevel ??
+				parseModelPreference(parsed.defaultModel).thinkingLevel,
+		};
+	} catch {
+		return {};
+	}
+}
+
+async function writeOraclePreferences(preferences: OraclePreferences): Promise<void> {
+	const configPath = getOracleConfigPath();
+	const config = {
+		...(preferences.model ? { model: preferences.model } : {}),
+		...(preferences.thinkingLevel ? { thinkingLevel: preferences.thinkingLevel } : {}),
+		updatedAt: new Date().toISOString(),
+	};
+	await fs.mkdir(path.dirname(configPath), { recursive: true });
+	await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function formatOraclePreferences(preferences: OraclePreferences): string {
+	const model = preferences.model ?? "auto";
+	const thinkingLevel = preferences.thinkingLevel ?? "auto";
+	return `Oracle defaults: model=${model}, thinkingLevel=${thinkingLevel}. Config: ${getOracleConfigPath()}`;
+}
+
+function notifyCommand(ctx: any, message: string, kind = "info"): void {
+	if (ctx.hasUI && ctx.ui) ctx.ui.notify(message, kind);
+	else console.log(message);
+}
+
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -534,7 +609,7 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 		return { command: process.execPath, args: [currentScript, ...args] };
 	}
 
-	const execName = basename(process.execPath).toLowerCase();
+	const execName = path.basename(process.execPath).toLowerCase();
 	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
 	if (!isGenericRuntime) {
 		return { command: process.execPath, args };
@@ -893,26 +968,147 @@ function renderCollapsedText(text: string, lineLimit = COLLAPSED_LINE_LIMIT): st
 
 export default function oracleExtension(pi: ExtensionAPI) {
 	const activeRuns = new Map<string, OracleUiRun>();
+	let preferences: OraclePreferences = {};
 
 	pi.on("session_start", async (_event, ctx) => {
+		preferences = await readOraclePreferences();
 		activeRuns.clear();
 		updateOracleUi(ctx, activeRuns);
+	});
+
+	pi.registerCommand("oracle", {
+		description: "Configure Oracle default model and thinking level for future oracle tool calls",
+		getArgumentCompletions: (prefix) => {
+			const parts = prefix.trim().toLowerCase().split(/\s+/).filter(Boolean);
+			const first = parts[0] ?? "";
+			if (parts.length <= 1) {
+				const commands = ["status", "model", "thinking", "clear"];
+				const matches = commands.filter((command) => command.startsWith(first));
+				return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+			}
+			if (parts[0] === "thinking") {
+				const query = parts[1] ?? "";
+				const values = ["auto", ...THINKING_LEVELS];
+				const matches = values.filter((value) => value.startsWith(query));
+				return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+			}
+			if (parts[0] === "clear") {
+				const query = parts[1] ?? "";
+				const values = ["all", "model", "thinking"];
+				const matches = values.filter((value) => value.startsWith(query));
+				return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+			}
+			return null;
+		},
+		handler: async (args, ctx) => {
+			const raw = args.trim();
+			const tokens = raw ? raw.split(/\s+/) : [];
+			const [command = "status", ...rest] = tokens;
+			const action = command.toLowerCase();
+			const configPath = getOracleConfigPath();
+
+			const save = async (next: OraclePreferences): Promise<string | undefined> => {
+				preferences = next;
+				try {
+					await writeOraclePreferences(preferences);
+					return undefined;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return `Preference changed for this process, but could not save ${configPath}: ${message}`;
+				}
+			};
+
+			if (action === "status" || action === "show") {
+				notifyCommand(ctx, formatOraclePreferences(preferences));
+				return;
+			}
+
+			if (action === "model") {
+				const model = rest.join(" ").trim();
+				const normalizedModelAction = model.toLowerCase();
+				if (!model) {
+					notifyCommand(ctx, "Usage: /oracle model <provider/model|auto>", "warning");
+					return;
+				}
+				if (normalizedModelAction === "auto" || normalizedModelAction === "clear" || normalizedModelAction === "default") {
+					const warning = await save({ ...preferences, model: undefined });
+					notifyCommand(ctx, `Oracle default model cleared; future oracle calls will auto-select. ${warning ?? formatOraclePreferences(preferences)}`, warning ? "warning" : "info");
+					return;
+				}
+				const parsedModel = parseModelPreference(model);
+				const next = {
+					...preferences,
+					model: parsedModel.model,
+					thinkingLevel: parsedModel.thinkingLevel ?? preferences.thinkingLevel,
+				};
+				const warning = await save(next);
+				notifyCommand(ctx, `Oracle default model set to ${parsedModel.model}. ${warning ?? formatOraclePreferences(preferences)}`, warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "thinking" || action === "think" || action === "thinking-level") {
+				const value = rest[0]?.trim().toLowerCase();
+				if (!value) {
+					notifyCommand(ctx, `Usage: /oracle thinking ${THINKING_LEVELS.join(" | ")} | auto`, "warning");
+					return;
+				}
+				if (value === "auto" || value === "clear" || value === "default") {
+					const warning = await save({ ...preferences, thinkingLevel: undefined });
+					notifyCommand(ctx, `Oracle default thinking level cleared; future oracle calls will use built-in defaults. ${warning ?? formatOraclePreferences(preferences)}`, warning ? "warning" : "info");
+					return;
+				}
+				const thinkingLevel = parseThinkingLevel(value);
+				if (!thinkingLevel) {
+					notifyCommand(ctx, `Usage: /oracle thinking ${THINKING_LEVELS.join(" | ")} | auto`, "warning");
+					return;
+				}
+				const warning = await save({ ...preferences, thinkingLevel });
+				notifyCommand(ctx, `Oracle default thinking level set to ${thinkingLevel}. ${warning ?? formatOraclePreferences(preferences)}`, warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "clear" || action === "reset") {
+				const target = rest[0]?.trim().toLowerCase() || "all";
+				let next: OraclePreferences;
+				if (target === "all") next = {};
+				else if (target === "model") next = { ...preferences, model: undefined };
+				else if (target === "thinking" || target === "thinking-level") next = { ...preferences, thinkingLevel: undefined };
+				else {
+					notifyCommand(ctx, "Usage: /oracle clear [all|model|thinking]", "warning");
+					return;
+				}
+				const warning = await save(next);
+				notifyCommand(ctx, `Oracle defaults cleared (${target}). ${warning ?? formatOraclePreferences(preferences)}`, warning ? "warning" : "info");
+				return;
+			}
+
+			notifyCommand(ctx, "Usage: /oracle status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
+		},
 	});
 
 	pi.registerCommand("oracle-model", {
 		description: "Show which model the oracle would use right now",
 		handler: async (_args, ctx) => {
-			const selectionResult = await selectOracleModel(ctx);
+			const defaultModel = parseModelPreference(preferences.model);
+			if (defaultModel.model) {
+				const matched = await findAvailableModel(ctx, defaultModel.model);
+				const thinking = resolveThinkingLevel(matched, preferences.thinkingLevel ?? defaultModel.thinkingLevel);
+				const modelRef = matched ? `${matched.provider}/${matched.id}` : defaultModel.model;
+				const suffix = matched
+					? appendThinkingLevelClampReason("Configured default oracle model is active.", thinking)
+					: "Configured default oracle model is active, but it was not matched against the authenticated model list.";
+				notifyCommand(ctx, `Oracle: ${modelRef} (${thinking.effective}) — ${suffix}`);
+				return;
+			}
+			const selectionResult = await selectOracleModel(ctx, preferences.thinkingLevel);
 			if (!selectionResult.ok) {
-				if (ctx.hasUI) ctx.ui.notify(selectionResult.error, "error");
-				else console.log(selectionResult.error);
+				notifyCommand(ctx, selectionResult.error, "error");
 				return;
 			}
 
 			const { selection } = selectionResult;
 			const message = `Oracle: ${selection.modelRef} (${selection.thinkingLevel}) — ${selection.selectionReason}`;
-			if (ctx.hasUI) ctx.ui.notify(message, "info");
-			else console.log(message);
+			notifyCommand(ctx, message);
 		},
 	});
 
@@ -932,6 +1128,11 @@ export default function oracleExtension(pi: ExtensionAPI) {
 		parameters: OracleParams,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const explicitModel = parseModelPreference(params.model);
+			const defaultModel = parseModelPreference(preferences.model);
+			const configuredModel = explicitModel.model ?? defaultModel.model;
+			const configuredThinkingLevel =
+				params.thinkingLevel ?? explicitModel.thinkingLevel ?? preferences.thinkingLevel ?? defaultModel.thinkingLevel;
 			const uiRun: OracleUiRun = {
 				task: params.task,
 				includeBash: params.includeBash ?? false,
@@ -942,16 +1143,24 @@ export default function oracleExtension(pi: ExtensionAPI) {
 
 			try {
 				let selection: OracleSelection;
-				if (params.model?.trim()) {
-					const modelRef = params.model.trim();
+				if (configuredModel) {
+					const modelRef = configuredModel;
 					const matched = await findAvailableModel(ctx, modelRef);
 					const provider =
 						matched?.provider ?? (modelRef.includes("/") ? modelRef.split("/")[0] : ctx.model?.provider ?? "unknown");
 					const modelId = matched?.id ?? (modelRef.includes("/") ? modelRef.split("/").slice(1).join("/") : modelRef);
-					const thinking = resolveThinkingLevel(matched, params.thinkingLevel);
+					const thinking = resolveThinkingLevel(matched, configuredThinkingLevel);
+					const usedToolOverride = !!explicitModel.model;
 					const selectionReason = matched
-						? appendThinkingLevelClampReason("Used the explicit model override provided in the tool call.", thinking)
-						: "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.";
+						? appendThinkingLevelClampReason(
+							usedToolOverride
+								? "Used the explicit model override provided in the tool call."
+								: "Used the configured default oracle model.",
+							thinking,
+						)
+						: usedToolOverride
+							? "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied."
+							: "Used the configured default oracle model. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.";
 					selection = {
 						modelRef: matched ? `${matched.provider}/${matched.id}` : modelRef,
 						provider,
@@ -965,7 +1174,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 						selectionReason,
 					};
 				} else {
-					const selectionResult = await selectOracleModel(ctx, params.thinkingLevel);
+					const selectionResult = await selectOracleModel(ctx, configuredThinkingLevel);
 					if (!selectionResult.ok) {
 						return {
 							content: [{ type: "text", text: selectionResult.error }],
@@ -974,7 +1183,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 								provider: ctx.model?.provider ?? "unknown",
 								modelId: "",
 								modelName: undefined,
-								thinkingLevel: params.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+								thinkingLevel: configuredThinkingLevel ?? DEFAULT_THINKING_LEVEL,
 								autoSelected: true,
 								selectionReason: selectionResult.error,
 								includeBash: params.includeBash ?? false,

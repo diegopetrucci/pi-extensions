@@ -38,6 +38,7 @@ Yes — the extension explicitly sets the oracle reasoning level.
 - reasoning models request `xhigh` by default, then use the Pi-compatible effective thinking level supported by the matched model
 - non-reasoning models default to `off`
 - you can override it with the tool's optional `thinkingLevel` parameter; matched models still clamp unsupported overrides and report the effective level
+- you can persist a default thinking level with `/oracle thinking <level>` so future automatic oracle tool calls use it when the agent does not pass a per-call override
 
 Use `/oracle-model` inside pi to see what it would pick right now.
 
@@ -81,12 +82,28 @@ Ask pi normally, for example:
 
 The main agent can call the tool directly.
 
+## User defaults
+
+Use `/oracle` to set persisted defaults that apply to future oracle tool calls, including calls the agent launches automatically without per-call overrides.
+
+```text
+/oracle status
+/oracle model anthropic/claude-opus-4-5
+/oracle thinking high
+/oracle thinking auto
+/oracle clear model
+/oracle clear thinking
+/oracle clear
+```
+
+Tool-call parameters still win over these defaults. `auto` clears the configured default and restores the built-in selection behavior. Preferences are saved under pi's agent directory in `extensions/oracle.json`.
+
 ## Tool parameters
 
 - `task` - required prompt for the oracle
 - `includeBash` - optional, adds `bash` for non-mutating inspection
-- `model` - optional explicit model override
-- `thinkingLevel` - optional reasoning/thinking override
+- `model` - optional explicit model override; falls back to the `/oracle model` default, then auto-selection
+- `thinkingLevel` - optional reasoning/thinking override; falls back to the `/oracle thinking` default, then built-in defaults
 - `cwd` - optional working directory override
 
 ## Notes
