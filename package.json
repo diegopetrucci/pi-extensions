@@ -1,8 +1,13 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.30",
-  "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, safety guards, GitHub research, todos, tool rendering, and model/provider helpers.",
-  "keywords": ["pi-package", "pi", "terminal", "agent"],
+  "version": "0.1.31",
+  "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "terminal",
+    "agent"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -34,6 +39,7 @@
       "./extensions/context-cap/index.ts",
       "./extensions/context-inspector/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
+      "./extensions/gnosis/index.ts",
       "./extensions/inline-bash/index.ts",
       "./extensions/librarian/index.ts",
       "./extensions/quiet-tools/index.ts",
