@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
   "keywords": [
     "pi-package",
@@ -8,7 +8,7 @@
     "terminal",
     "agent"
   ],
-  "license": "MIT",
+  "license": "MIT AND Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/diegopetrucci/pi-extensions.git"
@@ -47,6 +47,7 @@
       "./extensions/confirm-destructive/index.ts",
       "./extensions/notify/index.ts",
       "./extensions/openai-fast/index.ts",
+      "./extensions/review/index.ts",
       "./extensions/todo/index.ts",
       "./extensions/triage-comments/index.ts"
     ],

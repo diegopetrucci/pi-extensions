@@ -1,6 +1,8 @@
 # pi-extensions
 
-A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions I made:
+A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions I made.
+
+**License note:** This root collection package is mixed-licensed: most of it is MIT, while [`extensions/review`](./extensions/review) is Apache-2.0 and includes its own [LICENSE](./extensions/review/LICENSE).
 
 - [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
@@ -16,6 +18,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.
 - [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
 - [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
+- [`review`](./extensions/review): Adds `/review` and `/end-review` for interactive code reviews of local changes, commits, PRs, and selected paths.
 - [`todo`](./extensions/todo): Adds a branch-aware `todo` tool for the agent and a `/todos` viewer for users.
 - [`triage-comments`](./extensions/triage-comments): Adds `/triage-comments` and a read-only `triage_comments` subagent tool that can auto-detect the current branch's PR, filter resolved/outdated inline comments, classify selected review comments with evidence, and suggest handling options without implementing changes.
 
