@@ -37,7 +37,7 @@ Then reload pi:
 - Uses `gh` for GitHub search/API access
 - Uses cached local checkouts by default
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`
-- Cached repos are removed lazily after 30 days without use
+- Cached repos are removed lazily after 7 days without use
 
 ## Commands
 

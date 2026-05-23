@@ -1,8 +1,15 @@
 {
   "name": "@diegopetrucci/pi-librarian",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi GitHub research scout with a toggleable local repo checkout cache under the user's OS cache directory.",
-  "keywords": ["pi-package", "pi", "github", "research", "subagent", "cache"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "github",
+    "research",
+    "subagent",
+    "cache"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

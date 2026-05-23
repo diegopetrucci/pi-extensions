@@ -21,7 +21,7 @@ const MAX_TURNS = 10;
 const MAX_TOOL_CALLS_TO_KEEP = 80;
 const DEFAULT_BASH_TIMEOUT_SECONDS = 60;
 const MAX_RUN_MS = 10 * 60 * 1000;
-const CACHE_TTL_DAYS = 30;
+const CACHE_TTL_DAYS = 7;
 const CACHE_TTL_MS = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
 const CACHE_METADATA_FILE = ".pi-librarian-cache.json";
 const CACHE_MARKER_FILE = ".pi-librarian-cache-used";
@@ -560,7 +560,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 		name: "librarian",
 		label: "Librarian",
 		description:
-			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 30-day local checkout cache by default; toggle it with /librarian-cache.",
+			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache by default; toggle it with /librarian-cache.",
 		promptSnippet:
 			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is enabled by default and user-toggleable with /librarian-cache.",
 		promptGuidelines: [

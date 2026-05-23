@@ -10,7 +10,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
 - [`gnosis`](./extensions/gnosis): Exposes the `gn` repo-local knowledge base CLI as an agent tool for searching and recording durable project decisions, constraints, and intent.
 - [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
-- [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache enabled by default under the OS user cache directory, toggleable with `/librarian-cache`, with cached repos expiring after 30 days of non-use.
+- [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache enabled by default under the OS user cache directory, toggleable with `/librarian-cache`, with cached repos expiring after 7 days of non-use.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch/repo on the first line, context/model on the second, optional `DUMB ZONE`, plus OpenAI Codex 5-hour and 7-day usage when available.
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.
 - [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.
