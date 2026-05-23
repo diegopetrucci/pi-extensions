@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "onlyWhenInteractive": true,
+  "webhook": "$BRRR_WEBHOOK_URL",
+  "idleSeconds": 20,
+  "title": "Pi finished",
+  "message": "Pi finished working in '{project}'.",
+  "includeLastAssistantMessage": true,
+  "sound": "",
+  "openUrl": "",
+  "imageUrl": ""
+}

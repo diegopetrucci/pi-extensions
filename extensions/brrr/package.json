@@ -1,0 +1,28 @@
+{
+  "name": "@diegopetrucci/pi-brrr",
+  "version": "0.1.0",
+  "description": "A pi extension that sends brrr push notifications when pi is ready for input.",
+  "keywords": ["pi-package", "pi", "brrr", "notification", "push"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/brrr"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "brrr.example.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

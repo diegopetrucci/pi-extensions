@@ -5,6 +5,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 **License note:** This root collection package is mixed-licensed: most of it is MIT, while [`extensions/review`](./extensions/review) is Apache-2.0 and includes its own [LICENSE](./extensions/review/LICENSE).
 
 - [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
+- [`brrr`](./extensions/brrr): Sends brrr push notifications when pi finishes an agent turn and is ready for input, with optional macOS idle gating.
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
 - [`context-cap`](./extensions/context-cap): Caps effective model context windows at 200k tokens by default so pi avoids the `dumb zone`; toggle temporarily with `/context-cap`.
 - [`context-inspector`](./extensions/context-inspector): Adds `/context`, a local self-contained HTML dashboard that breaks down where the current session context is going, with category overview, top offenders, and drilldown search.
