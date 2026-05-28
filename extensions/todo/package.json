@@ -1,8 +1,14 @@
 {
   "name": "@diegopetrucci/pi-todo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that adds a branch-aware todo tool and /todos viewer.",
-  "keywords": ["pi-package", "pi", "todo", "tool", "session"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "todo",
+    "tool",
+    "session"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +17,8 @@
   },
   "files": [
     "index.ts",
-    "README.md"
+    "README.md",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

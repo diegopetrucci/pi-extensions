@@ -1,8 +1,15 @@
 {
   "name": "@diegopetrucci/pi-gnosis",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that exposes the gnosis repo-local knowledge base CLI as an agent tool.",
-  "keywords": ["pi-package", "pi", "gnosis", "memory", "knowledge-base", "tool"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "gnosis",
+    "memory",
+    "knowledge-base",
+    "tool"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +18,8 @@
   },
   "files": [
     "index.ts",
-    "README.md"
+    "README.md",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

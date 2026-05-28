@@ -1,8 +1,14 @@
 {
   "name": "@diegopetrucci/pi-quiet-tools",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi extension that visually compacts collapsed built-in tool rows in the TUI without changing tool results sent to the model.",
-  "keywords": ["pi-package", "pi", "tools", "terminal", "tui"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "tools",
+    "terminal",
+    "tui"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +17,8 @@
   },
   "files": [
     "index.ts",
-    "README.md"
+    "README.md",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

@@ -1,8 +1,13 @@
 {
   "name": "@diegopetrucci/pi-context-cap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that caps effective model context windows at 200k tokens for earlier auto-compaction.",
-  "keywords": ["pi-package", "pi", "context", "compaction"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "context",
+    "compaction"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +16,8 @@
   },
   "files": [
     "index.ts",
-    "README.md"
+    "README.md",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

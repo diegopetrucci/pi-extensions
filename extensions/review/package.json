@@ -1,8 +1,15 @@
 {
   "name": "@diegopetrucci/pi-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A standalone pi extension that adds /review and /end-review commands adapted from mitsuhiko/agent-stuff.",
-  "keywords": ["pi-package", "pi", "review", "code-review", "git", "github"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "review",
+    "code-review",
+    "git",
+    "github"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -12,7 +19,8 @@
   "files": [
     "index.ts",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

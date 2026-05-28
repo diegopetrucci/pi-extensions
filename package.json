@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
   "keywords": [
     "pi-package",
@@ -17,7 +17,8 @@
     "extensions",
     "assets",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    ".pi-fleet-tested-version"
   ],
   "workspaces": [
     "extensions/*"
@@ -55,9 +56,9 @@
     "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.75.5",
-    "@earendil-works/pi-coding-agent": "^0.75.5",
-    "@earendil-works/pi-tui": "^0.75.5",
+    "@earendil-works/pi-ai": "^0.76.0",
+    "@earendil-works/pi-coding-agent": "^0.76.0",
+    "@earendil-works/pi-tui": "^0.76.0",
     "@types/node": "^25.9.1",
     "husky": "^9.1.7",
     "typebox": "^1.1.38",

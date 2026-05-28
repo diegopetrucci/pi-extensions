@@ -1,8 +1,15 @@
 {
   "name": "@diegopetrucci/pi-agent-workflow-audit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that runs an isolated repo workflow audit and returns only the final report to the main session.",
-  "keywords": ["pi-package", "pi", "agents", "workflow", "audit", "subagent"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "agents",
+    "workflow",
+    "audit",
+    "subagent"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +18,8 @@
   },
   "files": [
     "index.ts",
-    "README.md"
+    "README.md",
+    ".pi-fleet-tested-version"
   ],
   "publishConfig": {
     "access": "public"

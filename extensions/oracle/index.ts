@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { getAgentDir, getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -668,7 +668,7 @@ function appendThinkingLevelClampReason(
 }
 
 async function findAvailableModel(
-	ctx: { model?: PiModel; modelRegistry: { getAvailable(): Promise<PiModel[]> } },
+	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
 	modelRef: string,
 ): Promise<PiModel | undefined> {
 	const available = await ctx.modelRegistry.getAvailable();
@@ -696,7 +696,7 @@ async function findAvailableModel(
 }
 
 async function selectOracleModel(
-	ctx: { model?: PiModel; modelRegistry: { getAvailable(): Promise<PiModel[]> } },
+	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
 	thinkingLevelOverride?: ThinkingLevel,
 ): Promise<{ ok: true; selection: OracleSelection } | { ok: false; error: string }> {
 	const available = await ctx.modelRegistry.getAvailable();
@@ -752,14 +752,7 @@ async function selectOracleModel(
 	};
 }
 
-function updateOracleUi(ctx: Parameters<ExtensionAPI["registerCommand"]>[1]["handler"] extends (
-	args: any,
-	ctx: infer T,
-) => any
-	? T
-	: never,
-	activeRuns: Map<string, OracleUiRun>,
-): void {
+function updateOracleUi(ctx: ExtensionContext, activeRuns: Map<string, OracleUiRun>): void {
 	if (!ctx.hasUI) return;
 	const theme = ctx.ui.theme;
 	if (activeRuns.size === 0) {
@@ -1193,7 +1186,6 @@ export default function oracleExtension(pi: ExtensionAPI) {
 								durationMs: 0,
 								cwd: params.cwd ?? ctx.cwd,
 							},
-							isError: true,
 						};
 					}
 					selection = selectionResult.selection;
@@ -1213,7 +1205,6 @@ export default function oracleExtension(pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text", text: result.error }],
 						details: result.details,
-						isError: true,
 					};
 				}
 
@@ -1244,7 +1235,8 @@ export default function oracleExtension(pi: ExtensionAPI) {
 			const body = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
 			if (!details) return new Text(body, 0, 0);
 
-			const icon = result.isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
+			const isError = (details.exitCode ?? 0) !== 0;
+			const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
 			const header = `${icon} ${theme.fg("toolTitle", theme.bold("oracle "))}${theme.fg("accent", details.modelRef || "(auto)")}`;
 			const subheader = [
 				details.thinkingLevel !== "off" ? details.thinkingLevel : undefined,
@@ -1260,7 +1252,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 				if (subheader) text += `\n${theme.fg("dim", subheader)}`;
 				text += `\n\n${theme.fg("toolOutput", renderCollapsedText(body))}`;
 				if (usage) text += `\n\n${theme.fg("dim", usage)}`;
-				if (result.isError && details.stderr) text += `\n${theme.fg("error", renderCollapsedText(details.stderr, 4))}`;
+				if (isError && details.stderr) text += `\n${theme.fg("error", renderCollapsedText(details.stderr, 4))}`;
 				text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				return new Text(text, 0, 0);
 			}
@@ -1283,7 +1275,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 				container.addChild(new Spacer(1));
 				container.addChild(new Text(theme.fg("muted", "stderr"), 0, 0));
 				container.addChild(
-					new Text(result.isError ? theme.fg("error", details.stderr) : theme.fg("dim", details.stderr), 0, 0),
+					new Text(isError ? theme.fg("error", details.stderr) : theme.fg("dim", details.stderr), 0, 0),
 				);
 			}
 			return container;
