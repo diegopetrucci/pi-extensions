@@ -11,7 +11,7 @@ const PROVIDER_ID = "openai-codex";
 const API_ID = "openai-codex-responses";
 const FAST_SERVICE_TIER = "priority";
 const SUPPORTED_MODELS = new Set(["gpt-5.4", "gpt-5.5"]);
-const COMMANDS = ["status", "on", "off", "auto", "toggle"];
+const COMMANDS = ["on", "off"];
 
 const DEFAULT_CONFIG: OpenAIFastConfig = {
 	enabled: false,
@@ -241,7 +241,7 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("fast", {
-		description: "Manage OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4/GPT-5.5",
+		description: "Set OpenAI Codex Fast mode on or off for ChatGPT-auth GPT-5.4/GPT-5.5",
 		getArgumentCompletions: (prefix) => {
 			const normalized = prefix.trim().toLowerCase();
 			const matches = COMMANDS.filter((command) => command.startsWith(normalized));
@@ -253,7 +253,8 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 
 			if (!action) {
 				if (!ctx.hasUI) {
-					action = "status";
+					ctx.ui.notify("Usage: /fast on | off", "warning");
+					return;
 				} else {
 					const selection = await ctx.ui.select("OpenAI Fast mode", COMMANDS);
 					if (!selection) return;
@@ -275,28 +276,7 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			if (action === "auto" || action === "default") {
-				state.override = "auto";
-				state.config = loadConfig(ctx.cwd);
-				updateStatus(ctx, state);
-				ctx.ui.notify(getStatusMessage(ctx, state), "info");
-				return;
-			}
-
-			if (action === "toggle") {
-				state.override = isFastEnabled(state) ? "off" : "on";
-				updateStatus(ctx, state);
-				ctx.ui.notify(getStatusMessage(ctx, state), "info");
-				return;
-			}
-
-			if (action === "status") {
-				updateStatus(ctx, state);
-				ctx.ui.notify(getStatusMessage(ctx, state), "info");
-				return;
-			}
-
-			ctx.ui.notify("Usage: /fast on | off | auto | toggle | status", "warning");
+			ctx.ui.notify("Usage: /fast on | off", "warning");
 		},
 	});
 }
