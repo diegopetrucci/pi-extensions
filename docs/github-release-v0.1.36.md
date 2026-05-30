@@ -1,11 +1,11 @@
-Simplifies `openai-fast` so `/fast` only offers the two Fast-mode choices users need: `on` and `off`.
+Simplifies `openai-fast` so `/fast` toggles Fast mode directly with no options.
 
 ## Highlights
 
-- Narrows `/fast` completions and the interactive menu to only `on` and `off`.
-- Removes user-facing `status`, `auto`, and `toggle` command choices.
-- Updates `/fast` usage text and README command docs to match the simplified flow.
-- Keeps config defaults and existing on/off session overrides intact.
+- Makes `/fast` toggle Fast mode directly with no arguments.
+- Removes user-facing `on`, `off`, `status`, `auto`, and `toggle` command choices.
+- Updates `/fast` usage text and README command docs to match the no-option toggle flow.
+- Keeps config defaults and existing session overrides intact.
 
 ## Packages
 

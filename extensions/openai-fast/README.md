@@ -26,11 +26,9 @@ Fast mode is only injected when all of these are true:
 
 ```text
 /fast
-/fast on
-/fast off
 ```
 
-Run `/fast` without arguments to pick from the two available actions: `on` or `off`. `/fast on` and `/fast off` are temporary session/runtime overrides.
+Run `/fast` to toggle Fast mode on or off for the current session/runtime. The command reports the new state in chat, and the footer shows `fast` while Fast mode is active for an eligible model.
 
 The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits.
 

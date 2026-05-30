@@ -38,7 +38,7 @@ npm audit --audit-level=high
 - [x] smoke-test OpenAI Fast command loading
 
 ```bash
-tmp=$(mktemp -d); PI_CODING_AGENT_DIR="$tmp/agent" PI_OFFLINE=1 pi --no-session --no-extensions --extension ./extensions/openai-fast/index.ts -p "/fast on"
+tmp=$(mktemp -d); PI_CODING_AGENT_DIR="$tmp/agent" PI_OFFLINE=1 pi --no-session --no-extensions --extension ./extensions/openai-fast/index.ts -p "/fast"
 ```
 
 ## Package sanity
@@ -114,5 +114,5 @@ pi install npm:@diegopetrucci/pi-extensions
 pi install npm:@diegopetrucci/pi-openai-fast
 ```
 
-- [ ] reload pi and confirm `/fast` only offers `on` and `off`
+- [ ] reload pi and confirm `/fast` toggles with no options
 - [ ] publish announcement copy from `docs/announcement-v0.1.36.md`
