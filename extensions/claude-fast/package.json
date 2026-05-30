@@ -1,0 +1,35 @@
+{
+  "name": "@diegopetrucci/pi-claude-fast",
+  "version": "0.1.0",
+  "description": "A pi extension that enables Anthropic Claude Fast mode for supported Claude Opus models by injecting speed=fast.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "claude",
+    "anthropic",
+    "fast"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/claude-fast"
+  },
+  "files": [
+    "index.ts",
+    "claude-fast.example.json",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

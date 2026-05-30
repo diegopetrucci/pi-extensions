@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
   "keywords": [
     "pi-package",
@@ -36,6 +36,7 @@
     "extensions": [
       "./extensions/agent-workflow-audit/index.ts",
       "./extensions/brrr/index.ts",
+      "./extensions/claude-fast/index.ts",
       "./extensions/minimal-footer/index.ts",
       "./extensions/oracle/index.ts",
       "./extensions/context-cap/index.ts",
