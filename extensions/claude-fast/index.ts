@@ -12,7 +12,7 @@ const API_ID = "anthropic-messages";
 const FAST_SPEED = "fast";
 const FAST_BETA = "fast-mode-2026-02-01";
 const CLAUDE_CODE_OAUTH_BETAS = ["claude-code-20250219", "oauth-2025-04-20"];
-const SUPPORTED_MODELS = new Set(["claude-opus-4-6", "claude-opus-4-7"]);
+const SUPPORTED_MODELS = new Set(["claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"]);
 
 const DEFAULT_CONFIG: ClaudeFastConfig = {
 	enabled: false,
@@ -143,7 +143,7 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 		return {
 			eligible: false,
 			modelKey: key,
-			reason: "Fast mode is only enabled for Claude Opus 4.6 and 4.7",
+			reason: "Fast mode is only enabled for Claude Opus 4.6, 4.7, and 4.8",
 		};
 	}
 

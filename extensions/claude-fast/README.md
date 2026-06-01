@@ -22,7 +22,7 @@ Fast mode is only injected when all of these are true:
 
 - The current provider is `anthropic`.
 - The current API is `anthropic-messages`.
-- The current model is `claude-opus-4-6` or `claude-opus-4-7`.
+- The current model is `claude-opus-4-6`, `claude-opus-4-7`, or `claude-opus-4-8`.
 - The request payload does not already include `speed`.
 
 Claude Fast mode is available for API-key access and Claude Code subscription/OAuth access when the account has access to Anthropic's Fast mode research preview. For Claude Code subscription users, Anthropic documents this as extra usage credits, not included subscription usage.

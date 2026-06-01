@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-todo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi extension that adds a branch-aware todo tool and /todos viewer.",
   "keywords": [
     "pi-package",

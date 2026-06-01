@@ -75,6 +75,7 @@ const ORACLE_CONFIG_FILE = "oracle.json";
 
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
+		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
 		"claude-opus-4-5",
@@ -91,6 +92,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"zai.glm-5",
 	],
 	anthropic: [
+		"claude-opus-4-8",
+		"claude-opus-4.8",
 		"claude-opus-4-7",
 		"claude-opus-4.7",
 		"claude-opus-4-6",
@@ -156,6 +159,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"accounts/fireworks/models/gpt-oss-120b",
 	],
 	"github-copilot": [
+		"claude-opus-4.8",
 		"claude-opus-4.7",
 		"claude-opus-4.6",
 		"claude-opus-4.5",
@@ -257,6 +261,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5.5",
 		"gpt-5.4-pro",
 		"gpt-5.4",
+		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
 		"claude-opus-4-5",
@@ -284,6 +289,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"kimi-k2.5",
 	],
 	openrouter: [
+		"anthropic/claude-opus-4.8",
+		"anthropic/claude-opus-4.8-fast",
 		"anthropic/claude-opus-4.7",
 		"anthropic/claude-opus-4.6-fast",
 		"anthropic/claude-opus-4.6",
@@ -320,6 +327,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"MiniMaxAI/MiniMax-M2.5",
 	],
 	"vercel-ai-gateway": [
+		"anthropic/claude-opus-4.8",
 		"anthropic/claude-opus-4.7",
 		"anthropic/claude-opus-4.6",
 		"anthropic/claude-opus-4.5",
