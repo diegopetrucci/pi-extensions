@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-git-footer",
-  "version": "0.1.0",
-  "description": "A TLH-style git status footer for pi.",
+  "version": "0.1.1",
+  "description": "A TLH-style git status add-on for pi's built-in footer.",
   "keywords": [
     "pi-package",
     "pi",

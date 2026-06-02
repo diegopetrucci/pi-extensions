@@ -1,14 +1,15 @@
 # git-footer
 
-A TLH-style git status footer for pi.
+A TLH-style git status add-on for pi's built-in footer.
 
-This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package because only one custom footer should win.
+This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package.
 
-It replaces pi's built-in footer with a compact two-line layout whose first line mirrors how [`the-last-harness`](https://github.com/diegopetrucci/the-last-harness) summarizes repository state:
+It keeps pi's default footer intact and adds a compact git status segment through pi's extension status API:
 
 ```text
-<repo> • <branch> • <git-status> • PR #<number> • <session-name>
-ctx <percent>% • <model> <thinking> • <extension-statuses>
+~/repo (main) • session-name
+↑12k ↓3k 44.1%/200k                      model
++2 ~1 ?3 ↑1 • PR #123
 ```
 
 Git status indicators:
@@ -20,7 +21,7 @@ Git status indicators:
 - `↑N`: commits ahead of upstream
 - `↓N`: commits behind upstream
 
-The extension polls git status in the background, caches the latest snapshot, and keeps footer rendering synchronous. It also performs a best-effort `gh pr view` lookup for the current branch; if `gh` is unavailable or the branch has no PR, the PR segment is omitted.
+The extension polls git status in the background and caches the latest snapshot. It also performs a best-effort `gh pr view` lookup for the current branch; if `gh` is unavailable or the branch has no PR, the PR segment is omitted.
 
 ## Install
 
@@ -36,6 +37,7 @@ Then reload pi:
 
 ## Notes
 
-- Replaces pi's built-in footer entirely.
-- Intended as a separate footer extension; do not enable it at the same time as another custom-footer extension such as `minimal-footer` unless you want the last-loaded footer to win.
-- `render()` never spawns subprocesses. Git and GitHub CLI lookups run on a short background interval with timeouts, and the footer reads only cached snapshots.
+- Does not replace pi's built-in footer.
+- Uses `ctx.ui.setStatus()`, so pi renders the git summary with other extension statuses.
+- The current pi extension API does not support literally appending text inside the built-in footer's first `cwd (branch)` line without replacing the footer.
+- Git and GitHub CLI lookups run on a short background interval with timeouts.

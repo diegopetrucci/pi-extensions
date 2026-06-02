@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
-import { basename } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
 
 type GitStatusSnapshot = {
 	branch?: string;
@@ -48,12 +46,12 @@ type GitFooterCacheOptions = {
 	gitTimeoutMs?: number;
 	ghTimeoutMs?: number;
 	onChange?: () => void;
-	onBranchChangeSource?: (callback: () => void) => () => void;
 };
 
 const BRANCH_HEAD_PREFIX = "# branch.head ";
 const BRANCH_AB_PREFIX = "# branch.ab ";
-const FOOTER_SEPARATOR = " • ";
+const STATUS_KEY = "git-footer";
+const STATUS_SEPARATOR = " • ";
 const DEFAULT_REFRESH_INTERVAL_MS = 8_000;
 const DEFAULT_GIT_TIMEOUT_MS = 1_500;
 const DEFAULT_GH_TIMEOUT_MS = 3_000;
@@ -157,21 +155,15 @@ function formatPullRequestFooterSegment(pullRequest: PullRequestSnapshot | undef
 	return undefined;
 }
 
-function formatGitFooterSegments(
+function formatGitFooterStatus(
 	status: GitStatusSnapshot | undefined,
 	pullRequest: PullRequestSnapshot | undefined,
-): string[] {
-	const segments: string[] = [];
-	const branch = typeof status?.branch === "string" ? status.branch.trim() : "";
-	if (branch) segments.push(branch);
-
-	const statusSegment = formatGitStatusFooterSegment(status);
-	if (statusSegment) segments.push(statusSegment);
-
-	const pullRequestSegment = formatPullRequestFooterSegment(pullRequest);
-	if (pullRequestSegment) segments.push(pullRequestSegment);
-
-	return segments;
+): string | undefined {
+	const parts = [
+		formatGitStatusFooterSegment(status),
+		formatPullRequestFooterSegment(pullRequest),
+	].filter((part): part is string => !!part);
+	return parts.length > 0 ? parts.join(STATUS_SEPARATOR) : undefined;
 }
 
 function parsePullRequestJson(stdout: string): PullRequestSnapshot | undefined {
@@ -307,7 +299,6 @@ class GitFooterCache {
 	private readonly inflightControllers = new Set<AbortController>();
 	private disposed = false;
 	private refreshInFlight: Promise<void> | undefined;
-	private branchChangeUnsubscribe: (() => void) | undefined;
 	private statusSnapshot: GitStatusSnapshot | undefined;
 	private pullRequestSnapshot: PullRequestSnapshot | undefined;
 	private lastSeenBranch: string | undefined;
@@ -325,12 +316,6 @@ class GitFooterCache {
 			void this.refresh();
 		}, this.refreshIntervalMs);
 		void this.refresh();
-
-		if (options.onBranchChangeSource) {
-			this.branchChangeUnsubscribe = options.onBranchChangeSource(() => {
-				void this.refresh();
-			});
-		}
 	}
 
 	getStatusSnapshot(): GitStatusSnapshot | undefined {
@@ -453,81 +438,43 @@ class GitFooterCache {
 			this.clock.clearInterval(this.intervalHandle);
 			this.intervalHandle = undefined;
 		}
-		if (this.branchChangeUnsubscribe) {
-			try {
-				this.branchChangeUnsubscribe();
-			} catch {
-				// Ignore misbehaving notifier.
-			}
-			this.branchChangeUnsubscribe = undefined;
-		}
 		for (const controller of this.inflightControllers) controller.abort();
 		this.inflightControllers.clear();
 	}
 }
 
-function composeFooterFirstLine(input: {
-	cwd: string;
-	sessionName?: string | null;
-	status?: GitStatusSnapshot;
-	pullRequest?: PullRequestSnapshot;
-}): string {
-	const segments = [input.cwd];
-	if (input.status !== undefined) {
-		segments.push(...formatGitFooterSegments(input.status, input.pullRequest));
-	}
-	if (input.sessionName) segments.push(input.sessionName);
-	return segments.join(FOOTER_SEPARATOR);
-}
-
-function sanitizeFooterSegment(value: string): string {
-	return value.replace(/[\r\n\t]+/g, " ").trim();
-}
-
 export default function (pi: ExtensionAPI) {
+	let cache: GitFooterCache | undefined;
+
+	function disposeCache(): void {
+		cache?.dispose();
+		cache = undefined;
+	}
+
 	pi.on("session_start", (_event, ctx) => {
-		let cache: GitFooterCache | undefined;
+		disposeCache();
 
-		ctx.ui.setFooter((tui, theme, footerData) => {
-			cache = new GitFooterCache({
-				cwd: () => ctx.cwd,
-				onChange: () => tui.requestRender(),
-				onBranchChangeSource: (callback) => footerData.onBranchChange(callback),
-			});
+		const updateStatus = () => {
+			const text = formatGitFooterStatus(
+				cache?.getStatusSnapshot(),
+				cache?.getPullRequestSnapshot(),
+			);
+			ctx.ui.setStatus(STATUS_KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
+		};
 
-			return {
-				dispose() {
-					cache?.dispose();
-					cache = undefined;
-				},
-				invalidate() {},
-				render(width: number): string[] {
-					const status = cache?.getStatusSnapshot();
-					const pullRequest = cache?.getPullRequestSnapshot();
-					const firstLine = composeFooterFirstLine({
-						cwd: basename(ctx.cwd),
-						status,
-						pullRequest,
-						sessionName: pi.getSessionName(),
-					});
-
-					const usage = ctx.getContextUsage();
-					const context = usage?.percent == null ? "ctx ?" : `ctx ${usage.percent.toFixed(1)}%`;
-					const thinking = pi.getThinkingLevel();
-					const model = ctx.model?.id ?? "no-model";
-					const modelText = thinking === "off" ? model : `${model} ${thinking}`;
-					const statuses = [...footerData.getExtensionStatuses().values()]
-						.map(sanitizeFooterSegment)
-						.filter(Boolean);
-					const secondLine = [theme.fg("dim", context), theme.fg("dim", modelText), ...statuses]
-						.join(theme.fg("dim", FOOTER_SEPARATOR));
-
-					return [
-						truncateToWidth(theme.fg("dim", firstLine), width),
-						truncateToWidth(secondLine, width),
-					];
-				},
-			};
+		cache = new GitFooterCache({
+			cwd: () => ctx.cwd,
+			onChange: updateStatus,
 		});
+		updateStatus();
+	});
+
+	pi.on("turn_end", () => {
+		void cache?.refresh();
+	});
+
+	pi.on("session_shutdown", (_event, ctx) => {
+		disposeCache();
+		ctx.ui.setStatus(STATUS_KEY, undefined);
 	});
 }
