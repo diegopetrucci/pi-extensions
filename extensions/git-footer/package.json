@@ -1,0 +1,35 @@
+{
+  "name": "@diegopetrucci/pi-git-footer",
+  "version": "0.1.0",
+  "description": "A TLH-style git status footer for pi.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "terminal",
+    "footer",
+    "git"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/git-footer"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

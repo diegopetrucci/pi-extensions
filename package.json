@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
   "keywords": [
     "pi-package",
