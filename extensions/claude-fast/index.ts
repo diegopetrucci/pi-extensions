@@ -167,7 +167,7 @@ function syncModelBetaHeader(ctx: ExtensionContext, state: SessionState): void {
 	const requiredBase = ctx.modelRegistry.isUsingOAuth(model) ? CLAUDE_CODE_OAUTH_BETAS : [];
 	const next = shouldEnable
 		? Array.from(new Set([...existing, ...requiredBase, FAST_BETA]))
-		: existing.filter((beta) => beta !== FAST_BETA && !CLAUDE_CODE_OAUTH_BETAS.includes(beta));
+		: existing.filter((beta) => beta !== FAST_BETA);
 
 	delete headers["Anthropic-Beta"];
 	if (next.length > 0) headers["anthropic-beta"] = next.join(",");
