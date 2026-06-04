@@ -4,6 +4,8 @@ A pi GitHub research scout inspired by `pi-librarian`, with a local checkout cac
 
 When the `librarian` tool runs, it can cache/reuse repository checkouts locally. Use `/librarian-cache off` to force GitHub API/search and temporary fetched files only, or `/librarian-cache on` to re-enable cached local checkouts.
 
+The internal librarian subagent uses a lightweight auto-selected model by default and requests `medium` thinking. Use `/librarian-config` to set a persistent internal model or thinking-level preference.
+
 ## Install
 
 ### Standalone npm package
@@ -37,6 +39,7 @@ Then reload pi:
 - Uses `gh` for GitHub search/API access
 - Uses cached local checkouts only when enabled
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`
+- Configure internal subagent defaults with `/librarian-config status | model <provider/model|auto|current> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]`
 - Cached repos are removed lazily after 7 days without use
 
 ## Commands
@@ -48,7 +51,16 @@ Then reload pi:
 /librarian-cache toggle
 ```
 
-The command works in interactive mode, RPC mode, and print/JSON mode. It writes a global preference to `~/.pi/agent/extensions/librarian.json`, so separate non-UI invocations use the same setting. In non-UI modes, command feedback is written to stderr so stdout remains usable for normal output or JSON events.
+```text
+/librarian-config status
+/librarian-config model auto
+/librarian-config model current
+/librarian-config model anthropic/claude-haiku-4-5:medium
+/librarian-config thinking medium
+/librarian-config clear model
+```
+
+The commands work in interactive mode, RPC mode, and print/JSON mode. They write global preferences to `~/.pi/agent/extensions/librarian.json`, so separate non-UI invocations use the same settings. In non-UI modes, command feedback is written to stderr so stdout remains usable for normal output or JSON events.
 
 ## Cache location
 

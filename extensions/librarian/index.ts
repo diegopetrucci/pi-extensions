@@ -30,8 +30,11 @@ const CACHE_CONFIG_FILE = "librarian.json";
 type LibrarianStatus = "running" | "done" | "error" | "aborted";
 
 type CacheMode = "disabled" | "enabled";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 const DEFAULT_CACHE_MODE: CacheMode = "disabled";
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 type ToolCall = {
 	id: string;
@@ -51,10 +54,20 @@ type CacheDetails = {
 	decisionReason: string;
 };
 
+type LibrarianModelDetails = {
+	modelRef: string;
+	modelId: string;
+	provider: string;
+	thinkingLevel: ThinkingLevel;
+	autoSelected: boolean;
+	selectionReason: string;
+};
+
 type LibrarianDetails = {
 	status: LibrarianStatus;
 	workspace: string;
 	cache: CacheDetails;
+	model: LibrarianModelDetails;
 	turns: number;
 	toolCalls: ToolCall[];
 	startedAt: number;
@@ -89,6 +102,16 @@ const LibrarianParams = Type.Object({
 			minimum: 1,
 			maximum: MAX_SEARCH_RESULTS,
 			default: DEFAULT_MAX_SEARCH_RESULTS,
+		}),
+	),
+	model: Type.Optional(
+		Type.String({
+			description: "Optional model override for the internal librarian subagent. Use provider/model, auto, or current.",
+		}),
+	),
+	thinkingLevel: Type.Optional(
+		Type.String({
+			description: `Optional thinking override for the internal librarian subagent (${THINKING_LEVELS.join(" | ")}). Default ${DEFAULT_THINKING_LEVEL}.`,
 		}),
 	),
 });
@@ -259,6 +282,12 @@ function getCacheConfigPath(): string {
 	return path.join(getAgentDir(), "extensions", CACHE_CONFIG_FILE);
 }
 
+type LibrarianPreferences = {
+	cacheMode: CacheMode;
+	model?: string;
+	thinkingLevel: ThinkingLevel;
+};
+
 function parseCacheMode(value: unknown): CacheMode | undefined {
 	if (typeof value === "string") {
 		const normalized = value.trim().toLowerCase();
@@ -270,36 +299,79 @@ function parseCacheMode(value: unknown): CacheMode | undefined {
 	return undefined;
 }
 
-async function readCachePreference(): Promise<CacheMode> {
+function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim().toLowerCase();
+	return (THINKING_LEVELS as readonly string[]).includes(normalized) ? (normalized as ThinkingLevel) : undefined;
+}
+
+function normalizeModelPreference(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.toLowerCase() === "auto") return undefined;
+	return trimmed;
+}
+
+function parseModelPreference(value: unknown): { model?: string; thinkingLevel?: ThinkingLevel } {
+	const model = normalizeModelPreference(value);
+	if (!model) return {};
+	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh)$/i);
+	if (!match?.[1]) return { model };
+	return { model: match[1], thinkingLevel: parseThinkingLevel(match[2]) };
+}
+
+async function readLibrarianPreferences(): Promise<LibrarianPreferences> {
 	try {
 		const raw = await fs.readFile(getCacheConfigPath(), "utf8");
 		const parsed = JSON.parse(raw) as {
 			cacheMode?: unknown;
 			cacheEnabled?: unknown;
 			cache?: { mode?: unknown; enabled?: unknown };
+			model?: unknown;
+			defaultModel?: unknown;
+			thinkingLevel?: unknown;
+			defaultThinkingLevel?: unknown;
 		};
-		return (
-			parseCacheMode(parsed.cacheMode) ??
-			parseCacheMode(parsed.cache?.mode) ??
-			parseCacheMode(parsed.cacheEnabled) ??
-			parseCacheMode(parsed.cache?.enabled) ??
-			DEFAULT_CACHE_MODE
-		);
+		return {
+			cacheMode:
+				parseCacheMode(parsed.cacheMode) ??
+				parseCacheMode(parsed.cache?.mode) ??
+				parseCacheMode(parsed.cacheEnabled) ??
+				parseCacheMode(parsed.cache?.enabled) ??
+				DEFAULT_CACHE_MODE,
+			model: parseModelPreference(parsed.model).model ?? parseModelPreference(parsed.defaultModel).model,
+			thinkingLevel:
+				parseThinkingLevel(parsed.thinkingLevel) ??
+				parseThinkingLevel(parsed.defaultThinkingLevel) ??
+				parseModelPreference(parsed.model).thinkingLevel ??
+				parseModelPreference(parsed.defaultModel).thinkingLevel ??
+				DEFAULT_THINKING_LEVEL,
+		};
 	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "ENOENT" ? DEFAULT_CACHE_MODE : "disabled";
+		return {
+			cacheMode: (error as NodeJS.ErrnoException).code === "ENOENT" ? DEFAULT_CACHE_MODE : "disabled",
+			thinkingLevel: DEFAULT_THINKING_LEVEL,
+		};
 	}
 }
 
-async function writeCachePreference(preference: CacheMode): Promise<void> {
+async function writeLibrarianPreferences(preferences: LibrarianPreferences): Promise<void> {
 	const configPath = getCacheConfigPath();
 	const config = {
-		cacheMode: preference,
-		cacheEnabled: preference === "enabled",
+		cacheMode: preferences.cacheMode,
+		cacheEnabled: preferences.cacheMode === "enabled",
+		...(preferences.model ? { model: preferences.model } : {}),
+		thinkingLevel: preferences.thinkingLevel,
 		updatedAt: new Date().toISOString(),
 	};
 
 	await fs.mkdir(path.dirname(configPath), { recursive: true });
 	await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+async function writeCachePreference(preference: CacheMode): Promise<void> {
+	const preferences = await readLibrarianPreferences();
+	await writeLibrarianPreferences({ ...preferences, cacheMode: preference });
 }
 
 function resolveCacheDecision(preference: CacheMode): { enabled: boolean; reason: string } {
@@ -314,6 +386,10 @@ function formatCachePreference(preference: CacheMode): string {
 	return preference === "enabled" ? "on" : "off";
 }
 
+function formatLibrarianPreferences(preferences: LibrarianPreferences): string {
+	return `Librarian defaults: cache=${formatCachePreference(preferences.cacheMode)}, model=${preferences.model ?? "auto"}, thinkingLevel=${preferences.thinkingLevel}. Config: ${getCacheConfigPath()}`;
+}
+
 function notifyCommand(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error" = "info"): void {
 	if (ctx.hasUI) {
 		ctx.ui.notify(message, type);
@@ -321,6 +397,115 @@ function notifyCommand(ctx: ExtensionContext, message: string, type: "info" | "w
 	}
 
 	console.error(message);
+}
+
+function modelRef(model: any): string {
+	return `${model.provider}/${model.id}`;
+}
+
+function modelCostScore(model: any): number {
+	const cost = model.cost ?? {};
+	const input = typeof cost.input === "number" ? cost.input : 0;
+	const output = typeof cost.output === "number" ? cost.output : 0;
+	return input + output;
+}
+
+function rankLibrarianModel(model: any): number {
+	const text = `${model.id ?? ""} ${model.name ?? ""}`.toLowerCase();
+	let score = modelCostScore(model) * 1_000_000;
+	if (model.reasoning) score += 50;
+	if (/\b(?:mini|nano|haiku|flash|lite|small|fast|instant)\b/.test(text)) score -= 10;
+	if (/\b(?:opus|pro|ultra|max)\b/.test(text)) score += 1_000;
+	if ((model.contextWindow ?? 0) < 32_000) score += 100;
+	return score;
+}
+
+async function findAvailableModel(
+	ctx: { model?: any; modelRegistry: { getAvailable(): any[] | Promise<any[]> } },
+	modelPreference: string,
+): Promise<any | undefined> {
+	const available = await ctx.modelRegistry.getAvailable();
+	const trimmed = modelPreference.trim();
+	const provider = trimmed.includes("/") ? trimmed.split("/")[0].toLowerCase() : ctx.model?.provider?.toLowerCase();
+	const id = trimmed.includes("/") ? trimmed.split("/").slice(1).join("/").toLowerCase() : trimmed.toLowerCase();
+
+	const exact = available.find(
+		(model) => model.id.toLowerCase() === id && (!provider || model.provider.toLowerCase() === provider),
+	);
+	if (exact) return exact;
+
+	const partial = available.find(
+		(model) => model.id.toLowerCase().includes(id) && (!provider || model.provider.toLowerCase() === provider),
+	);
+	if (partial) return partial;
+
+	if (!provider) {
+		const uniqueById = available.filter((model) => model.id.toLowerCase() === id);
+		if (uniqueById.length === 1) return uniqueById[0];
+	}
+
+	return undefined;
+}
+
+async function selectLibrarianModel(
+	ctx: { model?: any; modelRegistry: { getAvailable(): any[] | Promise<any[]> } },
+	modelPreference: string | undefined,
+	thinkingLevel: ThinkingLevel,
+): Promise<{ model: any; details: LibrarianModelDetails }> {
+	const normalized = modelPreference?.trim();
+	if (normalized?.toLowerCase() === "current") {
+		if (!ctx.model) throw new Error("Librarian model=current needs an active pi model, but ctx.model is unavailable.");
+		return {
+			model: ctx.model,
+			details: {
+				modelRef: modelRef(ctx.model),
+				provider: ctx.model.provider,
+				modelId: ctx.model.id,
+				thinkingLevel,
+				autoSelected: false,
+				selectionReason: "Using the caller's current model because librarian model=current is configured.",
+			},
+		};
+	}
+
+	if (normalized) {
+		const matched = await findAvailableModel(ctx, normalized);
+		if (matched) {
+			return {
+				model: matched,
+				details: {
+					modelRef: modelRef(matched),
+					provider: matched.provider,
+					modelId: matched.id,
+					thinkingLevel,
+					autoSelected: false,
+					selectionReason: "Using the configured librarian model.",
+				},
+			};
+		}
+	}
+
+	const available = await ctx.modelRegistry.getAvailable();
+	const currentProvider = ctx.model?.provider;
+	const sameProvider = currentProvider ? available.filter((model) => model.provider === currentProvider) : [];
+	const candidates = sameProvider.length > 0 ? sameProvider : available;
+	const winner = [...candidates].sort((a, b) => rankLibrarianModel(a) - rankLibrarianModel(b))[0] ?? ctx.model;
+	if (!winner) {
+		throw new Error("No authenticated models are available for Librarian. Log in or configure an API key first.");
+	}
+
+	const fallbackText = normalized ? ` Configured model ${normalized} was unavailable, so Librarian fell back to auto-selection.` : "";
+	return {
+		model: winner,
+		details: {
+			modelRef: modelRef(winner),
+			provider: winner.provider,
+			modelId: winner.id,
+			thinkingLevel,
+			autoSelected: true,
+			selectionReason: `Selected the cheapest available model${sameProvider.length > 0 ? " on the current provider" : ""}.${fallbackText}`,
+		},
+	};
 }
 
 function resolveToolPath(cwd: string, rawPath: string): string {
@@ -489,9 +674,115 @@ function isAbortLikeError(error: unknown): boolean {
 
 export default function librarianExtension(pi: ExtensionAPI) {
 	let cachePreference: CacheMode = DEFAULT_CACHE_MODE;
+	let modelPreference: string | undefined;
+	let thinkingPreference: ThinkingLevel = DEFAULT_THINKING_LEVEL;
 
 	pi.on("session_start", async () => {
-		cachePreference = await readCachePreference();
+		const preferences = await readLibrarianPreferences();
+		cachePreference = preferences.cacheMode;
+		modelPreference = preferences.model;
+		thinkingPreference = preferences.thinkingLevel;
+	});
+
+	const currentPreferences = (): LibrarianPreferences => ({
+		cacheMode: cachePreference,
+		...(modelPreference ? { model: modelPreference } : {}),
+		thinkingLevel: thinkingPreference,
+	});
+
+	const savePreferences = async (preferences: LibrarianPreferences): Promise<string | undefined> => {
+		cachePreference = preferences.cacheMode;
+		modelPreference = preferences.model;
+		thinkingPreference = preferences.thinkingLevel;
+		try {
+			await writeLibrarianPreferences(preferences);
+			return undefined;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return `Preference changed for this process, but could not save ${getCacheConfigPath()}: ${message}`;
+		}
+	};
+
+	pi.registerCommand("librarian-config", {
+		description: "Configure Librarian subagent model and thinking defaults",
+		getArgumentCompletions: (prefix) => {
+			const parts = prefix.trim().split(/\s+/).filter(Boolean);
+			if (parts.length <= 1) {
+				const commands = ["status", "model", "thinking", "clear"];
+				const query = parts[0]?.toLowerCase() ?? "";
+				return commands.filter((command) => command.startsWith(query)).map((value) => ({ value, label: value }));
+			}
+			if (parts[0]?.toLowerCase() === "thinking") {
+				const query = parts[1]?.toLowerCase() ?? "";
+				return [...THINKING_LEVELS, "auto"].filter((level) => level.startsWith(query)).map((value) => ({ value, label: value }));
+			}
+			return null;
+		},
+		handler: async (args, ctx) => {
+			const tokens = args.trim().split(/\s+/).filter(Boolean);
+			const [command = "status", ...rest] = tokens;
+			const action = command.toLowerCase();
+
+			if (action === "status" || action === "show") {
+				notifyCommand(ctx, formatLibrarianPreferences(currentPreferences()));
+				return;
+			}
+
+			if (action === "model") {
+				const value = rest.join(" ").trim();
+				if (!value) {
+					notifyCommand(ctx, "Usage: /librarian-config model <provider/model|auto|current>", "warning");
+					return;
+				}
+				const normalized = value.toLowerCase();
+				const parsedModel = parseModelPreference(value);
+				const next = normalized === "auto" || normalized === "clear" || normalized === "default"
+					? { ...currentPreferences(), model: undefined }
+					: {
+						...currentPreferences(),
+						model: normalized === "current" ? "current" : parsedModel.model,
+						thinkingLevel: parsedModel.thinkingLevel ?? thinkingPreference,
+					};
+				const warning = await savePreferences(next);
+				notifyCommand(ctx, `Librarian model default updated. ${warning ?? formatLibrarianPreferences(currentPreferences())}`, warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "thinking" || action === "think" || action === "thinking-level") {
+				const value = rest[0]?.trim().toLowerCase();
+				if (!value) {
+					notifyCommand(ctx, `Usage: /librarian-config thinking ${THINKING_LEVELS.join(" | ")} | auto`, "warning");
+					return;
+				}
+				const thinkingLevel = value === "auto" || value === "clear" || value === "default"
+					? DEFAULT_THINKING_LEVEL
+					: parseThinkingLevel(value);
+				if (!thinkingLevel) {
+					notifyCommand(ctx, `Usage: /librarian-config thinking ${THINKING_LEVELS.join(" | ")} | auto`, "warning");
+					return;
+				}
+				const warning = await savePreferences({ ...currentPreferences(), thinkingLevel });
+				notifyCommand(ctx, `Librarian thinking default set to ${thinkingLevel}. ${warning ?? formatLibrarianPreferences(currentPreferences())}`, warning ? "warning" : "info");
+				return;
+			}
+
+			if (action === "clear" || action === "reset") {
+				const target = rest[0]?.trim().toLowerCase() || "all";
+				let next: LibrarianPreferences;
+				if (target === "all") next = { cacheMode: cachePreference, thinkingLevel: DEFAULT_THINKING_LEVEL };
+				else if (target === "model") next = { ...currentPreferences(), model: undefined };
+				else if (target === "thinking" || target === "thinking-level") next = { ...currentPreferences(), thinkingLevel: DEFAULT_THINKING_LEVEL };
+				else {
+					notifyCommand(ctx, "Usage: /librarian-config clear [all|model|thinking]", "warning");
+					return;
+				}
+				const warning = await savePreferences(next);
+				notifyCommand(ctx, `Librarian defaults cleared (${target}). ${warning ?? formatLibrarianPreferences(currentPreferences())}`, warning ? "warning" : "info");
+				return;
+			}
+
+			notifyCommand(ctx, "Usage: /librarian-config status | model <provider/model|auto|current> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
+		},
 	});
 
 	pi.registerCommand("librarian-cache", {
@@ -560,12 +851,13 @@ export default function librarianExtension(pi: ExtensionAPI) {
 		name: "librarian",
 		label: "Librarian",
 		description:
-			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache that is disabled by default; toggle it with /librarian-cache.",
+			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache that is disabled by default; toggle it with /librarian-cache. Configure its internal subagent defaults with /librarian-config.",
 		promptSnippet:
-			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is disabled by default and user-toggleable with /librarian-cache.",
+			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is disabled by default and user-toggleable with /librarian-cache. Internal subagent defaults are user-configurable with /librarian-config and default to medium thinking.",
 		promptGuidelines: [
 			"Use librarian when the answer likely requires exploratory GitHub repository search or line-cited evidence from external repos.",
 			"Do not use librarian for files already present in the current workspace unless the user asks for external GitHub research.",
+			"Use model or thinkingLevel only when the user explicitly asks for a non-default internal librarian model or thinking level.",
 		],
 		parameters: LibrarianParams,
 
@@ -573,7 +865,6 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			const rawQuery = (params as { query?: unknown }).query;
 			const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
 			if (!query) throw new Error("Invalid parameters: expected query to be a non-empty string.");
-			if (!ctx.model) throw new Error("Librarian needs an active pi model, but ctx.model is unavailable.");
 
 			const repos = asStringArray((params as { repos?: unknown }).repos);
 			const owners = asStringArray((params as { owners?: unknown }).owners);
@@ -583,6 +874,12 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				MAX_SEARCH_RESULTS,
 				DEFAULT_MAX_SEARCH_RESULTS,
 			);
+			const explicitModel = parseModelPreference((params as { model?: unknown }).model);
+			const thinkingLevel =
+				parseThinkingLevel((params as { thinkingLevel?: unknown }).thinkingLevel) ??
+				explicitModel.thinkingLevel ??
+				thinkingPreference;
+			const selectedModel = await selectLibrarianModel(ctx, explicitModel.model ?? modelPreference, thinkingLevel);
 
 			const workspaceBase = path.join(os.tmpdir(), "pi-librarian");
 			await fs.mkdir(workspaceBase, { recursive: true });
@@ -617,6 +914,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					cleanupErrors: cleanup.errors,
 					decisionReason: cacheDecision.reason,
 				},
+				model: selectedModel.details,
 				turns: 0,
 				toolCalls: [],
 				startedAt: Date.now(),
@@ -687,8 +985,8 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					modelRegistry: ctx.modelRegistry,
 					resourceLoader,
 					sessionManager: SessionManager.inMemory(workspace),
-					model: ctx.model,
-					thinkingLevel: pi.getThinkingLevel(),
+					model: selectedModel.model,
+					thinkingLevel,
 					tools: ["read", "bash"],
 				});
 
@@ -807,6 +1105,10 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			)}${cacheLabel}`;
 
 			const workspaceLine = `${theme.fg("muted", "workspace: ")}${theme.fg("toolOutput", details.workspace)}`;
+			const modelLine = `${theme.fg("muted", "model: ")}${theme.fg("toolOutput", details.model.modelRef)} ${theme.fg(
+				"dim",
+				`(${details.model.thinkingLevel}, ${details.model.autoSelected ? "auto" : "configured"})`,
+			)}`;
 			const cacheLine = `${theme.fg("muted", "cache: ")}${theme.fg("toolOutput", details.cache.root)} ${theme.fg(
 				"dim",
 				`(${details.cache.mode}, ${details.cache.ttlDays}d TTL, cleaned ${details.cache.cleanupDeleted})`,
@@ -822,7 +1124,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			if (!expanded && details.toolCalls.length > 6) toolLines.unshift(theme.fg("muted", "…"));
 
 			if (status === "running") {
-				const parts = [header, workspaceLine, cacheLine];
+				const parts = [header, workspaceLine, modelLine, cacheLine];
 				if (toolLines.length) parts.push("", theme.fg("muted", "Tools:"), ...toolLines);
 				parts.push("", theme.fg("muted", "Searching GitHub…"));
 				return new Text(parts.join("\n"), 0, 0);
@@ -830,7 +1132,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 
 			if (!expanded) {
 				const previewLines = answer.split("\n").slice(0, 18);
-				const parts = [header, workspaceLine, cacheLine, "", theme.fg("toolOutput", previewLines.join("\n"))];
+				const parts = [header, workspaceLine, modelLine, cacheLine, "", theme.fg("toolOutput", previewLines.join("\n"))];
 				if (answer.split("\n").length > previewLines.length) parts.push(theme.fg("muted", "(Ctrl+O to expand)"));
 				if (toolLines.length) parts.push("", theme.fg("muted", "Tools:"), ...toolLines);
 				return new Text(parts.join("\n"), 0, 0);
@@ -839,6 +1141,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			const container = new Container();
 			container.addChild(new Text(header, 0, 0));
 			container.addChild(new Text(workspaceLine, 0, 0));
+			container.addChild(new Text(modelLine, 0, 0));
 			container.addChild(new Text(cacheLine, 0, 0));
 			if (details.cache.cleanupErrors.length) {
 				container.addChild(
