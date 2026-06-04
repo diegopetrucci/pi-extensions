@@ -88,13 +88,13 @@ git push origin v0.1.42
 
 > Human-only: stop here before running any `npm publish` command. Ask the authenticated npm publisher to run the publish commands manually. After the user confirms publishing is complete, wait 5 minutes before npm registry/package-page or npm-install validation, because npm propagation can lag.
 
-- [ ] human publishes root package
+- [x] human publishes root package
 
 ```bash
 npm publish
 ```
 
-- [ ] human publishes standalone `librarian` package
+- [x] human publishes standalone `librarian` package
 
 ```bash
 npm publish --workspace @diegopetrucci/pi-librarian
@@ -102,14 +102,14 @@ npm publish --workspace @diegopetrucci/pi-librarian
 
 ## Post-publish validation
 
-- [ ] wait 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verify npm package pages show expected versions for the root and `librarian` packages
-- [ ] test install from npm
+- [x] wait 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verify npm package pages show expected versions for the root and `librarian` packages
+- [x] test install from npm
 
 ```bash
 pi install npm:@diegopetrucci/pi-extensions
 pi install npm:@diegopetrucci/pi-librarian
 ```
 
-- [ ] reload pi and confirm `librarian` loads when installed standalone
+- [x] reload pi and confirm `librarian` loads when installed standalone
 - [ ] publish announcement copy from `docs/announcement-v0.1.42.md`
