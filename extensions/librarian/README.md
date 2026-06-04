@@ -1,6 +1,6 @@
 # librarian
 
-A pi GitHub research scout inspired by `pi-librarian`, with a local checkout cache enabled by default.
+A pi GitHub research scout inspired by `pi-librarian`, with a local checkout cache disabled by default.
 
 When the `librarian` tool runs, it can cache/reuse repository checkouts locally. Use `/librarian-cache off` to force GitHub API/search and temporary fetched files only, or `/librarian-cache on` to re-enable cached local checkouts.
 
@@ -35,7 +35,7 @@ Then reload pi:
 - Tool name: `librarian`
 - Uses a restricted subagent with `bash` and `read`
 - Uses `gh` for GitHub search/API access
-- Uses cached local checkouts by default
+- Uses cached local checkouts only when enabled
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`
 - Cached repos are removed lazily after 7 days without use
 

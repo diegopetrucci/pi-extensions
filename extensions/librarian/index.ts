@@ -31,7 +31,7 @@ type LibrarianStatus = "running" | "done" | "error" | "aborted";
 
 type CacheMode = "disabled" | "enabled";
 
-const DEFAULT_CACHE_MODE: CacheMode = "enabled";
+const DEFAULT_CACHE_MODE: CacheMode = "disabled";
 
 type ToolCall = {
 	id: string;
@@ -560,9 +560,9 @@ export default function librarianExtension(pi: ExtensionAPI) {
 		name: "librarian",
 		label: "Librarian",
 		description:
-			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache by default; toggle it with /librarian-cache.",
+			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache that is disabled by default; toggle it with /librarian-cache.",
 		promptSnippet:
-			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is enabled by default and user-toggleable with /librarian-cache.",
+			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is disabled by default and user-toggleable with /librarian-cache.",
 		promptGuidelines: [
 			"Use librarian when the answer likely requires exploratory GitHub repository search or line-cited evidence from external repos.",
 			"Do not use librarian for files already present in the current workspace unless the user asks for external GitHub research.",
