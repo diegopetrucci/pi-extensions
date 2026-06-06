@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-[#0d1117]">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>annotate-git-diff</title>
+<script>
+__INLINE_TAILWIND_JS__
+</script>
+<style>
+  :root {
+              --color-review-bg: #0d1117;
+              --color-review-inset: #010409;
+              --color-review-panel: #151b23;
+              --color-review-panel-hover: #1f242c;
+              --color-review-border: #3d444d;
+              --color-review-border-muted: #2f353d;
+              --color-review-text: #f0f6fc;
+              --color-review-muted: #9198a1;
+              --color-review-subtle: #6e7681;
+              --color-review-accent: #4493f8;
+              --color-review-accent-emphasis: #1f6feb;
+              --color-review-success: #3fb950;
+              --color-review-success-emphasis: #238636;
+              --color-review-danger: #f85149;
+              --color-review-attention: #d29922;
+            }
+
+            .bg-review-bg { background-color: var(--color-review-bg); }
+            .bg-review-panel { background-color: var(--color-review-panel); }
+            .border-review-border { border-color: var(--color-review-border); }
+            .text-review-text { color: var(--color-review-text); }
+            .text-review-muted { color: var(--color-review-muted); }
+            .placeholder\:text-review-muted::placeholder { color: var(--color-review-muted); }
+            .focus\:border-review-accent:focus { border-color: var(--color-review-accent); }
+            .focus\:ring-review-accent:focus { --tw-ring-color: var(--color-review-accent); }
+</style>
+<style>
+  html, body {
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+              }
+
+              .scrollbar-thin::-webkit-scrollbar {
+                width: 10px;
+                height: 10px;
+              }
+
+              .scrollbar-thin::-webkit-scrollbar-thumb {
+                background: #3d444d;
+                border-radius: 999px;
+                border: 3px solid #151b23;
+              }
+
+              .scrollbar-thin::-webkit-scrollbar-track {
+                background: transparent;
+              }
+
+              .review-popover {
+                position: absolute;
+                width: min(420px, 92vw);
+                background: #151b23;
+                border: 1px solid #3d444d;
+                border-radius: 10px;
+                box-shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+                padding: 12px;
+                z-index: 100;
+                animation: reviewPopIn 120ms ease-out;
+              }
+
+              @keyframes reviewPopIn {
+                from { opacity: 0; transform: translateY(-4px); }
+                to   { opacity: 1; transform: none; }
+              }
+
+              .review-popover::before {
+                content: "";
+                position: absolute;
+                top: -6px;
+                width: 10px;
+                height: 10px;
+                background: #151b23;
+                border-top: 1px solid #3d444d;
+                border-left: 1px solid #3d444d;
+                transform: rotate(45deg);
+              }
+
+              .review-popover[data-arrow="right"]::before { right: 18px; }
+              .review-popover[data-arrow="left"]::before  { left: 18px; }
+
+              .review-popover textarea {
+                min-height: 120px;
+                max-height: 40vh;
+              }
+
+              /* Icon button — compact square toggle matching the GitHub Dark palette. */
+              .icon-button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 28px;
+                height: 28px;
+                padding: 0;
+                border-radius: 6px;
+                border: 1px solid #3d444d;
+                background: #151b23;
+                color: #9198a1;
+                cursor: pointer;
+                transition: background-color 120ms, color 120ms, border-color 120ms;
+                flex-shrink: 0;
+              }
+
+              .icon-button:hover:not([disabled]) {
+                background: #1f242c;
+                color: #f0f6fc;
+              }
+
+              .icon-button[data-active="true"] {
+                background: rgba(35, 134, 54, 0.15);
+                border-color: rgba(63, 185, 80, 0.45);
+                color: #3fb950;
+              }
+
+              .icon-button[data-active="true"]:hover:not([disabled]) {
+                background: rgba(35, 134, 54, 0.25);
+                color: #3fb950;
+              }
+
+              .icon-button[disabled] {
+                opacity: 0.4;
+                cursor: default;
+              }
+
+              .icon-button svg {
+                width: 14px;
+                height: 14px;
+              }
+
+              /* Added-only files in inline diff mode: suppress the original gutter/line-number column
+                 that Monaco still paints alongside the modified line numbers.
+                 Keep the original editor's layout width intact: Monaco uses that width for word-wrap
+                 height calculation, and collapsing it to 0px makes wrapped added files render huge
+                 folded/diagonal gaps. */
+              #editor-container[data-added-only="true"] .monaco-diff-editor .editor.original,
+              #editor-container[data-added-only="true"] .monaco-diff-editor .original-in-monaco {
+                visibility: hidden;
+              }
+              #editor-container[data-added-only="true"] .monaco-editor .line-numbers.original,
+              #editor-container[data-added-only="true"] .monaco-editor .margin-view-overlays .line-numbers[data-lineNumberType="original"] {
+                display: none;
+              }
+
+              /* === GitHub-style sidebar === */
+              .gh-tree-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                width: 100%;
+                padding: 3px 8px 3px 8px;
+                text-align: left;
+                font-size: 13px;
+                color: #c9d1d9;
+                border-radius: 6px;
+                cursor: pointer;
+                line-height: 1.4;
+              }
+              .gh-tree-row:hover { background: #1f242c; color: #f0f6fc; }
+              .gh-tree-row[data-selected="true"] { background: rgba(56,139,253,0.15); color: #f0f6fc; }
+              .gh-tree-row .gh-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+              .gh-tree-row .gh-row-trail { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+              .gh-tree-row svg { flex-shrink: 0; }
+              .gh-dir-icon { color: #79c0ff; }
+              .gh-file-icon { color: #9198a1; }
+
+              /* GitHub-style status square (A / M / D / R). */
+              .gh-status {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                font-size: 9px;
+                font-weight: 700;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                line-height: 1;
+                flex-shrink: 0;
+              }
+              .gh-status-added    { background: rgba(46,160,67,0.35);  color: #3fb950; }
+              .gh-status-modified { background: rgba(210,153,34,0.30); color: #d29922; }
+              .gh-status-deleted  { background: rgba(248,81,73,0.30);  color: #f85149; }
+              .gh-status-renamed  { background: rgba(56,139,253,0.30); color: #58a6ff; }
+
+              .gh-comment-count {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 18px;
+                height: 16px;
+                padding: 0 4px;
+                border-radius: 9999px;
+                background: #1f242c;
+                color: #f0f6fc;
+                font-size: 10px;
+                font-weight: 600;
+                border: 1px solid #3d444d;
+              }
+
+              /* === GitHub-style file header (main pane) === */
+              .gh-file-header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
+              }
+              .gh-file-path {
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 13px;
+                font-weight: 600;
+                color: #f0f6fc;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }
+              .gh-file-path .gh-file-path-dir { color: #9198a1; font-weight: 400; }
+
+              .gh-diff-stats {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 11px;
+                color: #9198a1;
+              }
+              .gh-diff-stats-plus  { color: #3fb950; }
+              .gh-diff-stats-minus { color: #f85149; }
+
+              /* === GitHub-style Viewed checkbox (replaces the Reviewed icon toggle) === */
+              .gh-viewed {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 10px;
+                border-radius: 6px;
+                border: 1px solid #3d444d;
+                background: #151b23;
+                color: #c9d1d9;
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                user-select: none;
+                transition: background-color 120ms, color 120ms, border-color 120ms;
+              }
+              .gh-viewed:hover:not([disabled]) { background: #1f242c; color: #f0f6fc; }
+              .gh-viewed[data-active="true"] {
+                background: rgba(35,134,54,0.15);
+                border-color: rgba(63,185,80,0.45);
+                color: #3fb950;
+              }
+              .gh-viewed .gh-viewed-box {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                border: 1px solid #6e7681;
+                background: transparent;
+              }
+              .gh-viewed[data-active="true"] .gh-viewed-box {
+                border-color: #3fb950;
+                background: #238636;
+              }
+              .gh-viewed .gh-viewed-box svg { width: 10px; height: 10px; opacity: 0; color: #fff; }
+              .gh-viewed[data-active="true"] .gh-viewed-box svg { opacity: 1; }
+
+              /* === Primary CTA (submit review) === */
+              .gh-primary-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 6px 12px;
+                border-radius: 6px;
+                border: 1px solid rgba(240,246,252,0.1);
+                background: #238636;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background-color 120ms;
+              }
+              .gh-primary-btn:hover:not([disabled]) { background: #2ea043; }
+              .gh-primary-btn[disabled] { opacity: 0.5; cursor: default; }
+
+              /* === Commit picker rows === */
+              .commit-row {
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+                width: 100%;
+                padding: 6px 8px;
+                text-align: left;
+                border-radius: 6px;
+                cursor: pointer;
+                color: #c9d1d9;
+              }
+              .commit-row:hover { background: #1f242c; }
+              .commit-row[data-selected="true"] {
+                background: rgba(56,139,253,0.15);
+                color: #f0f6fc;
+              }
+              .commit-row-sha {
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 10.5px;
+                color: #79c0ff;
+                padding-top: 2px;
+                flex-shrink: 0;
+              }
+              .commit-row-body { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+              .commit-row-subject {
+                font-size: 12.5px;
+                font-weight: 500;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }
+              .commit-row-meta {
+                font-size: 10.5px;
+                color: #9198a1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }
+              .commit-row-status {
+                font-size: 10px;
+                color: #9198a1;
+                padding-top: 2px;
+                flex-shrink: 0;
+              }
+
+              /* === GitHub-style Monaco diff backgrounds === */
+              .monaco-editor .line-insert,
+              .monaco-editor .char-insert {
+                background: rgba(46,160,67,0.18);
+              }
+              .monaco-editor .line-delete,
+              .monaco-editor .char-delete {
+                background: rgba(248,81,73,0.18);
+              }
+
+              #editor-container {
+                height: 100%;
+                min-height: 0;
+                overflow: hidden;
+                position: relative; /* anchor for overlays */
+              }
+
+              #diff-editor-host,
+              #single-editor-host {
+                position: absolute;
+                inset: 0;
+                z-index: 1;
+                height: 100%;
+              }
+
+              #single-editor-host {
+                display: none;
+              }
+
+              #editor-container[data-text-editor-mode="single"] #diff-editor-host {
+                display: none;
+              }
+
+              #editor-container[data-text-editor-mode="single"] #single-editor-host {
+                display: block;
+              }
+
+              #diff-editor-host .monaco-diff-editor,
+              #diff-editor-host .monaco-editor,
+              #single-editor-host .monaco-editor {
+                height: 100%;
+              }
+
+              #editor-container[data-preview-active="true"] #diff-editor-host,
+              #editor-container[data-preview-active="true"] #single-editor-host {
+                opacity: 0;
+                pointer-events: none;
+              }
+
+              #binary-preview {
+                position: absolute;
+                inset: 0;
+                z-index: 4;
+                display: none;
+                overflow: auto;
+                background: #0d1117;
+                padding: 20px;
+              }
+
+              #binary-preview[data-active="true"] {
+                display: block;
+              }
+
+              .binary-preview-grid {
+                display: grid;
+                gap: 16px;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+              }
+
+              .binary-preview-card {
+                border: 1px solid #3d444d;
+                border-radius: 10px;
+                background: #151b23;
+                overflow: hidden;
+              }
+
+              .binary-preview-card-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 10px 12px;
+                border-bottom: 1px solid #3d444d;
+                font-size: 12px;
+                color: #9198a1;
+              }
+
+              .binary-preview-card-body {
+                padding: 12px;
+              }
+
+              .binary-preview-image {
+                display: block;
+                width: 100%;
+                height: auto;
+                border-radius: 8px;
+                background: #010409;
+              }
+
+              .binary-preview-empty {
+                min-height: 180px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px dashed #3d444d;
+                border-radius: 8px;
+                color: #9198a1;
+                background: #0d1117;
+                text-align: center;
+                padding: 16px;
+                font-size: 13px;
+              }
+
+              .binary-preview-note {
+                margin-top: 16px;
+                padding: 12px 14px;
+                border: 1px solid #3d444d;
+                border-radius: 10px;
+                background: #151b23;
+                color: #9198a1;
+                font-size: 13px;
+                line-height: 1.5;
+              }
+
+              .gh-kind-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 32px;
+                padding: 1px 6px;
+                border-radius: 999px;
+                border: 1px solid #3d444d;
+                background: #0d1117;
+                color: #9198a1;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+              }
+
+              /* Opaque cover painted on top of the diff editor during remount. Monaco keeps
+                 rendering/computing underneath at full speed — unlike opacity:0 on the
+                 container, Monaco is NOT affected by this overlay and reliably settles
+                 hideUnchangedRegions before we unveil. Removing the cover is a single
+                 discrete paint, so no sub-frame shift is observable. */
+
+              #editor-cover {
+                position: absolute;
+                inset: 0;
+                background: #0d1117;
+                z-index: 5;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 80ms linear;
+              }
+
+              #editor-cover[data-active="true"] {
+                opacity: 1;
+                transition: none;
+              }
+
+              #editor-container[data-asset-failure="true"] #diff-editor-host,
+              #editor-container[data-asset-failure="true"] #single-editor-host,
+              #editor-container[data-asset-failure="true"] #binary-preview,
+              #editor-container[data-asset-failure="true"] #editor-cover {
+                display: none !important;
+              }
+
+              #asset-failure-panel {
+                position: absolute;
+                inset: 20px;
+                z-index: 7;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+              }
+
+              #editor-container[data-asset-failure="true"] #asset-failure-panel {
+                display: flex;
+              }
+
+              .asset-failure-card {
+                width: min(680px, 100%);
+                padding: 24px;
+                border: 1px solid #3d444d;
+                border-radius: 12px;
+                background: #151b23;
+                box-shadow: 0 16px 40px rgba(1, 4, 9, 0.45);
+              }
+
+              .asset-failure-eyebrow {
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #d29922;
+              }
+
+              .asset-failure-title {
+                margin: 10px 0 0;
+                font-size: 22px;
+                line-height: 1.2;
+                color: #f0f6fc;
+              }
+
+              .asset-failure-copy {
+                margin: 10px 0 0;
+                color: #c9d1d9;
+                font-size: 14px;
+                line-height: 1.6;
+              }
+
+              .asset-failure-detail {
+                margin: 14px 0 0;
+                padding: 12px 14px;
+                border: 1px solid #2f353d;
+                border-radius: 10px;
+                background: #0d1117;
+                color: #9198a1;
+                font-size: 12px;
+                line-height: 1.5;
+                white-space: pre-wrap;
+                word-break: break-word;
+              }
+
+              .asset-failure-detail[hidden] {
+                display: none;
+              }
+
+              .monaco-editor .view-zones {
+                z-index: 10;
+              }
+
+              .view-zone-container {
+                padding: 8px 16px 10px 16px;
+                border-top: 1px solid #3d444d;
+                border-bottom: 1px solid #3d444d;
+                background: #151b23;
+                overflow: visible;
+              }
+
+              .monaco-editor .review-comment-line-original {
+                background: rgba(210, 153, 34, 0.15);
+              }
+
+              .monaco-editor .review-comment-line-modified {
+                background: rgba(68, 147, 248, 0.15);
+              }
+
+              .monaco-editor .review-comment-glyph-original,
+              .monaco-editor .review-comment-glyph-modified {
+                border-radius: 999px;
+                width: 8px;
+                height: 8px;
+                margin-left: 6px;
+                margin-top: 5px;
+                cursor: pointer;
+              }
+
+              .monaco-editor .review-comment-glyph-original {
+                background: #d29922;
+              }
+
+              .monaco-editor .review-comment-glyph-modified {
+                background: #4493f8;
+              }
+
+              .monaco-editor .review-glyph-plus {
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16'%3E%3Cpath fill='%23f0f6fc' d='M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z'%3E%3C/path%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: center;
+                background-size: 12px;
+                background-color: #238636;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-left: 2px;
+                margin-top: 2px;
+                width: 16px;
+                height: 16px;
+                box-shadow: 0 0 0 1px rgba(240, 246, 252, 0.08);
+              }
+</style>
+</head>
+<body class="h-full overflow-hidden bg-review-bg text-review-text antialiased">
+<div id="root-layout" class="flex h-full w-full flex-col">
+  <div class="flex items-center justify-between gap-4 border-b border-review-border bg-[#010409] px-4 py-3">
+    <div class="min-w-0 flex items-center gap-3">
+      <button type="button" id="toggle-sidebar-button" class="icon-button" title="Toggle sidebar" aria-label="Toggle sidebar">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1.25"/><line x1="6" y1="3" x2="6" y2="13"/></svg>
+      </button>
+      <div class="min-w-0">
+        <div id="window-title" class="text-[15px] font-semibold text-white">Review</div>
+        <div id="repo-root" class="truncate text-[11px] text-review-muted"></div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <div id="summary" class="max-w-[24rem] truncate text-[11px] text-review-muted"></div>
+      <button type="button" id="refresh-review-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#1f242c]" title="Refresh review data" aria-label="Refresh review data" style="display:none;">Refresh</button>
+      <button type="button" id="overall-comment-button" class="icon-button" title="Overall review note" aria-label="Overall review note">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.5l3 3-8 8H2.5V10.5z"/><path d="M9 4l3 3"/></svg>
+      </button>
+      <button type="button" id="cancel-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-3 py-1.5 text-xs font-medium text-review-text hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30">Cancel</button>
+      <button type="button" id="submit-button" class="gh-primary-btn">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>
+        Submit review
+      </button>
+    </div>
+  </div>
+
+  <div id="content-layout" class="flex min-h-0 flex-1">
+    <aside id="sidebar" class="flex min-h-0 shrink-0 flex-col border-r border-review-border bg-[#0d1117]" style="width: 280px; min-width: 280px; flex-basis: 280px; overflow: hidden;">
+    <div class="border-b border-review-border px-4 py-3">
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <div id="sidebar-title" class="text-[11px] font-semibold uppercase tracking-wider text-review-muted">Files</div>
+        <div class="text-[10px] text-review-muted">Fuzzy filter</div>
+      </div>
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <button type="button" id="scope-branch-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#1f242c]">Branch</button>
+        <button type="button" id="scope-commits-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#1f242c]">Commits</button>
+        <button type="button" id="scope-all-button" class="cursor-pointer rounded-md border border-review-border bg-review-panel px-2.5 py-1 text-[11px] font-medium text-review-text hover:bg-[#1f242c]">All</button>
+      </div>
+      <input id="sidebar-search-input" type="text" spellcheck="false" autocomplete="off" placeholder="Search files" class="w-full rounded-md border border-review-border bg-review-panel px-3 py-2 text-sm text-review-text outline-none placeholder:text-review-muted focus:border-review-accent focus:ring-1 focus:ring-review-accent">
+    </div>
+    <div id="commit-picker" class="border-b border-review-border" style="display:none;">
+      <div class="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-review-muted">Commits</div>
+      <div id="commit-list" class="scrollbar-thin max-h-[38vh] overflow-auto px-2 pb-2"></div>
+    </div>
+    <div id="file-tree" class="scrollbar-thin min-h-0 flex-1 overflow-auto px-2 pb-2"></div>
+  </aside>
+
+    <main id="main-pane" class="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0d1117]">
+    <div class="flex items-center justify-between gap-4 border-b border-review-border bg-[#0d1117] px-4 py-2">
+      <div class="gh-file-header min-w-0 flex-1">
+        <button type="button" id="file-collapse-button" class="icon-button" title="Collapse file" aria-label="Collapse file" style="width:22px;height:22px;">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="currentColor"><path d="M12.78 6.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 7.28a.749.749 0 1 1 1.06-1.06L8 9.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg>
+        </button>
+        <span id="file-status-badge" class="gh-status" style="display:none;"></span>
+        <div class="min-w-0 flex-1">
+          <div id="current-file-label" class="gh-file-path"></div>
+          <div id="mode-hint" class="mt-0.5 text-[11px] text-review-muted"></div>
+        </div>
+        <div id="file-diff-stats" class="gh-diff-stats" style="display:none;"></div>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button type="button" id="toggle-wrap-button" class="icon-button" title="Wrap long lines" aria-label="Wrap lines">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12"/><path d="M2 12h3"/><path d="M2 8h9.5a2.5 2.5 0 010 5H8.5"/><path d="M10.5 10.75L8.5 13l2 2.25"/></svg>
+        </button>
+        <button type="button" id="toggle-unchanged-button" class="icon-button" title="Show changed areas only" aria-label="Show changed areas only">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12"/><path d="M2 12h12"/><path d="M5 7l3-3 3 3"/><path d="M5 9l3 3 3-3"/></svg>
+        </button>
+        <button type="button" id="file-comment-button" class="icon-button" title="Add file-level comment" aria-label="Add file comment">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.75 2.5h10.5a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75H7l-3 3v-3H2.75a.75.75 0 01-.75-.75v-7.5a.75.75 0 01.75-.75z"/><path d="M8 6v3.5M6.25 7.75h3.5"/></svg>
+        </button>
+        <button type="button" id="toggle-reviewed-button" class="gh-viewed" title="Mark this file as viewed" aria-label="Mark as viewed">
+          <span class="gh-viewed-box"><svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5l2.5 2.5L12 5.5"/></svg></span>
+          <span>Viewed</span>
+        </button>
+      </div>
+    </div>
+    <div id="file-comments-container" class="hidden border-b border-review-border bg-[#0d1117] px-4 py-0"></div>
+    <div id="editor-container" class="min-h-0 min-w-0 flex-1" data-text-editor-mode="diff" data-asset-failure="false">
+      <div id="diff-editor-host"></div>
+      <div id="single-editor-host"></div>
+      <div id="binary-preview" data-active="false"></div>
+      <div id="editor-cover" aria-hidden="true"></div>
+      <div id="asset-failure-panel" aria-live="polite" aria-hidden="true">
+        <div class="asset-failure-card">
+          <div class="asset-failure-eyebrow">Review UI unavailable</div>
+          <h2 id="asset-failure-title" class="asset-failure-title">The review window could not finish loading.</h2>
+          <p id="asset-failure-message" class="asset-failure-copy">TLH could not initialize its packaged review assets. Close this window and rerun <code>/annotate-git-diff</code>. If the problem persists, reinstall or update TLH.</p>
+          <pre id="asset-failure-detail" class="asset-failure-detail" hidden></pre>
+        </div>
+      </div>
+    </div>
+    </main>
+  </div>
+</div>
+
+<script id="annotate-git-diff-data" type="application/json">"__INLINE_DATA__"</script>
+<script>
+window.__reviewAssetConfig = __INLINE_ASSET_CONFIG__;
+</script>
+<script>
+/**
+ * Keyboard shortcut bridge for WKWebView (glimpseui).
+ * glimpseui loads inline HTML as about:blank/null-origin content. That is not a
+ * secure context, so navigator.clipboard is unavailable and Cmd+C/V/X/A are not
+ * backed by a native Edit menu. We bridge clipboard reads/writes through the
+ * extension host and use DOM/Monaco APIs only to collect or insert text.
+ */
+(() => {
+  const pendingClipboardReads = new Map();
+  let clipboardRequestSeq = 0;
+
+  function isTextControl(el) {
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  }
+
+  function isEditableTextControl(el) {
+    return isTextControl(el) && !el.disabled && !el.readOnly;
+  }
+
+  function isMonacoInput(el) {
+    return !!(el?.classList?.contains("inputarea") && el.closest?.(".monaco-editor"));
+  }
+
+  function getTextControlSelection(el) {
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? start;
+    if (start === end) return "";
+    return el.value.slice(start, end);
+  }
+
+  function replaceTextControlSelection(el, text) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    const cursor = start + text.length;
+    el.selectionStart = el.selectionEnd = cursor;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+
+  function getDomSelectionText() {
+    return window.getSelection?.().toString() ?? "";
+  }
+
+  function getSelectedText() {
+    const active = document.activeElement;
+    if (active && isTextControl(active) && !isMonacoInput(active)) {
+      return getTextControlSelection(active);
+    }
+    const editorText = window.__reviewClipboard?.getSelectedText?.() ?? "";
+    if (editorText) return editorText;
+    return getDomSelectionText();
+  }
+
+  function deleteSelectedText() {
+    const active = document.activeElement;
+    if (active && isEditableTextControl(active) && !isMonacoInput(active)) {
+      return replaceTextControlSelection(active, "");
+    }
+    if (active?.isContentEditable) {
+      return document.execCommand("delete");
+    }
+    return window.__reviewClipboard?.deleteSelection?.() === true;
+  }
+
+  function canReceivePaste() {
+    const active = document.activeElement;
+    if (!active) return false;
+    if (isMonacoInput(active)) return window.__reviewClipboard?.canPaste?.() === true;
+    return isEditableTextControl(active) || active.isContentEditable || window.__reviewClipboard?.canPaste?.() === true;
+  }
+
+  function insertAtActiveTarget(text) {
+    const active = document.activeElement;
+    if (active && isEditableTextControl(active) && !isMonacoInput(active)) {
+      return replaceTextControlSelection(active, text);
+    }
+    if (active?.isContentEditable) {
+      return document.execCommand("insertText", false, text);
+    }
+    return window.__reviewClipboard?.insertText?.(text) === true;
+  }
+
+  function writeClipboardText(text) {
+    if (!text) return;
+    if (window.glimpse?.send) {
+      window.glimpse.send({ type: "clipboard-write", text });
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).catch(() => {});
+    }
+  }
+
+  function requestClipboardText() {
+    if (!window.glimpse?.send) {
+      if (navigator.clipboard?.readText) return navigator.clipboard.readText();
+      return Promise.resolve("");
+    }
+    const requestId = `clipboard:${Date.now()}:${++clipboardRequestSeq}`;
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        pendingClipboardReads.delete(requestId);
+        resolve("");
+      }, 3000);
+      pendingClipboardReads.set(requestId, { resolve, timeoutId });
+      window.glimpse.send({ type: "clipboard-read", requestId });
+    });
+  }
+
+  window.__reviewReceiveClipboardData = (message) => {
+    const pending = pendingClipboardReads.get(message?.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timeoutId);
+    pendingClipboardReads.delete(message.requestId);
+    pending.resolve(typeof message.text === "string" ? message.text : "");
+  };
+
+  function handleCopyOrCut(e, cut) {
+    const text = getSelectedText();
+    if (!text) return;
+    e.preventDefault();
+    writeClipboardText(text);
+    if (cut) deleteSelectedText();
+  }
+
+  async function handlePaste(e) {
+    if (!canReceivePaste()) return;
+    e.preventDefault();
+    const text = await requestClipboardText();
+    if (text) insertAtActiveTarget(text);
+  }
+
+  function handleSelectAll(e) {
+    const active = document.activeElement;
+    if (active && isTextControl(active) && !isMonacoInput(active)) {
+      e.preventDefault();
+      active.select();
+      return;
+    }
+    if (window.__reviewClipboard?.selectAll?.() === true) {
+      e.preventDefault();
+      return;
+    }
+    if (active?.isContentEditable) {
+      e.preventDefault();
+      document.execCommand("selectAll");
+    }
+  }
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "w") {
+        e.preventDefault();
+        if (window.glimpse && typeof window.glimpse.close === "function") window.glimpse.close();
+        else if (typeof window.close === "function") window.close();
+        return;
+      }
+      if (key === "v") {
+        void handlePaste(e);
+        return;
+      }
+      if (key === "c") {
+        handleCopyOrCut(e, false);
+        return;
+      }
+      if (key === "x") {
+        handleCopyOrCut(e, true);
+        return;
+      }
+      if (key === "a") {
+        handleSelectAll(e);
+      }
+    },
+    true,
+  );
+})();
+</script>
+<script>
+__INLINE_MONACO_LOADER_JS__
+</script>
+<script>
+__INLINE_JS__
+</script>
+</body>
+</html>

@@ -3,6 +3,8 @@
 A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions I made.
 
 - [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
+- [`annotate-git-diff`](./extensions/annotate-git-diff): Adds `/annotate-git-diff`, a native Glimpse UI for annotating git diffs and appending structured feedback prompts to the editor.
+- [`annotate-last-message`](./extensions/annotate-last-message): Adds `/annotate-last-message`, a native Glimpse UI for annotating the latest assistant reply and sending planning-oriented feedback back through the editor.
 - [`brrr`](./extensions/brrr): Sends brrr push notifications when pi finishes an agent turn and is ready for input, with optional macOS idle gating.
 - [`claude-fast`](./extensions/claude-fast): Adds `/claude-fast` to enable Anthropic Claude Fast mode for supported Claude Opus models by injecting `speed: "fast"`.
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.

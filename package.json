@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.42",
-  "description": "A collection of pi extensions for context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
+  "version": "0.1.43",
+  "description": "A collection of pi extensions for annotation UIs, context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
   "keywords": [
     "pi-package",
     "pi",
@@ -35,21 +35,23 @@
   "pi": {
     "extensions": [
       "./extensions/agent-workflow-audit/index.ts",
+      "./extensions/annotate-git-diff/index.ts",
+      "./extensions/annotate-last-message/index.ts",
       "./extensions/brrr/index.ts",
       "./extensions/claude-fast/index.ts",
-      "./extensions/minimal-footer/index.ts",
-      "./extensions/oracle/index.ts",
+      "./extensions/confirm-destructive/index.ts",
       "./extensions/context-cap/index.ts",
       "./extensions/context-inspector/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
       "./extensions/gnosis/index.ts",
       "./extensions/inline-bash/index.ts",
       "./extensions/librarian/index.ts",
-      "./extensions/quiet-tools/index.ts",
-      "./extensions/permission-gate/index.ts",
-      "./extensions/confirm-destructive/index.ts",
+      "./extensions/minimal-footer/index.ts",
       "./extensions/notify/index.ts",
       "./extensions/openai-fast/index.ts",
+      "./extensions/oracle/index.ts",
+      "./extensions/permission-gate/index.ts",
+      "./extensions/quiet-tools/index.ts",
       "./extensions/review/index.ts",
       "./extensions/todo/index.ts",
       "./extensions/triage-comments/index.ts"
@@ -64,5 +66,10 @@
     "husky": "^9.1.7",
     "typebox": "^1.1.38",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@tailwindcss/browser": "^4.3.0",
+    "glimpseui": "^0.8.1",
+    "monaco-editor": "0.52.2"
   }
 }

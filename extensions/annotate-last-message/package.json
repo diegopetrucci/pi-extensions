@@ -1,0 +1,45 @@
+{
+  "name": "@diegopetrucci/pi-annotate-last-message",
+  "version": "0.1.0",
+  "description": "A standalone pi extension that adds /annotate-last-message, a native Glimpse UI for annotating the latest assistant reply.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "annotate",
+    "feedback",
+    "assistant-message"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/annotate-last-message"
+  },
+  "files": [
+    "index.ts",
+    "prompt.ts",
+    "quiet-glimpse.ts",
+    "session.ts",
+    "types.ts",
+    "ui.ts",
+    "web",
+    "glimpseui.d.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "dependencies": {
+    "glimpseui": "^0.8.1"
+  },
+  "type": "module"
+}
