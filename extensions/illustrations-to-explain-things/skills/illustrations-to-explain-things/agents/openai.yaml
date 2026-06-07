@@ -1,0 +1,6 @@
+interface:
+  display_name: "Illustrations to Explain Things"
+  short_description: "Create clean, absurd article illustrations with Xiaohei. Default output language: English unless the user explicitly requests another language."
+  default_prompt: "Use $illustrations-to-explain-things to plan and generate article illustrations for this piece. Default all response text and handwritten image labels to English unless I explicitly request another language."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,31 @@
+{
+  "name": "@diegopetrucci/pi-illustrations-to-explain-things",
+  "version": "0.1.0",
+  "description": "A pi skill for generating clean, absurd Xiaohei-style article illustrations, shot lists, and visual metaphors.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "skill",
+    "illustration",
+    "image-generation"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/illustrations-to-explain-things"
+  },
+  "files": [
+    "skills",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "skills": [
+      "skills"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # pi-extensions
 
-A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions I made.
+A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions and skills I made.
 
 - [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
 - [`annotate-git-diff`](./extensions/annotate-git-diff): Adds `/annotate-git-diff`, a native Glimpse UI for annotating git diffs and appending structured feedback prompts to the editor.
@@ -14,6 +14,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`git-footer`](./extensions/git-footer): Standalone extension that adds TLH-style git dirty counts, ahead/behind, and optional PR number to pi's built-in footer status area.
 - [`gnosis`](./extensions/gnosis): Exposes the `gn` repo-local knowledge base CLI as an agent tool for searching and recording durable project decisions, constraints, and intent.
 - [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
+- [`illustrations-to-explain-things`](./extensions/illustrations-to-explain-things): Adds a skill for generating clean, absurd Xiaohei-style article illustrations, shot lists, image edits, and visual metaphors.
 - [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, and cached repos expiring after 7 days of non-use.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch/repo on the first line, context/model on the second, optional `DUMB ZONE`, plus OpenAI Codex 5-hour and 7-day usage when available.
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.

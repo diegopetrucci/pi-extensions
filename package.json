@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.43",
-  "description": "A collection of pi extensions for annotation UIs, context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, and model/provider helpers.",
+  "version": "0.1.44",
+  "description": "A collection of pi extensions and skills for annotation UIs, context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, model/provider helpers, and Xiaohei-style article illustrations.",
   "keywords": [
     "pi-package",
     "pi",
@@ -56,7 +56,10 @@
       "./extensions/todo/index.ts",
       "./extensions/triage-comments/index.ts"
     ],
-    "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg"
+    "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg",
+    "skills": [
+      "./extensions/illustrations-to-explain-things/skills"
+    ]
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.78.0",
