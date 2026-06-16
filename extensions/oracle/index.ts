@@ -75,6 +75,7 @@ const ORACLE_CONFIG_FILE = "oracle.json";
 
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
+		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
@@ -92,6 +93,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"zai.glm-5",
 	],
 	anthropic: [
+		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4.8",
 		"claude-opus-4-7",
@@ -132,6 +134,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	],
 	cerebras: ["gpt-oss-120b", "zai-glm-4.7", "llama3.1-8b"],
 	"cloudflare-ai-gateway": [
+		"claude-fable-5",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
 		"claude-opus-4-5",
@@ -159,6 +162,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"accounts/fireworks/models/gpt-oss-120b",
 	],
 	"github-copilot": [
+		"claude-fable-5",
 		"claude-opus-4.8",
 		"claude-opus-4.7",
 		"claude-opus-4.6",
@@ -257,6 +261,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"big-pickle",
 	],
 	opencode: [
+		"claude-fable-5",
 		"gpt-5.5-pro",
 		"gpt-5.5",
 		"gpt-5.4-pro",
@@ -289,6 +294,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"kimi-k2.5",
 	],
 	openrouter: [
+		"anthropic/claude-fable-5",
+		"~anthropic/claude-fable-latest",
 		"anthropic/claude-opus-4.8",
 		"anthropic/claude-opus-4.8-fast",
 		"anthropic/claude-opus-4.7",
@@ -327,6 +334,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"MiniMaxAI/MiniMax-M2.5",
 	],
 	"vercel-ai-gateway": [
+		"anthropic/claude-fable-5",
 		"anthropic/claude-opus-4.8",
 		"anthropic/claude-opus-4.7",
 		"anthropic/claude-opus-4.6",

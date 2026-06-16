@@ -27,7 +27,7 @@ By default, the extension:
 4. tries a provider-specific hardcoded priority list first
 5. falls back to a heuristic that favors stronger tiers like `opus`, `pro`, newer versions, and penalizes `mini`, `flash`, `haiku`, `spark`, etc.
 
-The hardcoded rankings now cover pi's built-in provider set, including Together; see the provider matrix for the current provider-by-provider top picks.
+The hardcoded rankings now cover pi's built-in provider set, including Claude Fable on Anthropic-compatible providers and Together; see the provider matrix for the current provider-by-provider top picks.
 
 If no reasoning model exists on the current provider, it falls back to the best available model on that provider.
 
