@@ -14,51 +14,77 @@ function isOptionalPackage(packageInfo) {
 }
 
 function packageJsonPathFromLockPath(lockPackagePath) {
-	return path.join(root, lockPackagePath, "package.json");
+	return lockPackagePath ? path.join(root, lockPackagePath, "package.json") : path.join(root, "package.json");
 }
 
-const lock = readJson(lockPath);
-const packages = lock.packages ?? {};
+function packageNameFromLockPath(lockPackagePath) {
+	if (!lockPackagePath) return "root package";
+	return lockPackagePath.replace(/^node_modules\//, "");
+}
+
+let lock;
+try {
+	lock = readJson(lockPath);
+} catch (error) {
+	const message = error instanceof Error ? error.message : String(error);
+	console.error(`Could not read package-lock.json at ${lockPath}: ${message}`);
+	console.error("Run `npm install` or `npm ci` first, then rerun this check.");
+	process.exit(1);
+}
+
+if (!lock.lockfileVersion || lock.lockfileVersion < 2 || !lock.packages) {
+	console.error("Cannot verify install state: package-lock.json must be lockfileVersion 2 or newer with a packages table.");
+	console.error("Regenerate the lockfile with a modern npm version, then rerun this check.");
+	process.exit(1);
+}
+
+const packages = lock.packages;
 const mismatches = [];
 const missing = [];
-let checked = 0;
+let checkedInstalled = 0;
+let checkedLocalPackages = 0;
 let skippedOptionalMissing = 0;
 
 for (const [lockPackagePath, packageInfo] of Object.entries(packages)) {
-	if (!lockPackagePath.startsWith("node_modules/")) continue;
 	if (packageInfo.link) continue;
 	if (!packageInfo.version) continue;
 
-	const installedPackageJsonPath = packageJsonPathFromLockPath(lockPackagePath);
-	if (!fs.existsSync(installedPackageJsonPath)) {
-		if (isOptionalPackage(packageInfo)) {
+	const packageJsonPath = packageJsonPathFromLockPath(lockPackagePath);
+	if (!fs.existsSync(packageJsonPath)) {
+		if (lockPackagePath.startsWith("node_modules/") && isOptionalPackage(packageInfo)) {
 			skippedOptionalMissing += 1;
 			continue;
 		}
-		missing.push({ name: lockPackagePath.replace(/^node_modules\//, ""), expected: packageInfo.version });
+		missing.push({ name: packageNameFromLockPath(lockPackagePath), expected: packageInfo.version });
 		continue;
 	}
 
-	const installed = readJson(installedPackageJsonPath);
-	checked += 1;
-	if (installed.version !== packageInfo.version) {
+	const actualPackage = readJson(packageJsonPath);
+	if (lockPackagePath.startsWith("node_modules/")) checkedInstalled += 1;
+	else checkedLocalPackages += 1;
+
+	if (actualPackage.version !== packageInfo.version) {
 		mismatches.push({
-			name: installed.name ?? lockPackagePath.replace(/^node_modules\//, ""),
+			name: actualPackage.name ?? packageNameFromLockPath(lockPackagePath),
 			expected: packageInfo.version,
-			actual: installed.version ?? "(missing version)",
+			actual: actualPackage.version ?? "(missing version)",
 		});
 	}
 }
 
 if (missing.length || mismatches.length) {
-	console.error("Installed dependency state does not match package-lock.json. Run `npm ci`, then rerun this check.\n");
+	console.error("Package state does not match package-lock.json. Run `npm ci` or refresh package-lock.json, then rerun this check.\n");
 	for (const item of missing) {
 		console.error(`missing: ${item.name} expected ${item.expected}`);
 	}
 	for (const item of mismatches) {
-		console.error(`mismatch: ${item.name} installed ${item.actual}, lockfile ${item.expected}`);
+		console.error(`mismatch: ${item.name} package.json ${item.actual}, lockfile ${item.expected}`);
 	}
 	process.exit(1);
 }
 
-console.log(`Installed dependency state matches package-lock.json (${checked} packages checked${skippedOptionalMissing ? `, ${skippedOptionalMissing} optional packages not installed` : ""}).`);
+console.log(
+	`Package state matches package-lock.json (${checkedInstalled} installed packages and ${checkedLocalPackages} local package entries checked${
+		skippedOptionalMissing ? `, ${skippedOptionalMissing} optional packages not installed` : ""
+	}).`,
+);
