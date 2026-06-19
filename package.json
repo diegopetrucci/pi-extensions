@@ -14,7 +14,9 @@
     "url": "git+https://github.com/diegopetrucci/pi-extensions.git"
   },
   "scripts": {
-    "preflight:install-state": "node scripts/check-install-state.mjs"
+    "ci": "npm run preflight:install-state && npm run typecheck",
+    "preflight:install-state": "node scripts/check-install-state.mjs",
+    "typecheck": "npx tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --skipLibCheck $(git ls-files '*.ts')"
   },
   "files": [
     "extensions",
