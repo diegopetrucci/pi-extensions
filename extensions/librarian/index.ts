@@ -629,20 +629,56 @@ function buildUserPrompt(query: string, repos: string[], owners: string[], maxSe
 	return `Task: locate and cite exact GitHub code locations that answer the query.\n\nQuery: ${query}\nRepository filters: ${repos.length ? repos.join(", ") : "(none)"}\nOwner filters: ${owners.length ? owners.join(", ") : "(none)"}\nMax search results per gh search call: ${maxSearchResults}\nLocal checkout cache: ${cache.mode === "enabled" ? `enabled at ${cache.root}` : "disabled"}\nCache decision: ${cache.decisionReason}\n\nRespond directly with concise, citation-heavy findings. Always pass --limit ${maxSearchResults} to gh search code unless a narrower command is clearly better.`;
 }
 
-function extractLastAssistantText(messages: unknown[]): string {
+type AssistantLikeMessage = {
+	role?: string;
+	content?: unknown;
+	stopReason?: unknown;
+	errorMessage?: unknown;
+};
+
+function getLastAssistantMessage(messages: unknown[]): AssistantLikeMessage | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: string; content?: unknown };
-		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
-		const parts: string[] = [];
-		for (const part of message.content) {
-			if (part && typeof part === "object" && (part as { type?: string }).type === "text") {
-				const text = (part as { text?: unknown }).text;
-				if (typeof text === "string") parts.push(text);
-			}
-		}
-		if (parts.length) return parts.join("").trim();
+		const message = messages[i] as AssistantLikeMessage;
+		if (message?.role === "assistant") return message;
 	}
-	return "";
+	return undefined;
+}
+
+function extractLastAssistantText(messages: unknown[]): string {
+	const message = getLastAssistantMessage(messages);
+	if (!message || !Array.isArray(message.content)) return "";
+	const parts: string[] = [];
+	for (const part of message.content) {
+		if (part && typeof part === "object" && (part as { type?: string }).type === "text") {
+			const text = (part as { text?: unknown }).text;
+			if (typeof text === "string") parts.push(text);
+		}
+	}
+	return parts.join("").trim();
+}
+
+function describeNoAnswerReason(message: AssistantLikeMessage | undefined, turns: number): string {
+	if (!message) return "the internal subagent produced no assistant message";
+	if (message.stopReason === "error") {
+		const errorMessage = typeof message.errorMessage === "string" && message.errorMessage.trim()
+			? message.errorMessage.trim()
+			: "provider/model error";
+		return `the internal subagent stopped with an error: ${errorMessage}`;
+	}
+	if (message.stopReason === "aborted") return "the internal subagent was aborted before producing an answer";
+	if (turns >= MAX_TURNS) return `the internal subagent reached the ${MAX_TURNS}-turn budget without producing a final answer`;
+	const stopReason = typeof message.stopReason === "string" && message.stopReason.trim()
+		? ` (stopReason: ${message.stopReason.trim()})`
+		: "";
+	return `the internal subagent completed without final assistant text${stopReason}`;
+}
+
+function formatInternalFailure(details: LibrarianDetails, reason: string): string {
+	return [
+		`Internal librarian run failed: ${reason}.`,
+		`Diagnostics: status=${details.status}; model=${details.model.modelRef}; thinking=${details.model.thinkingLevel}; modelSelection=${details.model.autoSelected ? "auto" : "configured"}; turns=${details.turns}; toolCalls=${details.toolCalls.length}.`,
+		"No answer was produced. This is not a reliable \"no results found\" signal; retry later or configure a different Librarian model with /librarian-config.",
+	].join("\n");
 }
 
 function formatToolCall(call: ToolCall): string {
@@ -847,6 +883,13 @@ export default function librarianExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "librarian") return undefined;
+		const details = event.details as LibrarianDetails | undefined;
+		if (details?.status !== "error") return undefined;
+		return { isError: true };
+	});
+
 	pi.registerTool({
 		name: "librarian",
 		label: "Librarian",
@@ -1034,9 +1077,20 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					await Promise.race([promptPromise, timeoutPromise]);
 				}
 
+				const lastAssistant = session ? getLastAssistantMessage(session.state.messages) : undefined;
 				const answer = session ? extractLastAssistantText(session.state.messages) : "";
-				lastContent = answer || (aborted ? "Aborted" : "(no output)");
-				details.status = aborted ? "aborted" : "done";
+				if (answer) {
+					lastContent = answer;
+					details.status = "done";
+				} else if (aborted) {
+					lastContent = "Aborted";
+					details.status = "aborted";
+				} else {
+					details.status = "error";
+					const reason = describeNoAnswerReason(lastAssistant, details.turns);
+					lastContent = formatInternalFailure(details, reason);
+					details.error = reason;
+				}
 				details.endedAt = Date.now();
 				emit(true);
 
