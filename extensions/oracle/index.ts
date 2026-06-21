@@ -557,6 +557,26 @@ function extractTextFromContent(content: unknown): string {
 	return parts.join("\n\n").trim();
 }
 
+// Errors that typically resolve on retry: provider overload, rate limiting,
+// transient 5xx, gateway/network failures, and request timeouts. Keep this list
+// pattern-based so we recognize variants across providers without enumerating them.
+const TRANSIENT_ERROR_PATTERN =
+	/\b(overload(?:ed)?|rate[ _-]?limit(?:ed)?|too many requests|429|500|502|503|504|bad gateway|service unavailable|gateway timeout|temporarily unavailable|timed?[ _-]?out|timeout|econnreset|econnrefused|etimedout|enetunreach|socket hang up|fetch failed)\b/i;
+
+function isTransientErrorMessage(message: string): boolean {
+	return TRANSIENT_ERROR_PATTERN.test(message);
+}
+
+function formatOracleModelError(stopReason: "error" | "aborted", errorMessage: string | undefined): string {
+	const trimmed = errorMessage?.trim();
+	if (stopReason === "aborted") {
+		return trimmed ? `Oracle model turn aborted: ${trimmed}` : "Oracle model turn aborted.";
+	}
+	if (!trimmed) return "Oracle model error (no detail provided by provider).";
+	const base = `Oracle model error: ${trimmed}`;
+	return isTransientErrorMessage(trimmed) ? `${base} (transient; retry may succeed)` : base;
+}
+
 function parseVersionScore(text: string): number {
 	const matches = text.match(/\d+(?:\.\d+){0,2}/g) ?? [];
 	let best = 0;
@@ -817,6 +837,9 @@ async function runOracle(
 	let finalOutput = "";
 	let stderr = "";
 
+	let lastStopReason: string | undefined;
+	let lastErrorMessage: string | undefined;
+
 	const details: OracleDetails = {
 		...selection,
 		includeBash,
@@ -888,6 +911,11 @@ async function runOracle(
 				if (text) finalOutput = text;
 				currentText = "";
 
+				const stopReason = event.message.stopReason;
+				lastStopReason = typeof stopReason === "string" ? stopReason : undefined;
+				const errorMessageField = event.message.errorMessage;
+				lastErrorMessage = typeof errorMessageField === "string" ? errorMessageField : undefined;
+
 				const messageUsage = event.message.usage;
 				if (messageUsage) {
 					usage.turns += 1;
@@ -944,6 +972,19 @@ async function runOracle(
 
 	if (wasAborted) {
 		return { ok: false, error: "Oracle was aborted.", details };
+	}
+
+	// The pi subprocess in `--mode json` does not promote an errored assistant
+	// turn to a non-zero exit code or stderr; the error is only carried on the
+	// streamed assistant message via stopReason/errorMessage. Surface that here
+	// so callers can distinguish transient provider errors from a genuinely
+	// empty response.
+	if (lastStopReason === "error" || lastStopReason === "aborted") {
+		return {
+			ok: false,
+			error: formatOracleModelError(lastStopReason, lastErrorMessage),
+			details,
+		};
 	}
 
 	if (exitCode !== 0) {
