@@ -108,13 +108,13 @@ git push origin v0.1.46
 
 > Human-only: stop here before running any `npm publish` command. Ask the authenticated npm publisher to run the publish commands manually. After the user confirms publishing is complete, wait 5 minutes before npm registry/package-page or npm-install validation, because npm propagation can lag.
 
-- [ ] human publishes root package
+- [x] human publishes root package
 
 ```bash
 npm publish
 ```
 
-- [ ] human publishes standalone oracle package
+- [x] human publishes standalone oracle package
 
 ```bash
 npm publish --workspace @diegopetrucci/pi-oracle
@@ -122,14 +122,16 @@ npm publish --workspace @diegopetrucci/pi-oracle
 
 ## Post-publish validation
 
-- [ ] wait 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verify npm package pages show expected versions for the root and standalone oracle packages
-- [ ] test install from npm
+- [x] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verified npm package pages show expected versions for the root and standalone oracle packages (`@diegopetrucci/pi-extensions@0.1.46` and `@diegopetrucci/pi-oracle@0.1.13`, both at dist-tag `latest`)
+- [x] verified the published `@diegopetrucci/pi-oracle@0.1.13` tarball contains the new error-reporting markers (`formatOracleModelError`, `TRANSIENT_ERROR_PATTERN`, `lastStopReason`, `event.message.stopReason`, `event.message.errorMessage`)
+- [x] tested install from npm
 
 ```bash
 pi install npm:@diegopetrucci/pi-extensions
 pi install npm:@diegopetrucci/pi-oracle
 ```
 
+- [x] verified installed `~/.pi/agent/npm/node_modules/@diegopetrucci/pi-extensions` is at `0.1.46`, its bundled oracle at `0.1.13`, and the standalone `~/.pi/agent/npm/node_modules/@diegopetrucci/pi-oracle` is at `0.1.13` with the same fix markers
 - [ ] reload pi and confirm oracle reports `Oracle model error: <detail>` (with the transient hint for transient signatures) when the upstream model turn errors, and keeps the genuine empty-response message otherwise
 - [ ] publish announcement copy from `docs/announcement-v0.1.46.md`
