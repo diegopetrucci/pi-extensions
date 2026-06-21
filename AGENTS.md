@@ -10,7 +10,7 @@ Keep the list of extensions in `README.md` alphabetically ordered.
 
 ## Release Checklist Automation
 
-When walking through a release checklist, the agent should run all agent-safe release steps automatically up to, but not including, npm publishing: preflight checks, local smoke tests, package dry-runs, commits/tags, pushes, and GitHub release creation. `npm publish` is human-only: stop before any `npm publish` command and ask the user to publish manually, because npm publishing depends on the user's authenticated npm session. After the user confirms npm publishing is complete, wait 5 minutes before checking npm registry/package pages or running npm-install validation, because npm propagation can lag. After the 5-minute wait, resume post-publish validation.
+When walking through a release checklist, the agent should run all agent-safe release steps automatically up to, but not including, npm publishing: preflight checks, local smoke tests, package dry-runs, commits/tags, pushes, and GitHub release creation. Refresh dependencies with `npm ci` before local validation, then run `npm run preflight:install-state` to confirm installed packages match `package-lock.json` before smoke tests. `npm publish` is human-only: stop before any `npm publish` command and ask the user to publish manually, because npm publishing depends on the user's authenticated npm session. After the user confirms npm publishing is complete, wait 5 minutes before checking npm registry/package pages or running npm-install validation, because npm propagation can lag. After the 5-minute wait, resume post-publish validation.
 
 ## GitHub Release Body Style
 
