@@ -14,6 +14,8 @@ import {
 	type UsageSnapshot,
 } from "./openai-usage";
 
+const CONFIG_DIR_NAME = ".pi";
+
 const DEFAULT_CONFIG: MinimalFooterConfig = {
 	context: {
 		showPercent: true,
@@ -91,6 +93,11 @@ type UsageSessionState = {
 	error?: string;
 	inflight?: Promise<void>;
 	requestRender?: () => void;
+};
+
+type ProjectConfigContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
 };
 
 function readConfigFile(path: string): RecursivePartial<MinimalFooterConfig> {
@@ -177,21 +184,25 @@ function normalizeDumbZoneColor(value: unknown, fallback: DumbZoneColor): DumbZo
 	return DUMB_ZONE_COLORS.has(value as DumbZoneColor) ? (value as DumbZoneColor) : fallback;
 }
 
+function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
+
 function findProjectConfigPath(cwd: string): string {
 	let current = cwd;
 	while (true) {
-		const candidate = join(current, ".pi", "minimal-footer.json");
+		const candidate = join(current, CONFIG_DIR_NAME, "minimal-footer.json");
 		if (existsSync(candidate)) return candidate;
 
 		const parent = dirname(current);
-		if (parent === current) return join(cwd, ".pi", "minimal-footer.json");
+		if (parent === current) return join(cwd, CONFIG_DIR_NAME, "minimal-footer.json");
 		current = parent;
 	}
 }
 
-function loadConfig(cwd: string): MinimalFooterConfig {
+function loadConfig(ctx: ProjectConfigContext): MinimalFooterConfig {
 	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "minimal-footer.json"));
-	const projectConfig = readConfigFile(findProjectConfigPath(cwd));
+	const projectConfig = canReadProjectConfig(ctx) ? readConfigFile(findProjectConfigPath(ctx.cwd)) : {};
 	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
@@ -268,7 +279,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		const state: UsageSessionState = {
 			authStorage: AuthStorage.create(),
-			config: loadConfig(ctx.cwd),
+			config: loadConfig(ctx),
 			loading: false,
 		};
 		states.set(ctx.sessionManager, state);

@@ -6,6 +6,8 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+const CONFIG_DIR_NAME = ".pi";
+
 const EXTENSION_ID = "openai-fast";
 const PROVIDER_ID = "openai-codex";
 const API_ID = "openai-codex-responses";
@@ -31,6 +33,11 @@ type SessionState = {
 	override: FastOverride;
 	lastInjectedAt?: number;
 	lastInjectedModel?: string;
+};
+
+type ProjectConfigContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
 };
 
 type RecursivePartial<T> = {
@@ -71,21 +78,25 @@ function mergeConfig(
 	};
 }
 
+function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
+
 function findProjectConfigPath(cwd: string): string {
 	let current = cwd;
 	while (true) {
-		const candidate = join(current, ".pi", "openai-fast.json");
+		const candidate = join(current, CONFIG_DIR_NAME, "openai-fast.json");
 		if (existsSync(candidate)) return candidate;
 
 		const parent = dirname(current);
-		if (parent === current) return join(cwd, ".pi", "openai-fast.json");
+		if (parent === current) return join(cwd, CONFIG_DIR_NAME, "openai-fast.json");
 		current = parent;
 	}
 }
 
-function loadConfig(cwd: string): OpenAIFastConfig {
+function loadConfig(ctx: ProjectConfigContext): OpenAIFastConfig {
 	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "openai-fast.json"));
-	const projectConfig = readConfigFile(findProjectConfigPath(cwd));
+	const projectConfig = canReadProjectConfig(ctx) ? readConfigFile(findProjectConfigPath(ctx.cwd)) : {};
 	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
@@ -211,7 +222,7 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 		let state = states.get(ctx.sessionManager);
 		if (!state) {
 			state = {
-				config: loadConfig(ctx.cwd),
+				config: loadConfig(ctx),
 				override: "auto",
 			};
 			states.set(ctx.sessionManager, state);
@@ -221,7 +232,7 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		const state: SessionState = {
-			config: loadConfig(ctx.cwd),
+			config: loadConfig(ctx),
 			override: "auto",
 		};
 		states.set(ctx.sessionManager, state);

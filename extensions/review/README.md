@@ -31,7 +31,7 @@ Then reload pi:
 
 - Behavior is intentionally kept equivalent to the upstream source, with only packaging/attribution changes for this repository.
 - PR review requires `gh` access and a clean working tree for tracked files.
-- If a `REVIEW_GUIDELINES.md` file exists next to the repo's `.pi` directory, its contents are appended to the review prompt.
+- If the project is trusted and a `REVIEW_GUIDELINES.md` file exists next to the repo's `.pi` directory, its contents are appended to the review prompt.
 
 ## License and attribution
 

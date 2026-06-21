@@ -6,7 +6,7 @@
  *
  * Config files (project overrides global):
  * - ~/.pi/agent/extensions/brrr.json
- * - <cwd>/.pi/brrr.json
+ * - <cwd>/.pi/brrr.json, when the project is trusted
  */
 
 import { execFile } from "node:child_process";
@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 const execFileAsync = promisify(execFile);
+const CONFIG_DIR_NAME = ".pi";
 
 interface BrrrConfig {
 	enabled: boolean;
@@ -39,6 +40,11 @@ interface BrrrPayload {
 	open_url?: string;
 	image_url?: string;
 }
+
+type ProjectConfigContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
+};
 
 const DEFAULT_CONFIG: BrrrConfig = {
 	enabled: true,
@@ -71,9 +77,15 @@ function mergeConfig(base: BrrrConfig, overrides: Partial<BrrrConfig>): BrrrConf
 	};
 }
 
-function loadConfig(cwd: string): BrrrConfig {
+function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
+
+function loadConfig(ctx: ProjectConfigContext): BrrrConfig {
 	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "brrr.json"));
-	const projectConfig = readConfigFile(join(cwd, ".pi", "brrr.json"));
+	const projectConfig = canReadProjectConfig(ctx)
+		? readConfigFile(join(ctx.cwd, CONFIG_DIR_NAME, "brrr.json"))
+		: {};
 	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
@@ -219,13 +231,13 @@ export default function brrrExtension(pi: ExtensionAPI) {
 	pi.registerCommand("brrr", {
 		description: "Show brrr notification status",
 		handler: async (_args, ctx) => {
-			const config = loadConfig(ctx.cwd);
+			const config = loadConfig(ctx);
 			notify(ctx, describeConfig(config, resolveWebhook(config.webhook)));
 		},
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
-		const config = loadConfig(ctx.cwd);
+		const config = loadConfig(ctx);
 		if (!config.enabled) return;
 		if (config.onlyWhenInteractive && !ctx.hasUI) return;
 

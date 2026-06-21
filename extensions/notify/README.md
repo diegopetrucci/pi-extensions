@@ -67,6 +67,8 @@ Config files are merged, with project config overriding global config:
 - `~/.pi/agent/extensions/notify.json`
 - `<project>/.pi/notify.json`
 
+Project config is only read after Pi reports that the project is trusted.
+
 A ready-to-copy sample file is included at [`notify.example.json`](./notify.example.json).
 
 Example:

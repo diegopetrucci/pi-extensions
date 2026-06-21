@@ -46,7 +46,7 @@ Optional project config:
 .pi/openai-fast.json
 ```
 
-Project config overrides global config.
+Project config overrides global config after Pi reports that the project is trusted.
 
 ```json
 {
