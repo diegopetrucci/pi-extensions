@@ -165,6 +165,19 @@ npm publish --workspace @diegopetrucci/pi-review
 
 ## Post-publish validation
 
-- [ ] wait 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verify npm registry state for root and affected standalone packages
-- [ ] verify install/package pages after npm propagation
+- [x] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verified npm registry state for root and affected standalone packages
+- [x] verified install/package pages after npm propagation
+
+Post-publish validation commands run:
+
+```bash
+npm view @diegopetrucci/pi-extensions@0.1.47 name version dist.tarball --json
+npm view @diegopetrucci/pi-brrr@0.1.3 name version dist.tarball --json
+npm view @diegopetrucci/pi-notify@0.1.6 name version dist.tarball --json
+npm view @diegopetrucci/pi-minimal-footer@0.1.9 name version dist.tarball --json
+npm view @diegopetrucci/pi-openai-fast@0.1.5 name version dist.tarball --json
+npm view @diegopetrucci/pi-claude-fast@0.1.3 name version dist.tarball --json
+npm view @diegopetrucci/pi-review@0.1.3 name version dist.tarball --json
+npm install --ignore-scripts --no-audit --no-fund @diegopetrucci/pi-extensions@0.1.47 @diegopetrucci/pi-brrr@0.1.3 @diegopetrucci/pi-notify@0.1.6 @diegopetrucci/pi-minimal-footer@0.1.9 @diegopetrucci/pi-openai-fast@0.1.5 @diegopetrucci/pi-claude-fast@0.1.3 @diegopetrucci/pi-review@0.1.3
+```
