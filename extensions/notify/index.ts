@@ -10,7 +10,7 @@
  *
  * Config files (project overrides global):
  * - ~/.pi/agent/extensions/notify.json
- * - <cwd>/.pi/notify.json
+ * - <cwd>/.pi/notify.json, when the project is trusted
  */
 
 import { execFile } from "node:child_process";
@@ -19,9 +19,16 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+const CONFIG_DIR_NAME = ".pi";
+
 type TerminalBackend = "auto" | "osc777" | "osc99" | "none";
 type DesktopBackend = "auto" | "macos" | "linux" | "windows-toast" | "none";
 type SoundBackend = "auto" | "macos" | "linux" | "windows-beep" | "command" | "none";
+
+type ProjectConfigContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
+};
 
 interface NotifyConfig {
 	enabled: boolean;
@@ -111,9 +118,15 @@ function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): Noti
 	};
 }
 
-function loadConfig(cwd: string): NotifyConfig {
+function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
+
+function loadConfig(ctx: ProjectConfigContext): NotifyConfig {
 	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "notify.json"));
-	const projectConfig = readConfigFile(join(cwd, ".pi", "notify.json"));
+	const projectConfig = canReadProjectConfig(ctx)
+		? readConfigFile(join(ctx.cwd, CONFIG_DIR_NAME, "notify.json"))
+		: {};
 	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
@@ -245,7 +258,7 @@ async function playSound(config: NotifyConfig, backend: Exclude<SoundBackend, "a
 
 export default function notifyExtension(pi: ExtensionAPI) {
 	pi.on("agent_end", async (_event, ctx) => {
-		const config = loadConfig(ctx.cwd);
+		const config = loadConfig(ctx);
 		if (!config.enabled) return;
 		if (config.onlyWhenInteractive && !ctx.hasUI) return;
 

@@ -35,6 +35,8 @@ Config files are merged, with project config overriding global config:
 - `~/.pi/agent/extensions/brrr.json`
 - `<project>/.pi/brrr.json`
 
+Project config is only read after Pi reports that the project is trusted.
+
 The default config expects your webhook in `BRRR_WEBHOOK_URL`:
 
 ```bash

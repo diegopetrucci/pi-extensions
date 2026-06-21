@@ -76,6 +76,8 @@ Config files are merged, with project config overriding global config:
 - `~/.pi/agent/extensions/minimal-footer.json`
 - `<project>/.pi/minimal-footer.json`
 
+Project config is only read after Pi reports that the project is trusted.
+
 A ready-to-copy sample file is included at [`minimal-footer.example.json`](./minimal-footer.example.json).
 
 Example:

@@ -29,8 +29,8 @@
  * - `/review --extra "focus on performance regressions"` - add extra review instruction (works with any mode)
  *
  * Project-specific review guidelines:
- * - If a REVIEW_GUIDELINES.md file exists in the same directory as .pi,
- *   its contents are appended to the review prompt.
+ * - If the project is trusted and a REVIEW_GUIDELINES.md file exists in the
+ *   same directory as .pi, its contents are appended to the review prompt.
  *
  * Note: PR review requires a clean working tree (no uncommitted changes to tracked files).
  */
@@ -48,6 +48,8 @@ import {
 } from "@earendil-works/pi-tui";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+
+const CONFIG_DIR_NAME = ".pi";
 
 // State to track fresh session review (where we branched from).
 // Module-level state means only one review can be active at a time.
@@ -74,6 +76,15 @@ type ReviewSettingsState = {
 	loopFixingEnabled?: boolean;
 	customInstructions?: string;
 };
+
+type ProjectConfigContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
+};
+
+function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
 
 function setReviewWidget(ctx: ExtensionContext, active: boolean) {
 	if (!ctx.hasUI) return;
@@ -501,7 +512,7 @@ async function loadProjectReviewGuidelines(cwd: string): Promise<string | null> 
 	let currentDir = path.resolve(cwd);
 
 	while (true) {
-		const piDir = path.join(currentDir, ".pi");
+		const piDir = path.join(currentDir, CONFIG_DIR_NAME);
 		const guidelinesPath = path.join(currentDir, "REVIEW_GUIDELINES.md");
 
 		const piStats = await fs.stat(piDir).catch(() => null);
@@ -1420,7 +1431,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 			includeLocalChanges: options?.includeLocalChanges === true,
 		});
 		const hint = getUserFacingHint(target);
-		const projectGuidelines = await loadProjectReviewGuidelines(ctx.cwd);
+		const projectGuidelines = canReadProjectConfig(ctx) ? await loadProjectReviewGuidelines(ctx.cwd) : null;
 
 		// Combine the review rubric with the specific prompt
 		let fullPrompt = `${REVIEW_RUBRIC}\n\n---\n\nPlease perform a code review with the following focus:\n\n${prompt}`;
