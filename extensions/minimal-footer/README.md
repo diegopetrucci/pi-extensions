@@ -12,6 +12,7 @@ It replaces pi's built-in footer with a cleaner two-line layout that focuses on 
 - red `DUMB ZONE` indicator when context usage is above 200k tokens
 - current model and thinking level
 - OpenAI Codex 5-hour and 7-day usage when available
+- `xp` marker when Pi experimental features are enabled
 
 ## Layout
 
@@ -39,6 +40,12 @@ When using `openai-codex`, the bottom-left line also includes subscription usage
 
 ```text
 44.1% · 5h 12% · 7d 38%
+```
+
+When `PI_EXPERIMENTAL=1`, the bottom-left line also includes an experimental marker:
+
+```text
+44.1% · xp
 ```
 
 On narrow terminals it falls back to one item per line.
@@ -107,6 +114,11 @@ Example:
         "label": "7d"
       }
     }
+  },
+  "experimentalMarker": {
+    "enabled": true,
+    "label": "xp",
+    "color": "warning"
   }
 }
 ```
@@ -147,6 +159,16 @@ Disable one session-limit window:
 }
 ```
 
+Disable the experimental-features marker:
+
+```json
+{
+  "experimentalMarker": {
+    "enabled": false
+  }
+}
+```
+
 ### Config fields
 
 - `context.showPercent`: show the context percentage
@@ -161,6 +183,9 @@ Disable one session-limit window:
 - `codexUsage.windows.primary.label`: label for the primary usage window
 - `codexUsage.windows.secondary.enabled`: show the secondary usage window
 - `codexUsage.windows.secondary.label`: label for the secondary usage window
+- `experimentalMarker.enabled`: show the marker when `PI_EXPERIMENTAL=1`
+- `experimentalMarker.label`: marker text
+- `experimentalMarker.color`: theme color for the marker (`error`, `warning`, `accent`, `text`, or `dim`)
 
 ## What it shows
 
@@ -168,6 +193,7 @@ Disable one session-limit window:
 - **Top right:** current repo directory name
 - **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 200k context tokens
 - **Bottom left on `openai-codex`:** current context usage percentage plus 5-hour and 7-day Codex usage
+- **Bottom left with `PI_EXPERIMENTAL=1`:** current context usage percentage plus `xp`
 - **Bottom right:** model id and thinking level
 
 ## Publishing notes
@@ -181,5 +207,6 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 - Shows only context percentage, not context window size.
 - Shows `DUMB ZONE` only while context usage is above 200k tokens.
 - Shows the model id rather than a provider-specific display label.
+- Shows `xp` when `PI_EXPERIMENTAL=1`.
 - For `openai-codex`, reads pi's stored OAuth login and fetches usage from ChatGPT's backend usage endpoint.
 - Usage is cached briefly in memory and refreshed after turns.

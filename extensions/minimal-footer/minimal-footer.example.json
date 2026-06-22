@@ -22,5 +22,10 @@
         "label": "7d"
       }
     }
+  },
+  "experimentalMarker": {
+    "enabled": true,
+    "label": "xp",
+    "color": "warning"
   }
 }
