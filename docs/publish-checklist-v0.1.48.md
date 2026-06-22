@@ -134,11 +134,11 @@ npm publish --workspace @diegopetrucci/pi-minimal-footer
 
 ## Post-publish validation
 
-- [ ] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verified npm registry state for root and affected standalone packages
-- [ ] verified install/package pages after npm propagation
+- [x] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verified npm registry state for root and affected standalone packages
+- [x] verified install/package pages after npm propagation
 
-Post-publish validation commands to run:
+Post-publish validation commands run:
 
 ```bash
 npm view @diegopetrucci/pi-extensions@0.1.48 name version dist.tarball --json
