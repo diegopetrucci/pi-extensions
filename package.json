@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.49",
+  "version": "0.1.50",
   "description": "A collection of pi extensions and skills for annotation UIs, context management, workflow audits, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, model/provider helpers, and Xiaohei-style article illustrations.",
   "keywords": [
     "pi-package",
@@ -67,9 +67,9 @@
     ]
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.78.0",
-    "@earendil-works/pi-coding-agent": "^0.78.0",
-    "@earendil-works/pi-tui": "^0.78.0",
+    "@earendil-works/pi-ai": "^0.79.10",
+    "@earendil-works/pi-coding-agent": "^0.79.10",
+    "@earendil-works/pi-tui": "^0.79.10",
     "@types/node": "^25.9.1",
     "husky": "^9.1.7",
     "typebox": "^1.1.38",
