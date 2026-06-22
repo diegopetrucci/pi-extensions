@@ -7,6 +7,7 @@ A minimal custom footer for pi.
 It replaces pi's built-in footer with a cleaner two-line layout that focuses on the information I care about most:
 
 - current git branch
+- TLH-style git dirty counts, ahead/behind counts, and optional PR number
 - current repo name
 - current context percentage
 - red `DUMB ZONE` indicator when context usage is above 200k tokens
@@ -19,7 +20,7 @@ It replaces pi's built-in footer with a cleaner two-line layout that focuses on 
 On wide terminals it renders two lines:
 
 ```text
-<git-branch>                                         <repo-name>
+<git-branch> · <git-status>                          <repo-name>
 <context-%>                                     <model> <thinking>
 ```
 
@@ -29,6 +30,14 @@ Example:
 fix/remove-detached-image-tasks                     SendItToMy
 44.1%                                              gpt-5.4 high
 ```
+
+When the repo has local or remote git state, the top-left line includes the same cached summary as `git-footer`:
+
+```text
+main · +1 ~2 ?3 ↑1 • PR #42
+```
+
+The markers are `!` conflicts, `+` staged, `~` unstaged, `?` untracked, `↑` ahead, and `↓` behind. PR numbers are fetched best-effort with `gh pr view`.
 
 When context usage is above 200k tokens, the bottom-left line includes a red warning:
 
@@ -119,6 +128,12 @@ Example:
     "enabled": true,
     "label": "xp",
     "color": "warning"
+  },
+  "gitStatus": {
+    "enabled": true,
+    "refreshIntervalMs": 8000,
+    "gitTimeoutMs": 1500,
+    "ghTimeoutMs": 3000
   }
 }
 ```
@@ -169,6 +184,16 @@ Disable the experimental-features marker:
 }
 ```
 
+Disable git dirty/ahead/PR status:
+
+```json
+{
+  "gitStatus": {
+    "enabled": false
+  }
+}
+```
+
 ### Config fields
 
 - `context.showPercent`: show the context percentage
@@ -186,10 +211,14 @@ Disable the experimental-features marker:
 - `experimentalMarker.enabled`: show the marker when `PI_EXPERIMENTAL=1`
 - `experimentalMarker.label`: marker text
 - `experimentalMarker.color`: theme color for the marker (`error`, `warning`, `accent`, `text`, or `dim`)
+- `gitStatus.enabled`: show cached git dirty counts, ahead/behind counts, and optional PR number
+- `gitStatus.refreshIntervalMs`: background git status refresh interval
+- `gitStatus.gitTimeoutMs`: timeout for `git status --porcelain=v2 --branch`
+- `gitStatus.ghTimeoutMs`: timeout for best-effort `gh pr view`
 
 ## What it shows
 
-- **Top left:** current git branch
+- **Top left:** current git branch plus dirty/ahead/PR status when available
 - **Top right:** current repo directory name
 - **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 200k context tokens
 - **Bottom left on `openai-codex`:** current context usage percentage plus 5-hour and 7-day Codex usage
@@ -203,7 +232,7 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 ## Notes
 
 - Replaces pi's built-in footer entirely.
-- Uses pi footer data for git branch updates.
+- Uses pi footer data for git branch updates, plus background cached git/gh checks for dirty counts and PR number.
 - Shows only context percentage, not context window size.
 - Shows `DUMB ZONE` only while context usage is above 200k tokens.
 - Shows the model id rather than a provider-specific display label.
