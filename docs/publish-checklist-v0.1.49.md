@@ -128,13 +128,13 @@ git push origin v0.1.49
 
 > Human-only: stop here before running any `npm publish` command. Ask the authenticated npm publisher to run the publish commands manually. After the user confirms publishing is complete, wait 5 minutes before npm registry/package-page or npm-install validation, because npm propagation can lag.
 
-- [ ] publish root collection package manually
+- [x] publish root collection package manually
 
 ```bash
 npm publish
 ```
 
-- [ ] publish affected standalone package manually
+- [x] publish affected standalone package manually
 
 ```bash
 npm publish --workspace @diegopetrucci/pi-librarian
@@ -142,9 +142,9 @@ npm publish --workspace @diegopetrucci/pi-librarian
 
 ## Post-publish validation
 
-- [ ] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verified npm registry state for root and affected standalone packages
-- [ ] verified install/package pages after npm propagation
+- [x] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verified npm registry state for root and affected standalone packages
+- [x] verified install/package pages after npm propagation
 
 Post-publish validation commands to run:
 
