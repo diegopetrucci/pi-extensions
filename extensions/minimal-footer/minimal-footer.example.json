@@ -27,5 +27,11 @@
     "enabled": true,
     "label": "xp",
     "color": "warning"
+  },
+  "gitStatus": {
+    "enabled": true,
+    "refreshIntervalMs": 8000,
+    "gitTimeoutMs": 1500,
+    "ghTimeoutMs": 3000
   }
 }

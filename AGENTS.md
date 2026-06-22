@@ -15,3 +15,8 @@ When walking through a release checklist, the agent should run all agent-safe re
 ## GitHub Release Body Style
 
 Keep `docs/github-release-*.md` as the exact public GitHub release body. Do not include internal document titles like `GitHub release body — ...` or redundant version headings; the release tag already supplies the version. Start with a short summary, then public sections such as `## Highlights`, `## Packages`, and `## Install`. Do not include an "Included docs" section in public release bodies. Use descriptive GitHub release titles instead of repeating the version.
+
+## Memory
+
+At the start of any task, run `gn help plan` and follow its instructions.
+After finishing a task, run `gn help review`.
