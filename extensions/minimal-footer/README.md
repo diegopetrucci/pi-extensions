@@ -31,13 +31,13 @@ fix/remove-detached-image-tasks                     SendItToMy
 44.1%                                              gpt-5.4 high
 ```
 
-When the repo has local or remote git state, the top-left line includes the same cached summary as `git-footer`:
+When the project is trusted and the repo has local or remote git state, the top-left line includes the same cached summary as `git-footer`:
 
 ```text
 main · +1 ~2 ?3 ↑1 • PR #42
 ```
 
-The markers are `!` conflicts, `+` staged, `~` unstaged, `?` untracked, `↑` ahead, and `↓` behind. PR numbers are fetched best-effort with `gh pr view`.
+The markers are `!` conflicts, `+` staged, `~` unstaged, `?` untracked, `↑` ahead, and `↓` behind. PR numbers are fetched best-effort with `gh pr view`. Git polling is skipped until Pi reports that the project is trusted, and `git status` is run with fsmonitor disabled.
 
 When context usage is above 200k tokens, the bottom-left line includes a red warning:
 
@@ -211,7 +211,7 @@ Disable git dirty/ahead/PR status:
 - `experimentalMarker.enabled`: show the marker when `PI_EXPERIMENTAL=1`
 - `experimentalMarker.label`: marker text
 - `experimentalMarker.color`: theme color for the marker (`error`, `warning`, `accent`, `text`, or `dim`)
-- `gitStatus.enabled`: show cached git dirty counts, ahead/behind counts, and optional PR number
+- `gitStatus.enabled`: show cached git dirty counts, ahead/behind counts, and optional PR number for trusted projects
 - `gitStatus.refreshIntervalMs`: background git status refresh interval
 - `gitStatus.gitTimeoutMs`: timeout for `git status --porcelain=v2 --branch`
 - `gitStatus.ghTimeoutMs`: timeout for best-effort `gh pr view`
@@ -232,7 +232,7 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 ## Notes
 
 - Replaces pi's built-in footer entirely.
-- Uses pi footer data for git branch updates, plus background cached git/gh checks for dirty counts and PR number.
+- Uses pi footer data for git branch updates, plus background cached git/gh checks for dirty counts and PR number after project trust is granted.
 - Shows only context percentage, not context window size.
 - Shows `DUMB ZONE` only while context usage is above 200k tokens.
 - Shows the model id rather than a provider-specific display label.

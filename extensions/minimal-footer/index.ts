@@ -163,6 +163,7 @@ type Clock = {
 
 type GitFooterCacheOptions = {
 	cwd: () => string;
+	canRun?: () => boolean;
 	runner?: CommandRunner;
 	clock?: Clock;
 	refreshIntervalMs?: number;
@@ -174,7 +175,14 @@ type GitFooterCacheOptions = {
 const BRANCH_HEAD_PREFIX = "# branch.head ";
 const BRANCH_AB_PREFIX = "# branch.ab ";
 const STATUS_SEPARATOR = " • ";
-const GIT_STATUS_ARGS = ["--no-optional-locks", "status", "--porcelain=v2", "--branch"] as const;
+const GIT_STATUS_ARGS = [
+	"--no-optional-locks",
+	"-c",
+	"core.fsmonitor=false",
+	"status",
+	"--porcelain=v2",
+	"--branch",
+] as const;
 const GH_PR_VIEW_ARGS = ["pr", "view", "--json", "number,state,isDraft,url,title"] as const;
 
 function readConfigFile(path: string): RecursivePartial<MinimalFooterConfig> {
@@ -324,6 +332,10 @@ function shouldShowExperimentalMarker(config: MinimalFooterConfig): boolean {
 
 function shouldShowGitStatus(config: MinimalFooterConfig): boolean {
 	return config.gitStatus.enabled;
+}
+
+function canRunProjectGit(ctx: ProjectConfigContext): boolean {
+	return canReadProjectConfig(ctx);
 }
 
 function createEmptyGitStatus(): GitStatusSnapshot {
@@ -556,6 +568,7 @@ function defaultClock(): Clock {
 
 class GitFooterCache {
 	private readonly cwd: () => string;
+	private readonly canRun: () => boolean;
 	private readonly runner: CommandRunner;
 	private readonly clock: Clock;
 	private readonly refreshIntervalMs: number;
@@ -573,6 +586,7 @@ class GitFooterCache {
 
 	constructor(options: GitFooterCacheOptions) {
 		this.cwd = options.cwd;
+		this.canRun = options.canRun ?? (() => true);
 		this.runner = options.runner ?? defaultRunner;
 		this.clock = options.clock ?? defaultClock();
 		this.refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_CONFIG.gitStatus.refreshIntervalMs;
@@ -596,6 +610,15 @@ class GitFooterCache {
 
 	refresh(): Promise<void> {
 		if (this.disposed) return Promise.resolve();
+		if (!this.canRun()) {
+			const previousStatusSnapshot = this.statusSnapshot;
+			const previousPullRequestSnapshot = this.pullRequestSnapshot;
+			this.statusSnapshot = undefined;
+			this.pullRequestSnapshot = undefined;
+			this.lastSeenBranch = undefined;
+			this.emitChangeIfSnapshotsChanged(previousStatusSnapshot, previousPullRequestSnapshot);
+			return Promise.resolve();
+		}
 		if (this.refreshInFlight) return this.refreshInFlight;
 		const run = this.runRefresh()
 			.finally(() => {
@@ -774,6 +797,28 @@ async function refreshUsageIfNeeded(
 export default function (pi: ExtensionAPI) {
 	const states = new WeakMap<object, UsageSessionState>();
 
+	function disposeGitCache(state: UsageSessionState): void {
+		state.gitCache?.dispose();
+		state.gitCache = undefined;
+	}
+
+	function ensureGitCache(ctx: ExtensionContext, state: UsageSessionState): void {
+		if (!shouldShowGitStatus(state.config) || !canRunProjectGit(ctx)) {
+			disposeGitCache(state);
+			return;
+		}
+
+		if (state.gitCache) return;
+		state.gitCache = new GitFooterCache({
+			cwd: () => ctx.cwd,
+			canRun: () => canRunProjectGit(ctx),
+			refreshIntervalMs: state.config.gitStatus.refreshIntervalMs,
+			gitTimeoutMs: state.config.gitStatus.gitTimeoutMs,
+			ghTimeoutMs: state.config.gitStatus.ghTimeoutMs,
+			onChange: () => state.requestRender?.(),
+		});
+	}
+
 	pi.on("session_start", (_event, ctx) => {
 		const state: UsageSessionState = {
 			authStorage: AuthStorage.create(),
@@ -782,15 +827,7 @@ export default function (pi: ExtensionAPI) {
 		};
 		states.set(ctx.sessionManager, state);
 
-		if (shouldShowGitStatus(state.config)) {
-			state.gitCache = new GitFooterCache({
-				cwd: () => ctx.cwd,
-				refreshIntervalMs: state.config.gitStatus.refreshIntervalMs,
-				gitTimeoutMs: state.config.gitStatus.gitTimeoutMs,
-				ghTimeoutMs: state.config.gitStatus.ghTimeoutMs,
-				onChange: () => state.requestRender?.(),
-			});
-		}
+		ensureGitCache(ctx, state);
 
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			const unsub = footerData.onBranchChange(() => tui.requestRender());
@@ -800,8 +837,7 @@ export default function (pi: ExtensionAPI) {
 			return {
 				dispose() {
 					if (state.requestRender) state.requestRender = undefined;
-					state.gitCache?.dispose();
-					state.gitCache = undefined;
+					disposeGitCache(state);
 					unsub();
 				},
 				invalidate() {},
@@ -879,13 +915,13 @@ export default function (pi: ExtensionAPI) {
 		const state = states.get(ctx.sessionManager);
 		if (!state) return;
 		void refreshUsageIfNeeded(ctx, state);
+		ensureGitCache(ctx, state);
 		void state.gitCache?.refresh();
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		const state = states.get(ctx.sessionManager);
 		if (!state) return;
-		state.gitCache?.dispose();
-		state.gitCache = undefined;
+		disposeGitCache(state);
 	});
 }
