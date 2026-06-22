@@ -37,7 +37,7 @@ const DEFAULT_THINKING_LEVEL: ThinkingLevel = "low";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 const PREFERRED_FAST_MODEL_PATTERNS = [
-	/\bgpt[-_. ]?5\.5\b/,
+	/\bgpt[-_. ]?5\.5(?:[-_. ].*)?\b(?:mini|nano|fast|lite)\b/,
 	/\bgpt[-_. ]?5(?:[-_. ].*)?\b(?:mini|nano|fast|lite)\b/,
 	/\bgpt[-_. ]?4(?:\.1|o)?(?:[-_. ].*)?\b(?:mini|nano)\b/,
 	/\bgemini\b.*\b(?:flash|flash-lite|lite)\b/,
