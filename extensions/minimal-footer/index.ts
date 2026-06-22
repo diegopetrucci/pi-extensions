@@ -41,6 +41,11 @@ const DEFAULT_CONFIG: MinimalFooterConfig = {
 			},
 		},
 	},
+	experimentalMarker: {
+		enabled: true,
+		label: "xp",
+		color: "warning",
+	},
 };
 
 const DUMB_ZONE_COLORS = new Set<DumbZoneColor>([
@@ -82,6 +87,11 @@ interface MinimalFooterConfig {
 			};
 		};
 	};
+	experimentalMarker: {
+		enabled: boolean;
+		label: string;
+		color: DumbZoneColor;
+	};
 }
 
 type UsageSessionState = {
@@ -120,6 +130,7 @@ function mergeConfig(
 	const codexUsage = overrides.codexUsage;
 	const primaryWindow = codexUsage?.windows?.primary;
 	const secondaryWindow = codexUsage?.windows?.secondary;
+	const experimentalMarker = overrides.experimentalMarker;
 
 	return {
 		context: {
@@ -160,6 +171,17 @@ function mergeConfig(
 					label: normalizeLabel(secondaryWindow?.label, base.codexUsage.windows.secondary.label),
 				},
 			},
+		},
+		experimentalMarker: {
+			enabled: normalizeBoolean(
+				experimentalMarker?.enabled,
+				base.experimentalMarker.enabled,
+			),
+			label: normalizeLabel(experimentalMarker?.label, base.experimentalMarker.label),
+			color: normalizeDumbZoneColor(
+				experimentalMarker?.color,
+				base.experimentalMarker.color,
+			),
 		},
 	};
 }
@@ -211,6 +233,10 @@ function shouldShowCodexUsage(config: MinimalFooterConfig): boolean {
 		config.codexUsage.enabled &&
 		(config.codexUsage.windows.primary.enabled || config.codexUsage.windows.secondary.enabled)
 	);
+}
+
+function shouldShowExperimentalMarker(config: MinimalFooterConfig): boolean {
+	return config.experimentalMarker.enabled && process.env.PI_EXPERIMENTAL === "1";
 }
 
 function clearUsageState(state: UsageSessionState): void {
@@ -317,6 +343,10 @@ export default function (pi: ExtensionAPI) {
 					if (state.config.context.showPercent) contextParts.push(theme.fg("dim", context));
 					if (inDumbZone) contextParts.push(theme.fg(dumbZone.color, dumbZone.label));
 					if (usageSummary) contextParts.push(theme.fg("dim", usageSummary));
+					if (shouldShowExperimentalMarker(state.config)) {
+						const marker = state.config.experimentalMarker;
+						contextParts.push(theme.fg(marker.color, marker.label));
+					}
 					const contextStyled = contextParts.join(theme.fg("dim", " · "));
 					const modelStyled = theme.fg("dim", modelText);
 
