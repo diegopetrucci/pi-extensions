@@ -4,7 +4,7 @@ A pi GitHub research scout inspired by `pi-librarian`, with a local checkout cac
 
 When the `librarian` tool runs, it can cache/reuse repository checkouts locally. Use `/librarian-cache off` to force GitHub API/search and temporary fetched files only, or `/librarian-cache on` to re-enable cached local checkouts.
 
-The internal librarian subagent uses a lightweight auto-selected model by default and requests `medium` thinking. Use `/librarian-config` to set a persistent internal model or thinking-level preference.
+The internal librarian subagent uses a fast auto-selected model by default, requests `low` thinking, and prompts its scout to batch independent GitHub probes in parallel. Use `/librarian-config` to set a persistent internal model or thinking-level preference.
 
 ## Install
 
@@ -39,7 +39,7 @@ Then reload pi:
 - Uses `gh` for GitHub search/API access
 - Uses cached local checkouts only when enabled
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`
-- Configure internal subagent defaults with `/librarian-config status | model <provider/model|auto|current> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]`
+- Configure internal subagent defaults with `/librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]`
 - Cached repos are removed lazily after 7 days without use
 
 ## Commands
@@ -54,9 +54,8 @@ Then reload pi:
 ```text
 /librarian-config status
 /librarian-config model auto
-/librarian-config model current
 /librarian-config model anthropic/claude-haiku-4-5:medium
-/librarian-config thinking medium
+/librarian-config thinking low
 /librarian-config clear model
 ```
 

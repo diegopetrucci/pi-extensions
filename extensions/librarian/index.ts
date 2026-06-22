@@ -33,8 +33,19 @@ type CacheMode = "disabled" | "enabled";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 const DEFAULT_CACHE_MODE: CacheMode = "disabled";
-const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = "low";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
+const PREFERRED_FAST_MODEL_PATTERNS = [
+	/\bgpt[-_. ]?5\.5\b/,
+	/\bgpt[-_. ]?5(?:[-_. ].*)?\b(?:mini|nano|fast|lite)\b/,
+	/\bgpt[-_. ]?4(?:\.1|o)?(?:[-_. ].*)?\b(?:mini|nano)\b/,
+	/\bgemini\b.*\b(?:flash|flash-lite|lite)\b/,
+	/\bclaude\b.*\bhaiku\b/,
+	/\b(?:mistral|codestral)\b.*\b(?:small|mini|lite)\b/,
+];
+
+const HEAVY_MODEL_PATTERN = /\b(?:opus|pro|ultra|max)\b/;
 
 type ToolCall = {
 	id: string;
@@ -106,7 +117,7 @@ const LibrarianParams = Type.Object({
 	),
 	model: Type.Optional(
 		Type.String({
-			description: "Optional model override for the internal librarian subagent. Use provider/model, auto, or current.",
+			description: "Optional model override for the internal librarian subagent. Use provider/model or auto.",
 		}),
 	),
 	thinkingLevel: Type.Optional(
@@ -308,7 +319,8 @@ function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
 function normalizeModelPreference(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
-	if (!trimmed || trimmed.toLowerCase() === "auto") return undefined;
+	const normalized = trimmed.toLowerCase();
+	if (!trimmed || normalized === "auto" || normalized === "current") return undefined;
 	return trimmed;
 }
 
@@ -317,7 +329,11 @@ function parseModelPreference(value: unknown): { model?: string; thinkingLevel?:
 	if (!model) return {};
 	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh)$/i);
 	if (!match?.[1]) return { model };
-	return { model: match[1], thinkingLevel: parseThinkingLevel(match[2]) };
+	const baseModel = match[1].trim();
+	if (!baseModel || baseModel.toLowerCase() === "auto" || baseModel.toLowerCase() === "current") {
+		return { thinkingLevel: parseThinkingLevel(match[2]) };
+	}
+	return { model: baseModel, thinkingLevel: parseThinkingLevel(match[2]) };
 }
 
 async function readLibrarianPreferences(): Promise<LibrarianPreferences> {
@@ -415,8 +431,22 @@ function rankLibrarianModel(model: any): number {
 	let score = modelCostScore(model) * 1_000_000;
 	if (model.reasoning) score += 50;
 	if (/\b(?:mini|nano|haiku|flash|lite|small|fast|instant)\b/.test(text)) score -= 10;
-	if (/\b(?:opus|pro|ultra|max)\b/.test(text)) score += 1_000;
+	if (HEAVY_MODEL_PATTERN.test(text)) score += 1_000;
 	if ((model.contextWindow ?? 0) < 32_000) score += 100;
+	return score;
+}
+
+function isPreferredFastLibrarianModel(model: any): boolean {
+	const text = `${model.provider ?? ""} ${model.id ?? ""} ${model.name ?? ""}`.toLowerCase();
+	if (HEAVY_MODEL_PATTERN.test(text)) return false;
+	return PREFERRED_FAST_MODEL_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function rankPreferredFastLibrarianModel(model: any): number {
+	const text = `${model.provider ?? ""} ${model.id ?? ""} ${model.name ?? ""}`.toLowerCase();
+	let score = rankLibrarianModel(model);
+	const patternIndex = PREFERRED_FAST_MODEL_PATTERNS.findIndex((pattern) => pattern.test(text));
+	if (patternIndex >= 0) score += patternIndex * 100;
 	return score;
 }
 
@@ -453,21 +483,6 @@ async function selectLibrarianModel(
 	thinkingLevel: ThinkingLevel,
 ): Promise<{ model: any; details: LibrarianModelDetails }> {
 	const normalized = modelPreference?.trim();
-	if (normalized?.toLowerCase() === "current") {
-		if (!ctx.model) throw new Error("Librarian model=current needs an active pi model, but ctx.model is unavailable.");
-		return {
-			model: ctx.model,
-			details: {
-				modelRef: modelRef(ctx.model),
-				provider: ctx.model.provider,
-				modelId: ctx.model.id,
-				thinkingLevel,
-				autoSelected: false,
-				selectionReason: "Using the caller's current model because librarian model=current is configured.",
-			},
-		};
-	}
-
 	if (normalized) {
 		const matched = await findAvailableModel(ctx, normalized);
 		if (matched) {
@@ -486,15 +501,18 @@ async function selectLibrarianModel(
 	}
 
 	const available = await ctx.modelRegistry.getAvailable();
-	const currentProvider = ctx.model?.provider;
-	const sameProvider = currentProvider ? available.filter((model) => model.provider === currentProvider) : [];
-	const candidates = sameProvider.length > 0 ? sameProvider : available;
-	const winner = [...candidates].sort((a, b) => rankLibrarianModel(a) - rankLibrarianModel(b))[0] ?? ctx.model;
+	const preferred = available.filter(isPreferredFastLibrarianModel);
+	const winner = preferred.length > 0
+		? [...preferred].sort((a, b) => rankPreferredFastLibrarianModel(a) - rankPreferredFastLibrarianModel(b))[0]
+		: [...available].sort((a, b) => rankLibrarianModel(a) - rankLibrarianModel(b))[0];
 	if (!winner) {
 		throw new Error("No authenticated models are available for Librarian. Log in or configure an API key first.");
 	}
 
 	const fallbackText = normalized ? ` Configured model ${normalized} was unavailable, so Librarian fell back to auto-selection.` : "";
+	const selectionReason = preferred.length > 0
+		? `Selected a preferred fast Librarian model.${fallbackText}`
+		: `Selected the cheapest available model because no preferred fast Librarian model was available.${fallbackText}`;
 	return {
 		model: winner,
 		details: {
@@ -503,7 +521,7 @@ async function selectLibrarianModel(
 			modelId: winner.id,
 			thinkingLevel,
 			autoSelected: true,
-			selectionReason: `Selected the cheapest available model${sameProvider.length > 0 ? " on the current provider" : ""}.${fallbackText}`,
+			selectionReason,
 		},
 	};
 }
@@ -621,7 +639,7 @@ function buildSystemPrompt(options: {
 		? `\nLocal checkout cache is ENABLED for this call.\n- Cache root: ${options.cacheRoot}\n- Use checkout path pattern: ${options.cacheRoot}/github.com/<owner>/<repo>\n- Reuse an existing checkout when it has a .git directory. Fetch/prune before relying on it: git -C "$DIR" fetch --all --prune --tags --quiet\n- If missing, clone with gh repo clone "$REPO" "$DIR" (or git clone https://github.com/$REPO.git "$DIR").\n- If a ref/branch/SHA is requested, fetch it and check it out locally before citing files from that ref.\n- After using a checkout, update its cache marker: touch "$DIR/${CACHE_MARKER_FILE}"\n- Prefer local rg/read inside cached checkouts once a repo is cloned, and cite absolute cached paths with line ranges.\n- Clone only repositories that are relevant to the query; do not bulk-clone broad owner/org scopes unless necessary.`
 		: `\nLocal checkout cache is DISABLED for this call.\n- Do not clone repositories.\n- Use gh search/API/tree/contents calls and cache only necessary proof files under ${options.workspace}/repos/<owner>/<repo>/<path>.`;
 
-	return `You are Librarian, an evidence-first GitHub code scout running inside pi.\n\nUse only the available bash/read tools. Use gh, jq, rg, find/fd, ls, stat, mkdir, base64, and nl -ba for GitHub reconnaissance and numbered evidence. Use read for focused local file inspection.\n\nWorkspace: ${options.workspace}\nDefault gh search limit: ${options.maxSearchResults}\nTurn budget: ${MAX_TURNS} turns total, including your final answer. Stop searching once you have enough evidence.\n${cacheSection}\n\nNon-negotiable constraints:\n- Never treat gh search snippets as proof by themselves. Use fetched files or local checkouts for code-content claims.\n- Keep temporary workspace writes under ${options.workspace}/repos unless local checkout cache is enabled, in which case writes under the cache root are also allowed.
+	return `You are Librarian, an evidence-first GitHub code scout running inside pi.\n\nUse only the available bash/read tools. Use gh, jq, rg, find/fd, ls, stat, mkdir, base64, and nl -ba for GitHub reconnaissance and numbered evidence. Use read for focused local file inspection.\n\nWorkspace: ${options.workspace}\nDefault gh search limit: ${options.maxSearchResults}\nTurn budget: ${MAX_TURNS} turns total, including your final answer. Stop searching once you have enough evidence.\n${cacheSection}\n\nPerformance guidance:\n- Prefer fast, parallel exploration. When probes are independent, issue multiple separate tool calls in the same assistant turn instead of waiting for each result one-by-one.\n- Aim for 4-8 independent bash/read calls in an exploration turn when useful: parallel gh searches, tree probes, contents fetches, and targeted file reads.\n- Keep dependent work sequential, and avoid concurrent writes to the same file, checkout, or cache directory.\n\nNon-negotiable constraints:\n- Never treat gh search snippets as proof by themselves. Use fetched files or local checkouts for code-content claims.\n- Keep temporary workspace writes under ${options.workspace}/repos unless local checkout cache is enabled, in which case writes under the cache root are also allowed.
 - A runtime guard blocks destructive shell commands, credential/environment inspection, and reads outside the workspace/cache.\n- Never paste whole files. Use short snippets only when they clarify the evidence.\n- If evidence is partial or access fails (404/403), state the limitation clearly.\n- Do not present anything as fact unless it appeared in tool output or in a file you read.\n\nRecommended search flow:\n1. If symbols/text are known, start with gh search code and the provided repo/owner filters.\n2. If a repo is known but paths are unclear, resolve the default branch and inspect the git tree or contents API.\n3. Fetch or clone only the files/repos required to prove the answer.\n4. Use rg/read/nl -ba locally to produce stable path and line evidence.\n\nUseful gh patterns:\n- gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'\n- gh search code '<terms>' --json path,repository,sha,url,textMatches --limit ${options.maxSearchResults}\n- gh api "repos/$REPO/git/trees/$REF?recursive=1" > tree.json\n- gh api "repos/$REPO/contents/$FILE?ref=$REF" --jq .content | tr -d '\\n' | base64 --decode > "repos/$REPO/$FILE"\n- rg -n '<pattern>' '<local path>'\n- nl -ba '<local file>' | sed -n '10,30p'\n\nOutput format, exact order:\n## Summary\n1-3 concise sentences.\n## Locations\n- \`path\` or \`path:lineStart-lineEnd\` — what is here and why it matters; include GitHub URL when useful. If nothing relevant is found, write \`- (none)\`.\n## Evidence\n- \`path\` or \`path:lineStart-lineEnd\` — what this proves. Include concise snippets only if useful.\n## Searched\nOnly include when incomplete/not found or when the search path matters. List queries, filters, and probes used.\n## Next steps\nOptional: 1-3 narrow follow-up checks for remaining ambiguity.`;
 }
 
@@ -767,16 +785,20 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			if (action === "model") {
 				const value = rest.join(" ").trim();
 				if (!value) {
-					notifyCommand(ctx, "Usage: /librarian-config model <provider/model|auto|current>", "warning");
+					notifyCommand(ctx, "Usage: /librarian-config model <provider/model|auto>", "warning");
 					return;
 				}
 				const normalized = value.toLowerCase();
+				if (normalized === "current" || normalized.startsWith("current:")) {
+					notifyCommand(ctx, "Librarian model=current is no longer supported. Use /librarian-config model auto or choose an explicit provider/model.", "warning");
+					return;
+				}
 				const parsedModel = parseModelPreference(value);
 				const next = normalized === "auto" || normalized === "clear" || normalized === "default"
 					? { ...currentPreferences(), model: undefined }
 					: {
 						...currentPreferences(),
-						model: normalized === "current" ? "current" : parsedModel.model,
+						model: parsedModel.model,
 						thinkingLevel: parsedModel.thinkingLevel ?? thinkingPreference,
 					};
 				const warning = await savePreferences(next);
@@ -817,7 +839,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			notifyCommand(ctx, "Usage: /librarian-config status | model <provider/model|auto|current> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
+			notifyCommand(ctx, "Usage: /librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
 		},
 	});
 
@@ -896,7 +918,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 		description:
 			"GitHub research scout for coding and personal-assistant tasks. Use when the answer likely lives in GitHub repos, exact repo/path locations are unknown, or you'd otherwise do exploratory gh search/tree probes plus local rg/read inspection. Librarian uses an optional 7-day local checkout cache that is disabled by default; toggle it with /librarian-cache. Configure its internal subagent defaults with /librarian-config.",
 		promptSnippet:
-			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is disabled by default and user-toggleable with /librarian-cache. Internal subagent defaults are user-configurable with /librarian-config and default to medium thinking.",
+			"Research GitHub repositories with evidence-first path and line citations; local checkout cache is disabled by default and user-toggleable with /librarian-cache. Internal subagent defaults are user-configurable with /librarian-config and default to low thinking.",
 		promptGuidelines: [
 			"Use librarian when the answer likely requires exploratory GitHub repository search or line-cited evidence from external repos.",
 			"Do not use librarian for files already present in the current workspace unless the user asks for external GitHub research.",
