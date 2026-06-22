@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-librarian",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A pi GitHub research scout with a toggleable local repo checkout cache under the user's OS cache directory.",
   "keywords": [
     "pi-package",

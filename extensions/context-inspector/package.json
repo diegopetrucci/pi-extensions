@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-context-inspector",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A pi extension that opens a local HTML dashboard explaining where the current session context is going.",
   "keywords": [
     "pi-package",
