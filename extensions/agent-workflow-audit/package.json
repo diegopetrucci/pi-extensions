@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-agent-workflow-audit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A pi extension that runs an isolated repo workflow audit and returns only the final report to the main session.",
   "keywords": [
     "pi-package",

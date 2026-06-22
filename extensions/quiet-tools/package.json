@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-quiet-tools",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A pi extension that visually compacts collapsed built-in tool rows in the TUI without changing tool results sent to the model.",
   "keywords": [
     "pi-package",
