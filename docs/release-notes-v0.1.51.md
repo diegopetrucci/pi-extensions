@@ -2,7 +2,13 @@
 
 ## Highlights
 
-This release refreshes the full extension package fleet for the latest validated Pi baseline, `0.79.10`.
+This release refreshes the full extension package fleet for the latest validated Pi baseline, `0.79.10`, and adds trusted-project git status to `minimal-footer`.
+
+## minimal-footer
+
+- adds TLH-style git dirty counts, ahead/behind counts, and optional PR number beside the branch in `minimal-footer`
+- gates git polling on project trust and runs git status with fsmonitor disabled
+- adds `gitStatus` configuration for enabling/disabling the feature and tuning git/gh refresh timeouts
 
 ## Pi compatibility
 

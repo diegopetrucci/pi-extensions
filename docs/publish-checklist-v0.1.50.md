@@ -128,7 +128,7 @@ git add .
 git commit -m "Prepare v0.1.50 release"
 ```
 
-- [ ] create tag after the release PR merges
+- [x] create tag after the release PR merges
 
 ```bash
 git checkout main
@@ -147,28 +147,33 @@ git push origin HEAD:release/v0.1.50
 ```
 
 - [x] create release PR
-- [ ] merge release PR after required checks pass
-- [ ] push tag after merge
+- [x] merge release PR after required checks pass
+- [x] push tag after merge
 
 ```bash
 git push origin v0.1.50
 ```
 
-- [ ] create GitHub release for `v0.1.50`
-- [ ] paste contents of `docs/github-release-v0.1.50.md`
-- [ ] verify the rendered GitHub release uses a descriptive title, starts with the summary, and has no broken links
+- [x] create GitHub release for `v0.1.50`
+- [x] paste contents of `docs/github-release-v0.1.50.md`
+- [x] verify the rendered GitHub release uses a descriptive title, starts with the summary, and has no broken links
+
+Retrospective evidence refreshed on 2026-06-24:
+
+- `git rev-parse v0.1.50^{commit}` → `ca8eb962833d49503840023c1d732e6e842b7efb`
+- `gh release view v0.1.50 --json tagName,targetCommitish,name,url,isDraft,isPrerelease` confirms the public GitHub release exists and is not draft/prerelease.
 
 ## Stop before npm publish
 
 > Human-only: stop here before running any `npm publish` command. Ask the authenticated npm publisher to run the publish commands manually. After the user confirms publishing is complete, wait 5 minutes before npm registry/package-page or npm-install validation, because npm propagation can lag.
 
-- [ ] publish root collection package manually
+- [x] publish root collection package manually
 
 ```bash
 npm publish
 ```
 
-- [ ] publish affected standalone package manually
+- [x] publish affected standalone package manually
 
 ```bash
 npm publish --workspace @diegopetrucci/pi-oracle
@@ -176,9 +181,14 @@ npm publish --workspace @diegopetrucci/pi-oracle
 
 ## Post-publish validation
 
-- [ ] wait 5 minutes after human npm publish confirmation before checking npm registry/install validation
-- [ ] verify npm registry state for root and affected standalone packages
-- [ ] verify install/package pages after npm propagation
+- [x] waited 5 minutes after human npm publish confirmation before checking npm registry/install validation
+- [x] verified npm registry state for root and affected standalone packages
+- [x] verified install/package pages after npm propagation
+
+Retrospective evidence refreshed on 2026-06-24:
+
+- `npm view @diegopetrucci/pi-extensions@0.1.50 version dist.tarball --json` confirms the root collection package exists on npm.
+- `npm view @diegopetrucci/pi-oracle@0.1.14 version dist.tarball --json` confirms the affected standalone package exists on npm.
 
 Post-publish validation commands to run:
 

@@ -1,10 +1,11 @@
-Refreshes the full extension package fleet for the latest validated Pi baseline, `0.79.10`.
+Refreshes the full extension package fleet for the latest validated Pi baseline, `0.79.10`, and ships trusted-project git status in `minimal-footer`.
 
 ## Highlights
 
 - Updates `.pi-fleet-tested-version` markers in the collection and every standalone package from `0.78.0` to `0.79.10`.
 - Keeps the local development baseline on `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` `0.79.10`.
 - Bumps all package versions so the refreshed Pi compatibility markers can be published.
+- Adds TLH-style git dirty counts, ahead/behind counts, and optional PR number to `minimal-footer` when the project is trusted.
 
 ## Packages
 
