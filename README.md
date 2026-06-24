@@ -13,8 +13,8 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
 - [`git-footer`](./extensions/git-footer): Standalone extension that adds TLH-style git dirty counts, ahead/behind, and optional PR number to pi's built-in footer status area.
 - [`gnosis`](./extensions/gnosis): Exposes the `gn` repo-local knowledge base CLI as an agent tool for searching and recording durable project decisions, constraints, and intent.
-- [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
 - [`illustrations-to-explain-things`](./extensions/illustrations-to-explain-things): Adds a skill for generating clean, absurd Xiaohei-style article illustrations, shot lists, image edits, and visual metaphors.
+- [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
 - [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, and cached repos expiring after 7 days of non-use.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch plus cached git dirty/ahead/PR status and repo on the first line, context/model on the second, optional `DUMB ZONE`, optional `xp` marker, plus OpenAI Codex 5-hour and 7-day usage when available.
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.

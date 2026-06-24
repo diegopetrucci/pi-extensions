@@ -4,7 +4,7 @@
 
 Released `@diegopetrucci/pi-extensions@0.1.51` plus refreshed standalone extension packages for Pi `0.79.10`.
 
-This release updates the fleet-tested markers in the collection and every standalone package from `0.78.0` to `0.79.10`, with package version bumps so the refreshed compatibility metadata can be published.
+This release updates the fleet-tested markers in the collection and every standalone package from `0.78.0` to `0.79.10`, with package version bumps so the refreshed compatibility metadata can be published. It also ships trusted-project git dirty/ahead/PR status in `minimal-footer`.
 
 Install:
 
@@ -16,17 +16,17 @@ pi install npm:@diegopetrucci/pi-extensions
 
 Released `pi-extensions@0.1.51` with all standalone extension packages refreshed for Pi `0.79.10`.
 
-The package fleet now carries updated `.pi-fleet-tested-version` markers for the latest validated Pi baseline.
+The package fleet now carries updated `.pi-fleet-tested-version` markers for the latest validated Pi baseline, and `minimal-footer` can show trusted-project git dirty/ahead/PR status.
 
 ## Very short version
 
-Released `pi-extensions@0.1.51`: package fleet refreshed for Pi `0.79.10`.
+Released `pi-extensions@0.1.51`: package fleet refreshed for Pi `0.79.10`, plus `minimal-footer` git status.
 
 ## Discord / forum version
 
 `pi-extensions@0.1.51` is out, alongside refreshed standalone extension packages.
 
-This release updates the collection and every standalone package to carry Pi `0.79.10` fleet-tested markers, replacing the older `0.78.0` markers. Package versions were bumped so the refreshed compatibility metadata can be published.
+This release updates the collection and every standalone package to carry Pi `0.79.10` fleet-tested markers, replacing the older `0.78.0` markers. Package versions were bumped so the refreshed compatibility metadata can be published. It also adds trusted-project git dirty/ahead/PR status to `minimal-footer`.
 
 Full collection:
 

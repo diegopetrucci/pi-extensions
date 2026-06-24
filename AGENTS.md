@@ -8,6 +8,10 @@ After changing anything in this repository, if the work is done, ask the user to
 
 Keep the list of extensions in `README.md` alphabetically ordered.
 
+## Branch and Pull Request Workflow
+
+Do not commit directly to `main` in this repository. For any change, create or switch to a non-`main` branch before committing, push the branch, and open a pull request targeting `main`. If work starts while checked out on `main`, create the branch before staging or committing changes.
+
 ## Release Checklist Automation
 
 When walking through a release checklist, the agent should run all agent-safe release steps automatically up to, but not including, npm publishing: preflight checks, local smoke tests, package dry-runs, commits/tags, pushes, and GitHub release creation. Refresh dependencies with `npm ci` before local validation, then run `npm run preflight:install-state` to confirm installed packages match `package-lock.json` before smoke tests. `npm publish` is human-only: stop before any `npm publish` command and ask the user to publish manually, because npm publishing depends on the user's authenticated npm session. After the user confirms npm publishing is complete, wait 5 minutes before checking npm registry/package pages or running npm-install validation, because npm propagation can lag. After the 5-minute wait, resume post-publish validation.
