@@ -1,5 +1,7 @@
 # pi-extensions
 
+[![Total npm downloads](https://img.shields.io/npm/dt/%40diegopetrucci%2Fpi-extensions?label=total%20npm%20downloads)](https://www.npmjs.com/package/@diegopetrucci/pi-extensions)
+
 A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions and skills I made.
 
 - [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
