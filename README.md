@@ -10,6 +10,7 @@ A collection of [pi](https://github.com/earendil-works/pi-mono) agent extensions
 - [`brrr`](./extensions/brrr): Sends brrr push notifications when pi finishes an agent turn and is ready for input, with optional macOS idle gating.
 - [`claude-fast`](./extensions/claude-fast): Adds `/claude-fast` to enable Anthropic Claude Fast mode for supported Claude Opus models by injecting `speed: "fast"`.
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
+- [`contrarian`](./extensions/contrarian): Adds a read-only contrarian tool that spins up an isolated subprocess to stress-test plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.
 - [`context-cap`](./extensions/context-cap): Caps effective model context windows at 200k tokens by default so pi avoids the `dumb zone`; toggle temporarily with `/context-cap`.
 - [`context-inspector`](./extensions/context-inspector): Adds `/context`, a local self-contained HTML dashboard that breaks down where the current session context is going, with category overview, top offenders, and drilldown search.
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
