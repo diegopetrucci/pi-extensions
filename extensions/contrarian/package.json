@@ -1,0 +1,37 @@
+{
+  "name": "@diegopetrucci/pi-contrarian",
+  "version": "0.1.0",
+  "description": "A read-only contrarian subagent extension for pi that stress-tests plans, designs, assumptions, and conclusions.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "contrarian",
+    "reasoning",
+    "subagent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/contrarian"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
