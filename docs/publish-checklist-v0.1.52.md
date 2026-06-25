@@ -47,9 +47,9 @@ npm pack --dry-run --json --workspace @diegopetrucci/pi-contrarian
 
 ## Commit, tag, and GitHub release
 
-- [ ] commit release changes on non-main branch
-- [ ] push branch
-- [ ] open PR targeting `main`
+- [x] commit release changes on non-main branch (`750a82a`)
+- [x] push branch `add-contrarian-extension`
+- [x] open PR targeting `main`: https://github.com/diegopetrucci/pi-extensions/pull/28
 - [ ] after PR merge, tag `v0.1.52` on `main`
 - [ ] push tag `v0.1.52`
 - [ ] create GitHub release using `docs/github-release-v0.1.52.md`
