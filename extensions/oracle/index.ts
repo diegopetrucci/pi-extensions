@@ -612,6 +612,19 @@ function isTransientErrorMessage(message: string): boolean {
 	return TRANSIENT_ERROR_PATTERN.test(message);
 }
 
+// A model the catalog advertises but the active provider/subscription cannot
+// serve surfaces as a not-found/404-style error (legacy snapshots or
+// access-gated tiers). These are NOT transient: the same model keeps failing,
+// so callers should fall back to a different model instead of retrying it.
+const MODEL_AVAILABILITY_ERROR_PATTERN =
+	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
+
+function isModelAvailabilityError(message: string | undefined): boolean {
+	if (!message) return false;
+	if (isTransientErrorMessage(message)) return false;
+	return MODEL_AVAILABILITY_ERROR_PATTERN.test(message);
+}
+
 function formatOracleModelError(stopReason: "error" | "aborted", errorMessage: string | undefined): string {
 	const trimmed = errorMessage?.trim();
 	if (stopReason === "aborted") {
@@ -776,10 +789,48 @@ async function findAvailableModel(
 	return undefined;
 }
 
+function toOracleSelection(
+	model: PiModel,
+	thinkingLevelOverride: ThinkingLevel | undefined,
+	reason: string,
+): OracleSelection {
+	const thinking = resolveThinkingLevel(model, thinkingLevelOverride);
+	return {
+		modelRef: `${model.provider}/${model.id}`,
+		provider: model.provider,
+		modelId: model.id,
+		modelName: model.name,
+		thinkingLevel: thinking.effective,
+		...(thinking.clamped ? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true } : {}),
+		autoSelected: true,
+		selectionReason: appendThinkingLevelClampReason(reason, thinking),
+	};
+}
+
+function buildSessionFallbackSelection(
+	ctx: { model?: PiModel },
+	thinkingLevelOverride: ThinkingLevel | undefined,
+): OracleSelection | undefined {
+	const model = ctx.model;
+	if (!model) return undefined;
+	return toOracleSelection(
+		model,
+		thinkingLevelOverride,
+		`Used the current session model ${model.provider}/${model.id} as a final fallback.`,
+	);
+}
+
+function withFallbackReason(selection: OracleSelection, previous: OracleSelection): OracleSelection {
+	return {
+		...selection,
+		selectionReason: `${selection.selectionReason} (Fell back from ${previous.modelRef} after a model-availability error.)`,
+	};
+}
+
 async function selectOracleModel(
 	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
 	thinkingLevelOverride?: ThinkingLevel,
-): Promise<{ ok: true; selection: OracleSelection } | { ok: false; error: string }> {
+): Promise<{ ok: true; selection: OracleSelection; ordered: OracleSelection[] } | { ok: false; error: string }> {
 	const available = await ctx.modelRegistry.getAvailable();
 	if (available.length === 0) {
 		return {
@@ -810,27 +861,23 @@ async function selectOracleModel(
 		reason = "No reasoning models were available, so the top-ranked model across all available providers was used.";
 	}
 
+	const sorted = [...candidates].sort((a, b) => rankModel(b) - rankModel(a));
 	const preferred = selectPreferredModel(candidates, providerForPreferences);
-	const winner = preferred ?? [...candidates].sort((a, b) => rankModel(b) - rankModel(a))[0];
-	const thinking = resolveThinkingLevel(winner, thinkingLevelOverride);
-	const selectionReason = appendThinkingLevelClampReason(
-		preferred ? `Selected ${winner.id} via the hardcoded preference list for ${winner.provider}.` : reason,
-		thinking,
+	const orderedModels = preferred ? [preferred, ...sorted.filter((model) => model !== preferred)] : sorted;
+
+	const ordered = orderedModels.map((model, index) =>
+		toOracleSelection(
+			model,
+			thinkingLevelOverride,
+			index === 0
+				? preferred
+					? `Selected ${model.id} via the hardcoded preference list for ${model.provider}.`
+					: reason
+				: `Auto-selected ${model.provider}/${model.id} as a lower-ranked fallback.`,
+		),
 	);
 
-	return {
-		ok: true,
-		selection: {
-			modelRef: `${winner.provider}/${winner.id}`,
-			provider: winner.provider,
-			modelId: winner.id,
-			modelName: winner.name,
-			thinkingLevel: thinking.effective,
-			...(thinking.clamped ? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true } : {}),
-			autoSelected: true,
-			selectionReason,
-		},
-	};
+	return { ok: true, selection: ordered[0], ordered };
 }
 
 function updateOracleUi(ctx: ExtensionContext, activeRuns: Map<string, OracleUiRun>): void {
@@ -1237,7 +1284,16 @@ export default function oracleExtension(pi: ExtensionAPI) {
 			updateOracleUi(ctx, activeRuns);
 
 			try {
-				let selection: OracleSelection;
+				const attempts: OracleSelection[] = [];
+				const seen = new Set<string>();
+				const pushAttempt = (candidate: OracleSelection | undefined) => {
+					if (!candidate) return;
+					const key = `${candidate.provider}/${candidate.modelId}`.toLowerCase();
+					if (seen.has(key)) return;
+					seen.add(key);
+					attempts.push(candidate);
+				};
+
 				if (configuredModel) {
 					const modelRef = configuredModel;
 					const matched = await findAvailableModel(ctx, modelRef);
@@ -1256,7 +1312,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 						: usedToolOverride
 							? "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied."
 							: "Used the configured default oracle model. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.";
-					selection = {
+					pushAttempt({
 						modelRef: matched ? `${matched.provider}/${matched.id}` : modelRef,
 						provider,
 						modelId,
@@ -1267,7 +1323,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 							: {}),
 						autoSelected: false,
 						selectionReason,
-					};
+					});
 				} else {
 					const selectionResult = await selectOracleModel(ctx, configuredThinkingLevel);
 					if (!selectionResult.ok) {
@@ -1290,11 +1346,14 @@ export default function oracleExtension(pi: ExtensionAPI) {
 							},
 						};
 					}
-					selection = selectionResult.selection;
+					for (const candidate of selectionResult.ordered) pushAttempt(candidate);
 				}
 
-				uiRun.selection = selection;
-				updateOracleUi(ctx, activeRuns);
+				// Keep the known-good session model as a final fallback: the catalog can
+				// advertise models the active provider/subscription cannot actually serve
+				// (legacy snapshots, access-gated tiers), which fail with a not-found/404
+				// error. Falling back lets the run degrade gracefully instead of hard-failing.
+				pushAttempt(buildSessionFallbackSelection(ctx, configuredThinkingLevel));
 
 				const handleUpdate = (partial: { content: Array<{ type: "text"; text: string }>; details: OracleDetails }) => {
 					uiRun.preview = partial.content[0]?.text ?? uiRun.preview;
@@ -1302,17 +1361,51 @@ export default function oracleExtension(pi: ExtensionAPI) {
 					onUpdate?.(partial);
 				};
 
-				const result = await runOracle(selection, params, signal, handleUpdate, ctx.cwd);
-				if (!result.ok) {
-					return {
-						content: [{ type: "text", text: result.error }],
-						details: result.details,
-					};
+				let lastErrorResult: { ok: false; error: string; details: OracleDetails } | undefined;
+				for (let index = 0; index < attempts.length; index++) {
+					const previous = index > 0 ? attempts[index - 1] : undefined;
+					const attempt = previous ? withFallbackReason(attempts[index], previous) : attempts[index];
+					uiRun.selection = attempt;
+					updateOracleUi(ctx, activeRuns);
+
+					const result = await runOracle(attempt, params, signal, handleUpdate, ctx.cwd);
+					if (result.ok) {
+						return {
+							content: [{ type: "text", text: result.output }],
+							details: result.details,
+						};
+					}
+
+					lastErrorResult = result;
+					const canFallBack = index < attempts.length - 1 && isModelAvailabilityError(result.error);
+					if (!canFallBack) {
+						return {
+							content: [{ type: "text", text: result.error }],
+							details: result.details,
+						};
+					}
 				}
 
 				return {
-					content: [{ type: "text", text: result.output }],
-					details: result.details,
+					content: [
+						{ type: "text", text: lastErrorResult?.error ?? "Oracle could not select an available model." },
+					],
+					details:
+						lastErrorResult?.details ?? {
+							modelRef: "",
+							provider: ctx.model?.provider ?? "unknown",
+							modelId: "",
+							modelName: undefined,
+							thinkingLevel: configuredThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+							autoSelected: true,
+							selectionReason: "No authenticated models were available to run the oracle.",
+							includeBash: params.includeBash ?? false,
+							usage: createEmptyUsage(),
+							stderr: "",
+							exitCode: 1,
+							durationMs: 0,
+							cwd: params.cwd ?? ctx.cwd,
+						},
 				};
 			} finally {
 				activeRuns.delete(toolCallId);
