@@ -482,7 +482,7 @@ async function findAvailableModel(
 // access-gated tiers). These are NOT transient: the same model keeps failing,
 // so we fall back to the next candidate instead of retrying it.
 const MODEL_AVAILABILITY_ERROR_PATTERN =
-	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
+	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|model[_ ]?not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
 
 function isModelAvailabilityError(message: string | undefined): boolean {
 	if (!message) return false;
