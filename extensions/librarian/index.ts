@@ -477,53 +477,104 @@ async function findAvailableModel(
 	return undefined;
 }
 
-async function selectLibrarianModel(
+// A model the catalog advertises but the active provider/subscription cannot
+// serve surfaces as a not-found/404-style error (legacy snapshots or
+// access-gated tiers). These are NOT transient: the same model keeps failing,
+// so we fall back to the next candidate instead of retrying it.
+const MODEL_AVAILABILITY_ERROR_PATTERN =
+	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|model[_ ]?not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
+
+function isModelAvailabilityError(message: string | undefined): boolean {
+	if (!message) return false;
+	return MODEL_AVAILABILITY_ERROR_PATTERN.test(message);
+}
+
+type LibrarianCandidate = { model: any; details: LibrarianModelDetails };
+
+function withLibrarianFallbackReason(candidate: LibrarianCandidate, previous: LibrarianCandidate): LibrarianCandidate {
+	return {
+		model: candidate.model,
+		details: {
+			...candidate.details,
+			selectionReason: `${candidate.details.selectionReason} (Fell back from ${previous.details.modelRef} after a model-availability error.)`,
+		},
+	};
+}
+
+// Build an ordered list of model candidates to try. The catalog can advertise
+// models the active provider/subscription cannot actually serve, so callers run
+// these in order and skip ones that fail with a model-availability error,
+// ultimately falling back to the known-good current session model.
+async function buildLibrarianCandidates(
 	ctx: { model?: any; modelRegistry: { getAvailable(): any[] | Promise<any[]> } },
 	modelPreference: string | undefined,
 	thinkingLevel: ThinkingLevel,
-): Promise<{ model: any; details: LibrarianModelDetails }> {
+): Promise<LibrarianCandidate[]> {
+	const candidates: LibrarianCandidate[] = [];
+	const seen = new Set<string>();
+	const push = (model: any, details: LibrarianModelDetails) => {
+		if (!model) return;
+		const key = `${model.provider}/${model.id}`.toLowerCase();
+		if (seen.has(key)) return;
+		seen.add(key);
+		candidates.push({ model, details });
+	};
+
 	const normalized = modelPreference?.trim();
+	let configuredMatched: any | undefined;
 	if (normalized) {
-		const matched = await findAvailableModel(ctx, normalized);
-		if (matched) {
-			return {
-				model: matched,
-				details: {
-					modelRef: modelRef(matched),
-					provider: matched.provider,
-					modelId: matched.id,
-					thinkingLevel,
-					autoSelected: false,
-					selectionReason: "Using the configured librarian model.",
-				},
-			};
+		configuredMatched = await findAvailableModel(ctx, normalized);
+		if (configuredMatched) {
+			push(configuredMatched, {
+				modelRef: modelRef(configuredMatched),
+				provider: configuredMatched.provider,
+				modelId: configuredMatched.id,
+				thinkingLevel,
+				autoSelected: false,
+				selectionReason: "Using the configured librarian model.",
+			});
 		}
 	}
 
 	const available = await ctx.modelRegistry.getAvailable();
 	const preferred = available.filter(isPreferredFastLibrarianModel);
-	const winner = preferred.length > 0
-		? [...preferred].sort((a, b) => rankPreferredFastLibrarianModel(a) - rankPreferredFastLibrarianModel(b))[0]
-		: [...available].sort((a, b) => rankLibrarianModel(a) - rankLibrarianModel(b))[0];
-	if (!winner) {
+	const ranked = preferred.length > 0
+		? [...preferred].sort((a, b) => rankPreferredFastLibrarianModel(a) - rankPreferredFastLibrarianModel(b))
+		: [...available].sort((a, b) => rankLibrarianModel(a) - rankLibrarianModel(b));
+	const fallbackText = normalized && !configuredMatched
+		? ` Configured model ${normalized} was unavailable, so Librarian fell back to auto-selection.`
+		: "";
+	ranked.forEach((model, index) => {
+		const topReason = preferred.length > 0
+			? `Selected a preferred fast Librarian model.${fallbackText}`
+			: `Selected the cheapest available model because no preferred fast Librarian model was available.${fallbackText}`;
+		push(model, {
+			modelRef: modelRef(model),
+			provider: model.provider,
+			modelId: model.id,
+			thinkingLevel,
+			autoSelected: true,
+			selectionReason: index === 0 ? topReason : `Auto-selected ${modelRef(model)} as a lower-ranked fallback.`,
+		});
+	});
+
+	// Final fallback: the active session model is known to be servable.
+	if (ctx.model) {
+		push(ctx.model, {
+			modelRef: modelRef(ctx.model),
+			provider: ctx.model.provider,
+			modelId: ctx.model.id,
+			thinkingLevel,
+			autoSelected: true,
+			selectionReason: `Used the current session model ${modelRef(ctx.model)} as a final fallback.`,
+		});
+	}
+
+	if (candidates.length === 0) {
 		throw new Error("No authenticated models are available for Librarian. Log in or configure an API key first.");
 	}
 
-	const fallbackText = normalized ? ` Configured model ${normalized} was unavailable, so Librarian fell back to auto-selection.` : "";
-	const selectionReason = preferred.length > 0
-		? `Selected a preferred fast Librarian model.${fallbackText}`
-		: `Selected the cheapest available model because no preferred fast Librarian model was available.${fallbackText}`;
-	return {
-		model: winner,
-		details: {
-			modelRef: modelRef(winner),
-			provider: winner.provider,
-			modelId: winner.id,
-			thinkingLevel,
-			autoSelected: true,
-			selectionReason,
-		},
-	};
+	return candidates;
 }
 
 function resolveToolPath(cwd: string, rawPath: string): string {
@@ -944,7 +995,8 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				parseThinkingLevel((params as { thinkingLevel?: unknown }).thinkingLevel) ??
 				explicitModel.thinkingLevel ??
 				thinkingPreference;
-			const selectedModel = await selectLibrarianModel(ctx, explicitModel.model ?? modelPreference, thinkingLevel);
+			const candidates = await buildLibrarianCandidates(ctx, explicitModel.model ?? modelPreference, thinkingLevel);
+			const selectedModel = candidates[0];
 
 			const workspaceBase = path.join(os.tmpdir(), "pi-librarian");
 			await fs.mkdir(workspaceBase, { recursive: true });
@@ -1045,62 +1097,124 @@ export default function librarianExtension(pi: ExtensionAPI) {
 
 				await resourceLoader.reload();
 
-				const created = await createAgentSession({
-					cwd: workspace,
-					modelRegistry: ctx.modelRegistry,
-					resourceLoader,
-					sessionManager: SessionManager.inMemory(workspace),
-					model: selectedModel.model,
-					thinkingLevel,
-					tools: ["read", "bash"],
-				});
+				const runAttempt = async (
+					candidate: LibrarianCandidate,
+				): Promise<{ answer: string; lastAssistant: AssistantLikeMessage | undefined }> => {
+					details.model = candidate.details;
+					details.turns = 0;
+					details.toolCalls = [];
+					emit(true);
 
-				session = created.session as typeof session;
-				unsubscribe = (created.session as any).subscribe((event: any) => {
-					switch (event.type) {
-						case "turn_end":
-							details.turns += 1;
-							emit();
-							break;
-						case "tool_execution_start":
-							details.toolCalls.push({
-								id: event.toolCallId,
-								name: event.toolName,
-								args: event.args,
-								startedAt: Date.now(),
-							});
-							if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
-								details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
+					const created = await createAgentSession({
+						cwd: workspace,
+						modelRegistry: ctx.modelRegistry,
+						resourceLoader,
+						sessionManager: SessionManager.inMemory(workspace),
+						model: candidate.model,
+						thinkingLevel,
+						tools: ["read", "bash"],
+					});
+
+					session = created.session as typeof session;
+					unsubscribe = (created.session as any).subscribe((event: any) => {
+						switch (event.type) {
+							case "turn_end":
+								details.turns += 1;
+								emit();
+								break;
+							case "tool_execution_start":
+								details.toolCalls.push({
+									id: event.toolCallId,
+									name: event.toolName,
+									args: event.args,
+									startedAt: Date.now(),
+								});
+								if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
+									details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
+								}
+								emit(true);
+								break;
+							case "tool_execution_end": {
+								const call = details.toolCalls.find((item) => item.id === event.toolCallId);
+								if (call) {
+									call.endedAt = Date.now();
+									call.isError = event.isError;
+								}
+								emit(true);
+								break;
 							}
-							emit(true);
-							break;
-						case "tool_execution_end": {
-							const call = details.toolCalls.find((item) => item.id === event.toolCallId);
-							if (call) {
-								call.endedAt = Date.now();
-								call.isError = event.isError;
-							}
-							emit(true);
-							break;
 						}
-					}
-				});
+					});
 
-				if (!aborted) {
-					const promptPromise = created.session.prompt(buildUserPrompt(query, repos, owners, maxSearchResults, details.cache), {
-						expandPromptTemplates: false,
-					});
-					const timeoutPromise = new Promise<never>((_resolve, reject) => {
-						runTimeout = setTimeout(() => {
-							abort();
-							reject(new Error(`Librarian timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
-						}, MAX_RUN_MS);
-					});
-					await Promise.race([promptPromise, timeoutPromise]);
+					try {
+						if (!aborted) {
+							const promptPromise = created.session.prompt(buildUserPrompt(query, repos, owners, maxSearchResults, details.cache), {
+								expandPromptTemplates: false,
+							});
+							const timeoutPromise = new Promise<never>((_resolve, reject) => {
+								runTimeout = setTimeout(() => {
+									abort();
+									reject(new Error(`Librarian timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
+								}, MAX_RUN_MS);
+							});
+							await Promise.race([promptPromise, timeoutPromise]);
+						}
+
+						const lastAssistant = session ? getLastAssistantMessage(session.state.messages) : undefined;
+						const answer = session ? extractLastAssistantText(session.state.messages) : "";
+						return { answer, lastAssistant };
+					} finally {
+						if (runTimeout) {
+							clearTimeout(runTimeout);
+							runTimeout = undefined;
+						}
+						unsubscribe?.();
+						unsubscribe = undefined;
+						session?.dispose();
+						session = undefined;
+					}
+				};
+
+				let answer = "";
+				let lastAssistant: AssistantLikeMessage | undefined;
+				let attemptErrorReason: string | undefined;
+				for (let index = 0; index < candidates.length; index++) {
+					if (aborted) break;
+					const candidate =
+						index === 0 ? candidates[index] : withLibrarianFallbackReason(candidates[index], candidates[index - 1]);
+
+					let attempt: { answer: string; lastAssistant: AssistantLikeMessage | undefined };
+					try {
+						attempt = await runAttempt(candidate);
+					} catch (error) {
+						// Let aborts/timeouts propagate to the outer handler.
+						if (aborted || isAbortLikeError(error)) throw error;
+						// Some providers throw (rather than carry the error on the assistant
+						// message) when a model is unavailable; treat that like a
+						// message-carried availability error and fall back to the next model.
+						const message = error instanceof Error ? error.message : String(error);
+						if (index < candidates.length - 1 && isModelAvailabilityError(message)) {
+							answer = "";
+							lastAssistant = undefined;
+							attemptErrorReason = `the internal subagent stopped with an error: ${message}`;
+							continue;
+						}
+						throw error;
+					}
+
+					answer = attempt.answer;
+					lastAssistant = attempt.lastAssistant;
+					if (answer || aborted) break;
+
+					attemptErrorReason = describeNoAnswerReason(lastAssistant, details.turns);
+					const errorMessage =
+						lastAssistant && lastAssistant.stopReason === "error" && typeof lastAssistant.errorMessage === "string"
+							? lastAssistant.errorMessage
+							: undefined;
+					const canFallBack = index < candidates.length - 1 && isModelAvailabilityError(errorMessage);
+					if (!canFallBack) break;
 				}
 
-				const lastAssistant = session ? getLastAssistantMessage(session.state.messages) : undefined;
-				const answer = session ? extractLastAssistantText(session.state.messages) : "";
 				if (answer) {
 					lastContent = answer;
 					details.status = "done";
@@ -1109,7 +1223,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					details.status = "aborted";
 				} else {
 					details.status = "error";
-					const reason = describeNoAnswerReason(lastAssistant, details.turns);
+					const reason = attemptErrorReason ?? describeNoAnswerReason(lastAssistant, details.turns);
 					lastContent = formatInternalFailure(details, reason);
 					details.error = reason;
 				}
