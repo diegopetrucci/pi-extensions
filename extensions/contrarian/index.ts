@@ -1184,6 +1184,12 @@ function renderCollapsedText(text: string, lineLimit = COLLAPSED_LINE_LIMIT): st
 	return [...lines.slice(0, lineLimit), `... (${lines.length - lineLimit} more lines)`].join("\n");
 }
 
+export const __test__ = {
+	findAvailableModel,
+	resolveThinkingLevel,
+	selectContrarianModel,
+};
+
 export default function contrarianExtension(pi: ExtensionAPI) {
 	const activeRuns = new Map<string, ContrarianUiRun>();
 	let preferences: ContrarianPreferences = {};
