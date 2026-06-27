@@ -619,6 +619,19 @@ function isTransientErrorMessage(message: string): boolean {
 	return TRANSIENT_ERROR_PATTERN.test(message);
 }
 
+// A model the catalog advertises but the active provider/subscription cannot
+// serve surfaces as a not-found/404-style error (legacy snapshots or
+// access-gated tiers). These are NOT transient: the same model keeps failing,
+// so callers should fall back to a different model instead of retrying it.
+const MODEL_AVAILABILITY_ERROR_PATTERN =
+	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|model[_ ]?not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
+
+function isModelAvailabilityError(message: string | undefined): boolean {
+	if (!message) return false;
+	if (isTransientErrorMessage(message)) return false;
+	return MODEL_AVAILABILITY_ERROR_PATTERN.test(message);
+}
+
 function formatContrarianModelError(stopReason: "error" | "aborted", errorMessage: string | undefined): string {
 	const trimmed = errorMessage?.trim();
 	if (stopReason === "aborted") {
@@ -810,10 +823,48 @@ async function findAvailableModel(
 	return undefined;
 }
 
+function toContrarianSelection(
+	model: PiModel,
+	thinkingLevelOverride: ThinkingLevel | undefined,
+	reason: string,
+): ContrarianSelection {
+	const thinking = resolveThinkingLevel(model, thinkingLevelOverride);
+	return {
+		modelRef: `${model.provider}/${model.id}`,
+		provider: model.provider,
+		modelId: model.id,
+		modelName: model.name,
+		thinkingLevel: thinking.effective,
+		...(thinking.clamped ? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true } : {}),
+		autoSelected: true,
+		selectionReason: appendThinkingLevelClampReason(reason, thinking),
+	};
+}
+
+function buildSessionFallbackSelection(
+	ctx: { model?: PiModel },
+	thinkingLevelOverride: ThinkingLevel | undefined,
+): ContrarianSelection | undefined {
+	const model = ctx.model;
+	if (!model) return undefined;
+	return toContrarianSelection(
+		model,
+		thinkingLevelOverride,
+		`Used the current session model ${model.provider}/${model.id} as a final fallback.`,
+	);
+}
+
+function withFallbackReason(selection: ContrarianSelection, previous: ContrarianSelection): ContrarianSelection {
+	return {
+		...selection,
+		selectionReason: `${selection.selectionReason} (Fell back from ${previous.modelRef} after a model-availability error.)`,
+	};
+}
+
 async function selectContrarianModel(
 	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
 	thinkingLevelOverride?: ThinkingLevel,
-): Promise<{ ok: true; selection: ContrarianSelection } | { ok: false; error: string }> {
+): Promise<{ ok: true; selection: ContrarianSelection; ordered: ContrarianSelection[] } | { ok: false; error: string }> {
 	const available = await ctx.modelRegistry.getAvailable();
 	if (available.length === 0) {
 		return {
@@ -884,29 +935,25 @@ async function selectContrarianModel(
 		reason = "No reasoning models were available, so the top-ranked model across all available providers was used.";
 	}
 
+	const sorted = [...candidates].sort((a, b) => rankModel(b) - rankModel(a));
 	const preferred = providerForPreferences
 		? selectPreferredModel(candidates, providerForPreferences)
 		: selectPreferredAcrossProviders(candidates);
-	const winner = preferred ?? [...candidates].sort((a, b) => rankModel(b) - rankModel(a))[0];
-	const thinking = resolveThinkingLevel(winner, thinkingLevelOverride);
-	const selectionReason = appendThinkingLevelClampReason(
-		preferred ? `Selected ${winner.id} via the hardcoded preference lists while preferring an opposite provider/model family.` : reason,
-		thinking,
+	const orderedModels = preferred ? [preferred, ...sorted.filter((model) => model !== preferred)] : sorted;
+
+	const ordered = orderedModels.map((model, index) =>
+		toContrarianSelection(
+			model,
+			thinkingLevelOverride,
+			index === 0
+				? preferred
+					? `Selected ${model.id} via the hardcoded preference lists while preferring an opposite provider/model family.`
+					: reason
+				: `Auto-selected ${model.provider}/${model.id} as a lower-ranked fallback.`,
+		),
 	);
 
-	return {
-		ok: true,
-		selection: {
-			modelRef: `${winner.provider}/${winner.id}`,
-			provider: winner.provider,
-			modelId: winner.id,
-			modelName: winner.name,
-			thinkingLevel: thinking.effective,
-			...(thinking.clamped ? { requestedThinkingLevel: thinking.requested, thinkingLevelClamped: true } : {}),
-			autoSelected: true,
-			selectionReason,
-		},
-	};
+	return { ok: true, selection: ordered[0], ordered };
 }
 
 function updateContrarianUi(ctx: ExtensionContext, activeRuns: Map<string, ContrarianUiRun>): void {
@@ -1320,7 +1367,16 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 			updateContrarianUi(ctx, activeRuns);
 
 			try {
-				let selection: ContrarianSelection;
+				const attempts: ContrarianSelection[] = [];
+				const seen = new Set<string>();
+				const pushAttempt = (candidate: ContrarianSelection | undefined) => {
+					if (!candidate) return;
+					const key = `${candidate.provider}/${candidate.modelId}`.toLowerCase();
+					if (seen.has(key)) return;
+					seen.add(key);
+					attempts.push(candidate);
+				};
+
 				if (configuredModel) {
 					const modelRef = configuredModel;
 					const matched = await findAvailableModel(ctx, modelRef);
@@ -1339,7 +1395,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 						: usedToolOverride
 							? "Used the explicit model override provided in the tool call. The model was not matched against the authenticated model list, so the reasoning level fallback was applied."
 							: "Used the configured default contrarian model. The model was not matched against the authenticated model list, so the reasoning level fallback was applied.";
-					selection = {
+					pushAttempt({
 						modelRef: matched ? `${matched.provider}/${matched.id}` : modelRef,
 						provider,
 						modelId,
@@ -1350,7 +1406,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 							: {}),
 						autoSelected: false,
 						selectionReason,
-					};
+					});
 				} else {
 					const selectionResult = await selectContrarianModel(ctx, configuredThinkingLevel);
 					if (!selectionResult.ok) {
@@ -1373,11 +1429,14 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 							},
 						};
 					}
-					selection = selectionResult.selection;
+					for (const candidate of selectionResult.ordered) pushAttempt(candidate);
 				}
 
-				uiRun.selection = selection;
-				updateContrarianUi(ctx, activeRuns);
+				// Keep the known-good session model as a final fallback: the catalog can
+				// advertise models the active provider/subscription cannot actually serve
+				// (legacy snapshots, access-gated tiers), which fail with a not-found/404
+				// error. Falling back lets the run degrade gracefully instead of hard-failing.
+				pushAttempt(buildSessionFallbackSelection(ctx, configuredThinkingLevel));
 
 				const handleUpdate = (partial: { content: Array<{ type: "text"; text: string }>; details: ContrarianDetails }) => {
 					uiRun.preview = partial.content[0]?.text ?? uiRun.preview;
@@ -1385,17 +1444,51 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 					onUpdate?.(partial);
 				};
 
-				const result = await runContrarian(selection, params, signal, handleUpdate, ctx.cwd);
-				if (!result.ok) {
-					return {
-						content: [{ type: "text", text: result.error }],
-						details: result.details,
-					};
+				let lastErrorResult: { ok: false; error: string; details: ContrarianDetails } | undefined;
+				for (let index = 0; index < attempts.length; index++) {
+					const previous = index > 0 ? attempts[index - 1] : undefined;
+					const attempt = previous ? withFallbackReason(attempts[index], previous) : attempts[index];
+					uiRun.selection = attempt;
+					updateContrarianUi(ctx, activeRuns);
+
+					const result = await runContrarian(attempt, params, signal, handleUpdate, ctx.cwd);
+					if (result.ok) {
+						return {
+							content: [{ type: "text", text: result.output }],
+							details: result.details,
+						};
+					}
+
+					lastErrorResult = result;
+					const canFallBack = index < attempts.length - 1 && isModelAvailabilityError(result.error);
+					if (!canFallBack) {
+						return {
+							content: [{ type: "text", text: result.error }],
+							details: result.details,
+						};
+					}
 				}
 
 				return {
-					content: [{ type: "text", text: result.output }],
-					details: result.details,
+					content: [
+						{ type: "text", text: lastErrorResult?.error ?? "Contrarian could not select an available model." },
+					],
+					details:
+						lastErrorResult?.details ?? {
+							modelRef: "",
+							provider: ctx.model?.provider ?? "unknown",
+							modelId: "",
+							modelName: undefined,
+							thinkingLevel: configuredThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+							autoSelected: true,
+							selectionReason: "No authenticated models were available to run the contrarian.",
+							includeBash: params.includeBash ?? false,
+							usage: createEmptyUsage(),
+							stderr: "",
+							exitCode: 1,
+							durationMs: 0,
+							cwd: params.cwd ?? ctx.cwd,
+						},
 				};
 			} finally {
 				activeRuns.delete(toolCallId);
