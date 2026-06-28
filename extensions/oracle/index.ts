@@ -1108,6 +1108,13 @@ function renderCollapsedText(text: string, lineLimit = COLLAPSED_LINE_LIMIT): st
 	return [...lines.slice(0, lineLimit), `... (${lines.length - lineLimit} more lines)`].join("\n");
 }
 
+export const __test__ = {
+	findAvailableModel,
+	parseModelPreference,
+	resolveThinkingLevel,
+	selectOracleModel,
+};
+
 export default function oracleExtension(pi: ExtensionAPI) {
 	const activeRuns = new Map<string, OracleUiRun>();
 	let preferences: OraclePreferences = {};
