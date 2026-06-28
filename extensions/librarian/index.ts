@@ -777,6 +777,13 @@ function isAbortLikeError(error: unknown): boolean {
 	return /aborted|cancelled|canceled/i.test(message);
 }
 
+export const __test__ = {
+	buildLibrarianCandidates,
+	findAvailableModel,
+	isModelAvailabilityError,
+	parseModelPreference,
+};
+
 export default function librarianExtension(pi: ExtensionAPI) {
 	let cachePreference: CacheMode = DEFAULT_CACHE_MODE;
 	let modelPreference: string | undefined;

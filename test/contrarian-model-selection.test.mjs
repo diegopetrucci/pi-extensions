@@ -41,6 +41,18 @@ test('contrarian explicit model matching prefers exact provider-qualified matche
   assert.equal(await findAvailableModel(ctx, 'anthropic/claude-opus-4.8'), exactMatch);
 });
 
+test('contrarian model preference parsing keeps the model ref and extracts the thinking-level suffix', async () => {
+  const { parseModelPreference } = await loadContrarianTestUtils();
+
+  assert.deepEqual(parseModelPreference(' anthropic/claude-opus-4.8:medium '), {
+    model: 'anthropic/claude-opus-4.8',
+    thinkingLevel: 'medium',
+  });
+  assert.deepEqual(parseModelPreference('anthropic/claude-opus-4.8'), {
+    model: 'anthropic/claude-opus-4.8',
+  });
+});
+
 test('contrarian auto-selection prefers an opposite provider and model family when available', async () => {
   const { selectContrarianModel } = await loadContrarianTestUtils();
   const result = await selectContrarianModel(
@@ -60,6 +72,28 @@ test('contrarian auto-selection prefers an opposite provider and model family wh
   assert.equal(result.selection.modelRef, 'anthropic/claude-opus-4.8');
   assert.equal(result.selection.autoSelected, true);
   assert.match(result.selection.selectionReason, /opposite provider\/model family/i);
+});
+
+test('contrarian auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
+  const { selectContrarianModel } = await loadContrarianTestUtils();
+  const result = await selectContrarianModel(
+    createContext({
+      model: { provider: 'custom', id: 'solver-1', reasoning: true },
+      available: [
+        { provider: 'custom', id: 'solver-1', reasoning: true },
+        { provider: 'custom', id: 'solver-2', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.selection.modelRef, 'custom/solver-2');
+  assert.match(
+    result.selection.selectionReason,
+    /No opposite provider\/model family was available, so the top-ranked reasoning model on the current provider was used\./i,
+  );
 });
 
 test('contrarian thinking-level resolution clamps unsupported levels for matched models', async () => {
