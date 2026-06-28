@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -43,6 +43,27 @@ function toPosix(filePath) {
 
 function readManifest(packageDef) {
   return JSON.parse(readFileSync(path.join(repoRoot, packageDef.manifestPath), 'utf8'));
+}
+
+function collectDirectoryFiles(rootPath) {
+  const files = [];
+
+  function visit(currentPath) {
+    for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        files.push(toPosix(path.relative(rootPath, entryPath)));
+      }
+    }
+  }
+
+  visit(rootPath);
+  return files;
 }
 
 function getDependencySections(manifest) {
@@ -275,11 +296,13 @@ test('publishable package files allowlists include declared runtime files', () =
 
       const stats = statSync(absoluteEntry);
       if (stats.isDirectory()) {
-        const prefix = `${normalizedEntry}/`;
-        assert.ok(
-          [...packedFiles].some((filePath) => filePath.startsWith(prefix)),
-          `${packageDef.label} published files must include runtime directory ${normalizedEntry}`,
-        );
+        for (const nestedFile of collectDirectoryFiles(absoluteEntry)) {
+          const publishedPath = toPosix(path.join(normalizedEntry, nestedFile));
+          assert.ok(
+            packedFiles.has(publishedPath),
+            `${packageDef.label} published files must include runtime directory file ${publishedPath}`,
+          );
+        }
       } else {
         assert.ok(
           packedFiles.has(normalizedEntry),
