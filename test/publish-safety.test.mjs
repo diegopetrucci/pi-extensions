@@ -2,14 +2,18 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import ts from 'typescript';
+import { getWorkspacePackageDefs, repoRoot } from './workspace-package-helpers.mjs';
 
-const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, '..');
 const packagePackCache = new Map();
 const localModuleExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json'];
+const packageLikeJavaScriptExtensions = new Map([
+  ['.js', ['.ts', '.tsx']],
+  ['.jsx', ['.tsx', '.ts']],
+  ['.mjs', ['.mts', '.ts']],
+  ['.cjs', ['.cts', '.ts']],
+]);
 
 const publishablePackages = [
   {
@@ -17,24 +21,7 @@ const publishablePackages = [
     packageRoot: repoRoot,
     manifestPath: 'package.json',
   },
-  {
-    label: 'oracle',
-    packageRoot: path.join(repoRoot, 'extensions/oracle'),
-    manifestPath: 'extensions/oracle/package.json',
-    workspace: '@diegopetrucci/pi-oracle',
-  },
-  {
-    label: 'contrarian',
-    packageRoot: path.join(repoRoot, 'extensions/contrarian'),
-    manifestPath: 'extensions/contrarian/package.json',
-    workspace: '@diegopetrucci/pi-contrarian',
-  },
-  {
-    label: 'librarian',
-    packageRoot: path.join(repoRoot, 'extensions/librarian'),
-    manifestPath: 'extensions/librarian/package.json',
-    workspace: '@diegopetrucci/pi-librarian',
-  },
+  ...getWorkspacePackageDefs(),
 ];
 
 function toPosix(filePath) {
@@ -148,7 +135,12 @@ function resolveLocalModule(importerPath, specifier) {
   const basePath = path.resolve(path.dirname(importerPath), specifier);
   const ext = path.extname(basePath);
   const candidates = ext
-    ? [basePath]
+    ? [
+        basePath,
+        ...(packageLikeJavaScriptExtensions.get(ext) ?? []).map((sourceExtension) =>
+          `${basePath.slice(0, -ext.length)}${sourceExtension}`,
+        ),
+      ]
     : [
         basePath,
         ...localModuleExtensions.map((extension) => `${basePath}${extension}`),

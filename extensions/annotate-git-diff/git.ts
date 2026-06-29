@@ -938,6 +938,7 @@ export async function loadReviewFileContents(
 }
 
 export const __testing = {
+	parseNameStatus,
 	parseStatusPorcelainZ,
 	shouldNormalizeBranchChanges,
 };
