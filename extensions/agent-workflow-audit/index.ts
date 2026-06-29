@@ -1103,6 +1103,13 @@ async function runAudit(
 	}
 }
 
+export const __test__ = {
+	assertToolPathInsideCwd,
+	createAuditRuntimeGuardExtension,
+	getBlockedBashReason,
+	parseArgs,
+};
+
 export default function agentWorkflowAuditExtension(pi: ExtensionAPI) {
 	pi.registerMessageRenderer(CUSTOM_TYPE, (message, { expanded }, theme) => {
 		const details = message.details as AuditDetails | undefined;
