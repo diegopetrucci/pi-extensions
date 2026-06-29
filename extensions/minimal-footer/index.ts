@@ -925,3 +925,14 @@ export default function (pi: ExtensionAPI) {
 		disposeGitCache(state);
 	});
 }
+
+export const __testing = {
+	GitFooterCache,
+	GIT_STATUS_ARGS,
+	GH_PR_VIEW_ARGS,
+	parseGitStatusPorcelainV2,
+	parsePullRequestJson,
+	formatGitStatusFooterSegment,
+	formatPullRequestFooterSegment,
+	formatGitFooterStatus,
+};
