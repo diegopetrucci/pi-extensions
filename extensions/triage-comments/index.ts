@@ -227,14 +227,14 @@ function normalizeComment(raw: unknown, index: number): NormalizedComment | unde
 
 	return {
 		index,
-		id: asTrimmedString(record.id ?? record.databaseId ?? record.nodeId),
+		id: asStableIdPart(record.id, record.databaseId, record.nodeId),
 		body,
 		path: asTrimmedString(record.path ?? record.file ?? record.filePath),
 		line: asFiniteNumber(record.line ?? record.position),
 		startLine: asFiniteNumber(record.startLine ?? record.start_line),
 		side: asTrimmedString(record.side),
 		diffHunk: asTrimmedString(record.diffHunk ?? record.diff_hunk ?? record.hunk),
-		author: asTrimmedString(record.author ?? record.user ?? record.login),
+		author: githubLogin(record.author) ?? githubLogin(record.user) ?? asTrimmedString(record.login),
 		url: asTrimmedString(record.url ?? record.htmlUrl ?? record.html_url),
 		createdAt: asTrimmedString(record.createdAt ?? record.created_at),
 		context: asTrimmedString(record.context ?? record.extraContext),
@@ -670,7 +670,11 @@ function normalizeFlagValue(value: string | undefined): string | undefined {
 }
 
 function getBlockedGhApiReason(tokens: string[]): string | undefined {
-	if (getGhCommand(tokens).command !== "api") return undefined;
+	const parsed = getGhCommand(tokens);
+	if (parsed.command !== "api") return undefined;
+	if (tokens.find((token) => token.toLowerCase() === "graphql")) {
+		return "Triage bash blocks gh api graphql because it uses POST/body fields.";
+	}
 	for (let index = 1; index < tokens.length; index += 1) {
 		const token = tokens[index];
 		const lowerToken = token.toLowerCase();
@@ -1876,6 +1880,16 @@ async function runPrMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, target?
 		ctx.ui.setStatus('triage-comments', undefined);
 	}
 }
+
+export const __test__ = {
+	assertToolPathInsideCwd,
+	createTriageRuntimeGuardExtension,
+	getBlockedBashReason,
+	normalizeComment,
+	normalizeInput,
+	parseTriageCommandArgs,
+	prepareArguments,
+};
 
 export default function triageCommentsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("triage-comments", {

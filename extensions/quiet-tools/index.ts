@@ -307,6 +307,12 @@ function createQuietToolDefinitions(cwd: string, enabled: boolean): ToolDefiniti
 	return enabled ? baseDefinitions.map(createQuietToolDefinition) : baseDefinitions;
 }
 
+export const __testing = {
+	sanitizeInlineText,
+	formatQuietCallLine,
+	createQuietToolDefinition,
+};
+
 export default function quietToolsExtension(pi: ExtensionAPI) {
 	let enabled = true;
 

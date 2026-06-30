@@ -60,6 +60,24 @@ let reviewLoopFixingEnabled = false;
 let reviewCustomInstructions: string | undefined = undefined;
 let reviewLoopInProgress = false;
 
+function getReviewRuntimeState() {
+	return {
+		reviewOriginId,
+		endReviewInProgress,
+		reviewLoopFixingEnabled,
+		reviewCustomInstructions,
+		reviewLoopInProgress,
+	};
+}
+
+function resetReviewRuntimeState() {
+	reviewOriginId = undefined;
+	endReviewInProgress = false;
+	reviewLoopFixingEnabled = false;
+	reviewCustomInstructions = undefined;
+	reviewLoopInProgress = false;
+}
+
 const REVIEW_STATE_TYPE = "review-session";
 const REVIEW_ANCHOR_TYPE = "review-anchor";
 const REVIEW_SETTINGS_TYPE = "review-settings";
@@ -630,18 +648,20 @@ async function hasPendingChanges(pi: ExtensionAPI): Promise<boolean> {
 function parsePrReference(ref: string): number | null {
 	const trimmed = ref.trim();
 
-	// Try as a number first
-	const num = parseInt(trimmed, 10);
-	if (!isNaN(num) && num > 0) {
-		return num;
+	if (/^\d+$/.test(trimmed)) {
+		const num = Number(trimmed);
+		if (Number.isSafeInteger(num) && num > 0) {
+			return num;
+		}
 	}
 
 	// Try to extract from GitHub URL
 	// Formats: https://github.com/owner/repo/pull/123
 	//          github.com/owner/repo/pull/123
-	const urlMatch = trimmed.match(/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/);
+	const urlMatch = trimmed.match(/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:[/?#]|$)/);
 	if (urlMatch) {
-		return parseInt(urlMatch[1], 10);
+		const num = Number(urlMatch[1]);
+		return Number.isSafeInteger(num) && num > 0 ? num : null;
 	}
 
 	return null;
@@ -763,6 +783,30 @@ async function buildReviewPrompt(
 /**
  * Get user-facing hint for the review target
  */
+type ComposeReviewPromptOptions = {
+	customInstructions?: string;
+	extraInstruction?: string;
+	projectGuidelines?: string | null;
+};
+
+function composeReviewPrompt(prompt: string, options: ComposeReviewPromptOptions = {}): string {
+	let fullPrompt = `${REVIEW_RUBRIC}\n\n---\n\nPlease perform a code review with the following focus:\n\n${prompt}`;
+
+	if (options.customInstructions?.trim()) {
+		fullPrompt += `\n\nShared custom review instructions (applies to all reviews):\n\n${options.customInstructions.trim()}`;
+	}
+
+	if (options.extraInstruction?.trim()) {
+		fullPrompt += `\n\nAdditional user-provided review instruction:\n\n${options.extraInstruction.trim()}`;
+	}
+
+	if (options.projectGuidelines?.trim()) {
+		fullPrompt += `\n\nThis project has additional instructions for code reviews:\n\n${options.projectGuidelines.trim()}`;
+	}
+
+	return fullPrompt;
+}
+
 function getUserFacingHint(target: ReviewTarget): string {
 	switch (target.type) {
 		case "uncommitted":
@@ -833,6 +877,130 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function tokenizeArgs(value: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | null = null;
+
+	for (let i = 0; i < value.length; i++) {
+		const char = value[i];
+
+		if (quote) {
+			if (char === "\\" && i + 1 < value.length) {
+				current += value[i + 1];
+				i += 1;
+				continue;
+			}
+			if (char === quote) {
+				quote = null;
+				continue;
+			}
+			current += char;
+			continue;
+		}
+
+		if (char === '"' || char === "'") {
+			quote = char;
+			continue;
+		}
+
+		if (/\s/.test(char)) {
+			if (current.length > 0) {
+				tokens.push(current);
+				current = "";
+			}
+			continue;
+		}
+
+		current += char;
+	}
+
+	if (current.length > 0) {
+		tokens.push(current);
+	}
+
+	return tokens;
+}
+
+function parseReviewPaths(value: string): string[] {
+	return tokenizeArgs(value)
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+}
+
+type ParsedReviewArgs = {
+	target: ReviewTarget | { type: "pr"; ref: string } | null;
+	extraInstruction?: string;
+	error?: string;
+};
+
+function parseArgs(args: string | undefined): ParsedReviewArgs {
+	if (!args?.trim()) return { target: null };
+
+	const rawParts = tokenizeArgs(args.trim());
+	const parts: string[] = [];
+	let extraInstruction: string | undefined;
+
+	for (let i = 0; i < rawParts.length; i++) {
+		const part = rawParts[i];
+		if (part === "--extra") {
+			const next = rawParts[i + 1];
+			if (!next) {
+				return { target: null, error: "Missing value for --extra" };
+			}
+			extraInstruction = next;
+			i += 1;
+			continue;
+		}
+
+		if (part.startsWith("--extra=")) {
+			extraInstruction = part.slice("--extra=".length);
+			continue;
+		}
+
+		parts.push(part);
+	}
+
+	if (parts.length === 0) {
+		return { target: null, extraInstruction };
+	}
+
+	const subcommand = parts[0]?.toLowerCase();
+
+	switch (subcommand) {
+		case "uncommitted":
+			return { target: { type: "uncommitted" }, extraInstruction };
+
+		case "branch": {
+			const branch = parts[1];
+			if (!branch) return { target: null, extraInstruction };
+			return { target: { type: "baseBranch", branch }, extraInstruction };
+		}
+
+		case "commit": {
+			const sha = parts[1];
+			if (!sha) return { target: null, extraInstruction };
+			const title = parts.slice(2).join(" ") || undefined;
+			return { target: { type: "commit", sha, title }, extraInstruction };
+		}
+
+		case "folder": {
+			const paths = parts.slice(1).map((item) => item.trim()).filter((item) => item.length > 0);
+			if (paths.length === 0) return { target: null, extraInstruction };
+			return { target: { type: "folder", paths }, extraInstruction };
+		}
+
+		case "pr": {
+			const ref = parts[1];
+			if (!ref) return { target: null, extraInstruction };
+			return { target: { type: "pr", ref }, extraInstruction };
+		}
+
+		default:
+			return { target: null, extraInstruction };
+	}
+}
+
 async function waitForLoopTurnToStart(ctx: ExtensionContext, previousAssistantId?: string): Promise<boolean> {
 	const deadline = Date.now() + REVIEW_LOOP_START_TIMEOUT_MS;
 
@@ -862,6 +1030,24 @@ type ReviewPresetValue =
 	| (typeof REVIEW_PRESETS)[number]["value"]
 	| typeof TOGGLE_LOOP_FIXING_VALUE
 	| typeof TOGGLE_CUSTOM_INSTRUCTIONS_VALUE;
+
+export const __test__ = {
+	applyReviewSettings,
+	applyReviewState,
+	buildReviewPrompt,
+	composeReviewPrompt,
+	getReviewRuntimeState,
+	getReviewSettings,
+	getReviewState,
+	hasBlockingReviewFindings,
+	hasNeedsAttentionVerdict,
+	getUserFacingHint,
+	parseArgs,
+	parsePrReference,
+	parseReviewPaths,
+	resetReviewRuntimeState,
+	tokenizeArgs,
+};
 
 export default function reviewExtension(pi: ExtensionAPI) {
 	function persistReviewSettings() {
@@ -1276,13 +1462,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
 	}
 
 
-	function parseReviewPaths(value: string): string[] {
-		return value
-			.split(/\s+/)
-			.map((item) => item.trim())
-			.filter((item) => item.length > 0);
-	}
-
 	/**
 	 * Show folder input
 	 */
@@ -1433,20 +1612,11 @@ export default function reviewExtension(pi: ExtensionAPI) {
 		const hint = getUserFacingHint(target);
 		const projectGuidelines = canReadProjectConfig(ctx) ? await loadProjectReviewGuidelines(ctx.cwd) : null;
 
-		// Combine the review rubric with the specific prompt
-		let fullPrompt = `${REVIEW_RUBRIC}\n\n---\n\nPlease perform a code review with the following focus:\n\n${prompt}`;
-
-		if (reviewCustomInstructions) {
-			fullPrompt += `\n\nShared custom review instructions (applies to all reviews):\n\n${reviewCustomInstructions}`;
-		}
-
-		if (options?.extraInstruction?.trim()) {
-			fullPrompt += `\n\nAdditional user-provided review instruction:\n\n${options.extraInstruction.trim()}`;
-		}
-
-		if (projectGuidelines) {
-			fullPrompt += `\n\nThis project has additional instructions for code reviews:\n\n${projectGuidelines}`;
-		}
+		const fullPrompt = composeReviewPrompt(prompt, {
+			customInstructions: reviewCustomInstructions,
+			extraInstruction: options?.extraInstruction,
+			projectGuidelines,
+		});
 
 		const modeHint = useFreshSession ? " (fresh session)" : "";
 		ctx.ui.notify(`Starting review: ${hint}${modeHint}`, "info");
@@ -1454,129 +1624,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
 		// Send as a user message that triggers a turn
 		pi.sendUserMessage(fullPrompt);
 		return true;
-	}
-
-	/**
-	 * Parse command arguments for direct invocation
-	 * Returns the target or a special marker for PR that needs async handling
-	 */
-	type ParsedReviewArgs = {
-		target: ReviewTarget | { type: "pr"; ref: string } | null;
-		extraInstruction?: string;
-		error?: string;
-	};
-
-	function tokenizeArgs(value: string): string[] {
-		const tokens: string[] = [];
-		let current = "";
-		let quote: '"' | "'" | null = null;
-
-		for (let i = 0; i < value.length; i++) {
-			const char = value[i];
-
-			if (quote) {
-				if (char === "\\" && i + 1 < value.length) {
-					current += value[i + 1];
-					i += 1;
-					continue;
-				}
-				if (char === quote) {
-					quote = null;
-					continue;
-				}
-				current += char;
-				continue;
-			}
-
-			if (char === '"' || char === "'") {
-				quote = char;
-				continue;
-			}
-
-			if (/\s/.test(char)) {
-				if (current.length > 0) {
-					tokens.push(current);
-					current = "";
-				}
-				continue;
-			}
-
-			current += char;
-		}
-
-		if (current.length > 0) {
-			tokens.push(current);
-		}
-
-		return tokens;
-	}
-
-	function parseArgs(args: string | undefined): ParsedReviewArgs {
-		if (!args?.trim()) return { target: null };
-
-		const rawParts = tokenizeArgs(args.trim());
-		const parts: string[] = [];
-		let extraInstruction: string | undefined;
-
-		for (let i = 0; i < rawParts.length; i++) {
-			const part = rawParts[i];
-			if (part === "--extra") {
-				const next = rawParts[i + 1];
-				if (!next) {
-					return { target: null, error: "Missing value for --extra" };
-				}
-				extraInstruction = next;
-				i += 1;
-				continue;
-			}
-
-			if (part.startsWith("--extra=")) {
-				extraInstruction = part.slice("--extra=".length);
-				continue;
-			}
-
-			parts.push(part);
-		}
-
-		if (parts.length === 0) {
-			return { target: null, extraInstruction };
-		}
-
-		const subcommand = parts[0]?.toLowerCase();
-
-		switch (subcommand) {
-			case "uncommitted":
-				return { target: { type: "uncommitted" }, extraInstruction };
-
-			case "branch": {
-				const branch = parts[1];
-				if (!branch) return { target: null, extraInstruction };
-				return { target: { type: "baseBranch", branch }, extraInstruction };
-			}
-
-			case "commit": {
-				const sha = parts[1];
-				if (!sha) return { target: null, extraInstruction };
-				const title = parts.slice(2).join(" ") || undefined;
-				return { target: { type: "commit", sha, title }, extraInstruction };
-			}
-
-
-			case "folder": {
-				const paths = parseReviewPaths(parts.slice(1).join(" "));
-				if (paths.length === 0) return { target: null, extraInstruction };
-				return { target: { type: "folder", paths }, extraInstruction };
-			}
-
-			case "pr": {
-				const ref = parts[1];
-				if (!ref) return { target: null, extraInstruction };
-				return { target: { type: "pr", ref }, extraInstruction };
-			}
-
-			default:
-				return { target: null, extraInstruction };
-		}
 	}
 
 	/**

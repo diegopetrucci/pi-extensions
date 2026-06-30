@@ -1447,6 +1447,11 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; 
 </html>`;
 }
 
+export const __testing = {
+	analyzeEntries,
+	buildReportData,
+};
+
 export default function contextInspectorExtension(pi: ExtensionAPI) {
 	pi.registerCommand("context", {
 		description: "Open a local HTML breakdown of where this session's context is going",
