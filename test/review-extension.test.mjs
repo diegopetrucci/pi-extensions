@@ -47,6 +47,164 @@ function createGitPi(execImpl) {
   };
 }
 
+function createResponseQueue(values, fallback = undefined) {
+  const queue = Array.isArray(values) ? [...values] : values === undefined ? [] : [values];
+  return (...args) => {
+    if (queue.length === 0) {
+      return typeof fallback === 'function' ? fallback(...args) : fallback;
+    }
+    const next = queue.shift();
+    return typeof next === 'function' ? next(...args) : next;
+  };
+}
+
+function createReviewHarness({ execImpl } = {}) {
+  const harness = createExtensionHarness({ execImpl });
+  const appendEntries = [];
+  const sentUserMessages = [];
+
+  harness.pi.appendEntry = (customType, data) => {
+    appendEntries.push({ customType, data });
+  };
+  harness.pi.sendUserMessage = (message, options) => {
+    sentUserMessages.push({ message, options });
+  };
+
+  reviewExtension(harness.pi);
+
+  return {
+    ...harness,
+    appendEntries,
+    sentUserMessages,
+    reviewHandler: harness.commands.get('review').handler,
+    endReviewHandler: harness.commands.get('end-review').handler,
+  };
+}
+
+function createReviewCommandContext({
+  hasUI = true,
+  entries = [],
+  branchEntries = entries,
+  leafId = 'leaf-1',
+  selectResponses,
+  editorResponses,
+  customResponses,
+  navigateTreeImpl,
+  initialEditorText = '',
+} = {}) {
+  const notifications = [];
+  const selectCalls = [];
+  const editorCalls = [];
+  const customCalls = [];
+  const navigateCalls = [];
+  const setEditorTextCalls = [];
+  const widgetCalls = [];
+  const waitForIdleCalls = [];
+  let editorText = initialEditorText;
+
+  const nextSelect = createResponseQueue(selectResponses);
+  const nextEditor = createResponseQueue(editorResponses);
+  const nextCustom = createResponseQueue(customResponses);
+
+  return {
+    notifications,
+    selectCalls,
+    editorCalls,
+    customCalls,
+    navigateCalls,
+    setEditorTextCalls,
+    widgetCalls,
+    waitForIdleCalls,
+    ctx: {
+      hasUI,
+      cwd: repoRoot,
+      ui: {
+        notify(message, level) {
+          notifications.push({ message, level });
+        },
+        async select(prompt, items) {
+          selectCalls.push({ prompt, items });
+          return nextSelect(prompt, items);
+        },
+        async editor(prompt, initialValue) {
+          editorCalls.push({ prompt, initialValue });
+          return nextEditor(prompt, initialValue);
+        },
+        async custom(renderer) {
+          customCalls.push({ renderer });
+          return nextCustom(renderer);
+        },
+        setEditorText(text) {
+          editorText = text;
+          setEditorTextCalls.push(text);
+        },
+        getEditorText() {
+          return editorText;
+        },
+        setWidget(name, widget) {
+          widgetCalls.push({ name, widget });
+        },
+      },
+      sessionManager: {
+        getEntries() {
+          return entries;
+        },
+        getBranch() {
+          return branchEntries;
+        },
+        getLeafId() {
+          return leafId;
+        },
+      },
+      async navigateTree(id, options) {
+        navigateCalls.push({ id, options });
+        if (navigateTreeImpl) {
+          return navigateTreeImpl(id, options);
+        }
+        return { cancelled: false };
+      },
+      async waitForIdle() {
+        waitForIdleCalls.push(true);
+      },
+      isIdle() {
+        return true;
+      },
+      hasPendingMessages() {
+        return false;
+      },
+    },
+  };
+}
+
+function createCleanGitExec({
+  status = '',
+  currentBranch = 'feature/review-tests',
+  defaultBranch = 'main',
+  branches = [currentBranch, defaultBranch],
+} = {}) {
+  return async (command, args) => {
+    assert.equal(command, 'git');
+
+    if (args[0] === 'rev-parse' && args[1] === '--git-dir') {
+      return { stdout: '.git\n', stderr: '', code: 0 };
+    }
+    if (args[0] === 'status' && args[1] === '--porcelain') {
+      return { stdout: status, stderr: '', code: 0 };
+    }
+    if (args[0] === 'branch' && args[1] === '--show-current') {
+      return { stdout: `${currentBranch}\n`, stderr: '', code: 0 };
+    }
+    if (args[0] === 'symbolic-ref' && args[1] === 'refs/remotes/origin/HEAD') {
+      return { stdout: `origin/${defaultBranch}\n`, stderr: '', code: 0 };
+    }
+    if (args[0] === 'branch' && args[1] === '--format=%(refname:short)') {
+      return { stdout: `${branches.join('\n')}\n`, stderr: '', code: 0 };
+    }
+
+    throw new Error(`Unexpected git call: ${args.join(' ')}`);
+  };
+}
+
 test('review parses blocking findings from findings sections and verdict fallbacks', { concurrency: false }, () => {
   reviewTestApi.resetReviewRuntimeState();
 
@@ -242,4 +400,210 @@ test('review prompt helpers build merge-base prompts, fallback prompts, and fina
   assert.match(fullPrompt, /Shared custom review instructions \(applies to all reviews\):\n\nShared preference/);
   assert.match(fullPrompt, /Additional user-provided review instruction:\n\nFocus on perf/);
   assert.match(fullPrompt, /This project has additional instructions for code reviews:\n\nProject rule/);
+});
+
+test('review command guards no-UI, active-review, and missing-git-repo paths before starting work', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const noUiHarness = createReviewHarness();
+  const noUiContext = createReviewCommandContext({ hasUI: false });
+  await noUiHarness.reviewHandler('', noUiContext.ctx);
+  assert.deepEqual(noUiContext.notifications, [{ message: 'Review requires interactive mode', level: 'error' }]);
+  assert.deepEqual(noUiHarness.execCalls, []);
+  assert.deepEqual(noUiHarness.sentUserMessages, []);
+
+  reviewTestApi.resetReviewRuntimeState();
+  const activeReviewState = createReviewStateContext({
+    branchEntries: [
+      {
+        type: 'custom',
+        customType: 'review-session',
+        data: { active: true, originId: 'origin-active' },
+      },
+    ],
+  });
+  reviewTestApi.applyReviewState(activeReviewState.ctx);
+
+  const activeHarness = createReviewHarness({ execImpl: createCleanGitExec() });
+  const activeContext = createReviewCommandContext();
+  await activeHarness.reviewHandler('', activeContext.ctx);
+  assert.deepEqual(activeContext.notifications, [
+    { message: 'Already in a review. Use /end-review to finish first.', level: 'warning' },
+  ]);
+  assert.deepEqual(activeHarness.execCalls, []);
+  assert.deepEqual(activeHarness.sentUserMessages, []);
+
+  reviewTestApi.resetReviewRuntimeState();
+  const missingRepoHarness = createReviewHarness({
+    execImpl: async (command, args) => {
+      assert.equal(command, 'git');
+      assert.deepEqual(args, ['rev-parse', '--git-dir']);
+      return { stdout: '', stderr: 'fatal: not a git repository', code: 128 };
+    },
+  });
+  const missingRepoContext = createReviewCommandContext();
+  await missingRepoHarness.reviewHandler('', missingRepoContext.ctx);
+  assert.deepEqual(missingRepoContext.notifications, [{ message: 'Not a git repository', level: 'error' }]);
+  assert.equal(missingRepoContext.customCalls.length, 0);
+  assert.deepEqual(missingRepoHarness.sentUserMessages, []);
+});
+
+test('review command rejects invalid PR args without gh or checkout and cancels cleanly', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const harness = createReviewHarness({ execImpl: createCleanGitExec() });
+  const context = createReviewCommandContext({ customResponses: [null] });
+
+  await harness.reviewHandler('pr definitely-not-a-pr', context.ctx);
+
+  assert.deepEqual(context.notifications, [
+    { message: 'Invalid PR reference. Enter a number or GitHub PR URL.', level: 'error' },
+    { message: 'PR review failed. Returning to review menu.', level: 'warning' },
+    { message: 'Review cancelled', level: 'info' },
+  ]);
+  assert.equal(context.customCalls.length, 1);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.ok(harness.execCalls.every(([command]) => command === 'git'));
+  assert.ok(harness.execCalls.every(([, args]) => !args.includes('checkout')));
+});
+
+test('review command loops back to the selector when session-mode selection is cancelled from a selector target', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const harness = createReviewHarness({ execImpl: createCleanGitExec() });
+  const context = createReviewCommandContext({
+    entries: [{ type: 'message', message: { role: 'user', text: 'start review' }, id: 'user-1' }],
+    customResponses: ['uncommitted', null],
+    selectResponses: [undefined],
+  });
+
+  await harness.reviewHandler('', context.ctx);
+
+  assert.equal(context.customCalls.length, 2);
+  assert.deepEqual(context.selectCalls.map((call) => call.prompt), ['Start review in:']);
+  assert.deepEqual(context.notifications, [{ message: 'Review cancelled', level: 'info' }]);
+  assert.deepEqual(harness.sentUserMessages, []);
+});
+
+test('review command blocks loop-fixing commit targets before starting a review turn', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const settingsState = createReviewStateContext({
+    entries: [
+      {
+        type: 'custom',
+        customType: 'review-settings',
+        data: { loopFixingEnabled: true },
+      },
+    ],
+  });
+  reviewTestApi.applyReviewSettings(settingsState.ctx);
+
+  const harness = createReviewHarness({ execImpl: createCleanGitExec() });
+  const context = createReviewCommandContext();
+
+  await harness.reviewHandler('commit abc123def Fix parser', context.ctx);
+
+  assert.deepEqual(context.notifications, [{ message: 'Loop mode does not work with commit review.', level: 'error' }]);
+  assert.equal(context.selectCalls.length, 0);
+  assert.deepEqual(harness.sentUserMessages, []);
+});
+
+test('end-review exits early when no review is active and never opens the finish selector', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const harness = createReviewHarness();
+  const context = createReviewCommandContext();
+
+  await harness.endReviewHandler('', context.ctx);
+
+  assert.equal(context.selectCalls.length, 0);
+  assert.deepEqual(context.notifications, [
+    {
+      message: 'Not in a review branch (use /review first, or review was started in current session mode)',
+      level: 'info',
+    },
+  ]);
+  assert.deepEqual(harness.appendEntries, []);
+});
+
+test('end-review guards no-UI, concurrent runs, stale state cleanup, and cancellation paths', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const noUiHarness = createReviewHarness();
+  const noUiContext = createReviewCommandContext({ hasUI: false });
+  await noUiHarness.endReviewHandler('', noUiContext.ctx);
+  assert.deepEqual(noUiContext.notifications, [{ message: 'End-review requires interactive mode', level: 'error' }]);
+
+  reviewTestApi.resetReviewRuntimeState();
+  const activeReviewState = createReviewStateContext({
+    branchEntries: [
+      {
+        type: 'custom',
+        customType: 'review-session',
+        data: { active: true, originId: 'origin-end-review' },
+      },
+    ],
+  });
+  reviewTestApi.applyReviewState(activeReviewState.ctx);
+
+  let resolveFirstSelect;
+  const firstSelect = new Promise((resolve) => {
+    resolveFirstSelect = resolve;
+  });
+
+  const concurrentHarness = createReviewHarness();
+  const firstContext = createReviewCommandContext({ selectResponses: [() => firstSelect] });
+  const secondContext = createReviewCommandContext();
+
+  const firstRun = concurrentHarness.endReviewHandler('', firstContext.ctx);
+  await Promise.resolve();
+  await concurrentHarness.endReviewHandler('', secondContext.ctx);
+  resolveFirstSelect(undefined);
+  await firstRun;
+
+  assert.deepEqual(secondContext.notifications, [{ message: '/end-review is already running', level: 'info' }]);
+  assert.deepEqual(firstContext.notifications, [{ message: 'Cancelled. Use /end-review to try again.', level: 'info' }]);
+
+  reviewTestApi.resetReviewRuntimeState();
+  const staleHarness = createReviewHarness();
+  const staleContext = createReviewCommandContext({
+    branchEntries: [
+      {
+        type: 'custom',
+        customType: 'review-session',
+        data: { active: true },
+      },
+    ],
+  });
+  await staleHarness.endReviewHandler('', staleContext.ctx);
+  assert.equal(staleContext.selectCalls.length, 0);
+  assert.deepEqual(staleContext.notifications, [
+    { message: 'Review state was missing origin info; cleared review status.', level: 'warning' },
+  ]);
+  assert.deepEqual(staleHarness.appendEntries, [{ customType: 'review-session', data: { active: false } }]);
+
+  reviewTestApi.resetReviewRuntimeState();
+  const cancelState = createReviewStateContext({
+    branchEntries: [
+      {
+        type: 'custom',
+        customType: 'review-session',
+        data: { active: true, originId: 'origin-cancelled-return' },
+      },
+    ],
+  });
+  reviewTestApi.applyReviewState(cancelState.ctx);
+
+  const cancelHarness = createReviewHarness();
+  const cancelContext = createReviewCommandContext({
+    selectResponses: ['Return only'],
+    navigateTreeImpl: async () => ({ cancelled: true }),
+  });
+  await cancelHarness.endReviewHandler('', cancelContext.ctx);
+
+  assert.deepEqual(cancelContext.notifications, [{ message: 'Navigation cancelled. Use /end-review to try again.', level: 'info' }]);
+  assert.equal(cancelContext.navigateCalls.length, 1);
+  assert.deepEqual(cancelHarness.appendEntries, []);
+  assert.equal(reviewTestApi.getReviewRuntimeState().reviewOriginId, 'origin-cancelled-return');
 });

@@ -2109,6 +2109,13 @@ Instructions:
 			return;
 		}
 
+		if (!getActiveReviewOrigin(ctx)) {
+			if (!getReviewState(ctx)?.active) {
+				ctx.ui.notify("Not in a review branch (use /review first, or review was started in current session mode)", "info");
+			}
+			return;
+		}
+
 		if (endReviewInProgress) {
 			ctx.ui.notify("/end-review is already running", "info");
 			return;
