@@ -240,7 +240,7 @@ test('review parses blocking findings from findings sections and verdict fallbac
   assert.equal(reviewTestApi.hasBlockingReviewFindings(messageUsingVerdictFallback), true);
 });
 
-test('review verdict parsing ignores rubric phrasing that is not an actual needs-attention verdict', { concurrency: false }, () => {
+test('review verdict parsing ignores rubric phrasing, handles quoted verdicts, and findings parsing ignores priority legends', { concurrency: false }, () => {
   reviewTestApi.resetReviewRuntimeState();
 
   const rubricText = [
@@ -248,7 +248,22 @@ test('review verdict parsing ignores rubric phrasing that is not an actual needs
     '- correct or needs attention',
   ].join('\n');
 
+  const quotedVerdictText = [
+    '## Verdict',
+    '- "Needs Attention"',
+  ].join('\n');
+
+  const priorityLegendText = [
+    '## Findings',
+    '- [P0] - Drop everything to fix',
+    '- [P1] - Urgent',
+    '',
+    'Verdict: correct',
+  ].join('\n');
+
   assert.equal(reviewTestApi.hasNeedsAttentionVerdict(rubricText), false);
+  assert.equal(reviewTestApi.hasNeedsAttentionVerdict(quotedVerdictText), true);
+  assert.equal(reviewTestApi.hasBlockingReviewFindings(priorityLegendText), false);
 });
 
 test('review parses PR references strictly from numbers and GitHub pull request URLs', { concurrency: false }, () => {
@@ -258,8 +273,12 @@ test('review parses PR references strictly from numbers and GitHub pull request 
   assert.equal(reviewTestApi.parsePrReference(' 0042 '), 42);
   assert.equal(reviewTestApi.parsePrReference('https://github.com/owner/repo/pull/42/files#discussion_r1'), 42);
   assert.equal(reviewTestApi.parsePrReference('github.com/owner/repo/pull/7'), 7);
+  assert.equal(reviewTestApi.parsePrReference('https://www.github.com/owner/repo/pull/9'), 9);
   assert.equal(reviewTestApi.parsePrReference('123abc'), null);
   assert.equal(reviewTestApi.parsePrReference('https://github.com/owner/repo/issues/42'), null);
+  assert.equal(reviewTestApi.parsePrReference('https://notgithub.com/owner/repo/pull/42'), null);
+  assert.equal(reviewTestApi.parsePrReference('https://example.com/github.com/owner/repo/pull/42'), null);
+  assert.equal(reviewTestApi.parsePrReference('ftp://github.com/owner/repo/pull/42'), null);
   assert.equal(reviewTestApi.parsePrReference('0'), null);
 });
 
@@ -286,6 +305,54 @@ test('review path parsers preserve quoted path arguments and one-off instruction
     reviewTestApi.tokenizeArgs("pr 'https://github.com/acme/repo/pull/12' --extra='security only'"),
     ['pr', 'https://github.com/acme/repo/pull/12', '--extra=security only'],
   );
+});
+
+test('review state and settings helpers keep the latest entries and normalize stored values', { concurrency: false }, () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const parsedState = reviewTestApi.getReviewState({
+    sessionManager: {
+      getBranch() {
+        return [
+          {
+            type: 'custom',
+            customType: 'review-session',
+            data: { active: true, originId: 'origin-old' },
+          },
+          {
+            type: 'custom',
+            customType: 'review-session',
+            data: { active: false, originId: 'origin-new' },
+          },
+        ];
+      },
+    },
+  });
+
+  const parsedSettings = reviewTestApi.getReviewSettings({
+    sessionManager: {
+      getEntries() {
+        return [
+          {
+            type: 'custom',
+            customType: 'review-settings',
+            data: { loopFixingEnabled: true, customInstructions: ' keep me ' },
+          },
+          {
+            type: 'custom',
+            customType: 'review-settings',
+            data: { loopFixingEnabled: false, customInstructions: '   ' },
+          },
+        ];
+      },
+    },
+  });
+
+  assert.deepEqual(parsedState, { active: false, originId: 'origin-new' });
+  assert.deepEqual(parsedSettings, {
+    loopFixingEnabled: false,
+    customInstructions: undefined,
+  });
 });
 
 test('review restores persisted review state and settings on session events', { concurrency: false }, async () => {
@@ -374,7 +441,22 @@ test('review prompt helpers build merge-base prompts, fallback prompts, and fina
   assert.match(basePrompt, /merge base commit for this comparison is abc123def/i);
   assert.match(basePrompt, /Also include local working-tree changes/);
 
+  const mergeBasePullRequestPrompt = await reviewTestApi.buildReviewPrompt(
+    mergeBasePi,
+    { type: 'pullRequest', prNumber: 12, baseBranch: 'main', title: 'Fix parser' },
+    { includeLocalChanges: true },
+  );
+  assert.match(mergeBasePullRequestPrompt, /Review pull request #12 \("Fix parser"\) against the base branch 'main'/);
+  assert.match(mergeBasePullRequestPrompt, /Run `git diff abc123def` to inspect the changes that would be merged\./);
+  assert.match(mergeBasePullRequestPrompt, /Also include local working-tree changes/);
+
   const fallbackPi = createGitPi(async () => ({ stdout: '', stderr: 'missing upstream', code: 1 }));
+  const branchFallbackPrompt = await reviewTestApi.buildReviewPrompt(
+    fallbackPi,
+    { type: 'baseBranch', branch: 'release' },
+  );
+  assert.match(branchFallbackPrompt, /Start by finding the merge diff between the current branch and release's upstream/i);
+
   const pullRequestPrompt = await reviewTestApi.buildReviewPrompt(
     fallbackPi,
     { type: 'pullRequest', prNumber: 12, baseBranch: 'main', title: 'Fix parser' },
@@ -400,6 +482,15 @@ test('review prompt helpers build merge-base prompts, fallback prompts, and fina
   assert.match(fullPrompt, /Shared custom review instructions \(applies to all reviews\):\n\nShared preference/);
   assert.match(fullPrompt, /Additional user-provided review instruction:\n\nFocus on perf/);
   assert.match(fullPrompt, /This project has additional instructions for code reviews:\n\nProject rule/);
+
+  const minimalPrompt = reviewTestApi.composeReviewPrompt('Review the target.', {
+    customInstructions: '   ',
+    extraInstruction: '',
+    projectGuidelines: '  ',
+  });
+  assert.doesNotMatch(minimalPrompt, /Shared custom review instructions/);
+  assert.doesNotMatch(minimalPrompt, /Additional user-provided review instruction/);
+  assert.doesNotMatch(minimalPrompt, /This project has additional instructions for code reviews/);
 });
 
 test('review command guards no-UI, active-review, and missing-git-repo paths before starting work', { concurrency: false }, async () => {
@@ -525,6 +616,16 @@ test('end-review exits early when no review is active and never opens the finish
     },
   ]);
   assert.deepEqual(harness.appendEntries, []);
+});
+
+test('review summary prompt preserves the required handoff sections and reviewer callout guidance', { concurrency: false }, () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const summaryPrompt = reviewTestApi.REVIEW_SUMMARY_PROMPT;
+  assert.match(summaryPrompt, /^We are leaving a code-review branch and returning to the main coding branch\./);
+  assert.match(summaryPrompt, /## Review Scope[\s\S]*## Verdict[\s\S]*## Findings[\s\S]*## Fix Queue[\s\S]*## Constraints & Preferences[\s\S]*## Human Reviewer Callouts \(Non-Blocking\)/);
+  assert.match(summaryPrompt, /If none apply, write "- \(none\)"\./);
+  assert.match(summaryPrompt, /These are informational callouts for humans and are not fix items by themselves\./);
 });
 
 test('end-review guards no-UI, concurrent runs, stale state cleanup, and cancellation paths', { concurrency: false }, async () => {
