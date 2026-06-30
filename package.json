@@ -50,6 +50,7 @@
       "./extensions/context-cap/index.ts",
       "./extensions/context-inspector/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
+      "./extensions/git-footer/index.ts",
       "./extensions/gnosis/index.ts",
       "./extensions/inline-bash/index.ts",
       "./extensions/librarian/index.ts",
