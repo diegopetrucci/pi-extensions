@@ -154,6 +154,11 @@ type CommandRunner = (
 	options: { cwd: string; signal: AbortSignal },
 ) => Promise<CommandResult>;
 
+type RunCommandSafelyResult =
+	| { kind: "ok"; result: CommandResult }
+	| { kind: "transient" }
+	| { kind: "unavailable" };
+
 type TimerHandle = unknown;
 
 type Clock = {
@@ -566,6 +571,10 @@ function defaultClock(): Clock {
 	};
 }
 
+function isCommandUnavailableError(error: unknown): boolean {
+	return !!error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT";
+}
+
 class GitFooterCache {
 	private readonly cwd: () => string;
 	private readonly canRun: () => boolean;
@@ -636,7 +645,7 @@ class GitFooterCache {
 		const result = await this.fetchGitStatus();
 		if (this.disposed) return;
 		if (result.kind === "transient") return;
-		if (result.kind === "not-a-repo") {
+		if (result.kind === "not-a-repo" || result.kind === "unavailable") {
 			this.statusSnapshot = undefined;
 			this.pullRequestSnapshot = undefined;
 			this.lastSeenBranch = undefined;
@@ -662,8 +671,8 @@ class GitFooterCache {
 
 		const pr = await this.fetchPullRequest();
 		if (this.disposed) return;
-		if (pr !== undefined) this.pullRequestSnapshot = pr;
-		else if (branchChanged) this.pullRequestSnapshot = undefined;
+		if (pr.kind === "ok") this.pullRequestSnapshot = pr.pullRequest;
+		else if (pr.kind === "not-found" || pr.kind === "unavailable") this.pullRequestSnapshot = undefined;
 
 		this.emitChangeIfSnapshotsChanged(previousStatusSnapshot, previousPullRequestSnapshot);
 	}
@@ -690,32 +699,40 @@ class GitFooterCache {
 		| { kind: "ok"; status: GitStatusSnapshot }
 		| { kind: "not-a-repo" }
 		| { kind: "transient" }
+		| { kind: "unavailable" }
 	> {
 		const result = await this.runCommandSafely("git", GIT_STATUS_ARGS, this.gitTimeoutMs);
-		if (!result) return { kind: "transient" };
-		if (result.exitCode !== 0) return { kind: "not-a-repo" };
-		return { kind: "ok", status: parseGitStatusPorcelainV2(result.stdout) };
+		if (result.kind !== "ok") return result;
+		if (result.result.exitCode !== 0) return { kind: "not-a-repo" };
+		return { kind: "ok", status: parseGitStatusPorcelainV2(result.result.stdout) };
 	}
 
-	private async fetchPullRequest(): Promise<PullRequestSnapshot | undefined> {
+	private async fetchPullRequest(): Promise<
+		| { kind: "ok"; pullRequest: PullRequestSnapshot | undefined }
+		| { kind: "not-found" }
+		| { kind: "transient" }
+		| { kind: "unavailable" }
+	> {
 		const result = await this.runCommandSafely("gh", GH_PR_VIEW_ARGS, this.ghTimeoutMs);
-		if (!result || result.exitCode !== 0) return undefined;
-		return parsePullRequestJson(result.stdout);
+		if (result.kind !== "ok") return result;
+		if (result.result.exitCode !== 0) return { kind: "not-found" };
+		return { kind: "ok", pullRequest: parsePullRequestJson(result.result.stdout) };
 	}
 
 	private async runCommandSafely(
 		command: string,
 		args: readonly string[],
 		timeoutMs: number,
-	): Promise<CommandResult | undefined> {
-		if (this.disposed) return undefined;
+	): Promise<RunCommandSafelyResult> {
+		if (this.disposed) return { kind: "transient" };
 		const controller = new AbortController();
 		this.inflightControllers.add(controller);
 		const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 		try {
-			return await this.runner(command, args, { cwd: this.cwd(), signal: controller.signal });
-		} catch {
-			return undefined;
+			const result = await this.runner(command, args, { cwd: this.cwd(), signal: controller.signal });
+			return { kind: "ok", result };
+		} catch (error) {
+			return isCommandUnavailableError(error) ? { kind: "unavailable" } : { kind: "transient" };
 		} finally {
 			clearTimeout(timeoutId);
 			this.inflightControllers.delete(controller);
