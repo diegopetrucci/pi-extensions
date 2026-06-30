@@ -440,6 +440,51 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
 
     await shutdownHandler({}, ctx);
   });
+
+  await t.test('surfaces lookup, launch, and runtime errors without editing the editor', async () => {
+    const runtimeWindow = createMockWindow('runtime-window');
+    const state = createAnnotateLastMessageState({
+      windows: [runtimeWindow],
+      findResult: {
+        ok: false,
+        code: 'empty',
+        message: 'Latest assistant message has no text to annotate.',
+      },
+    });
+    const extension = await loadAnnotateLastMessageExtension(state);
+    const { pi, commands } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-last-message').handler;
+    const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Existing editor text' });
+
+    await handler({}, ctx);
+    assert.deepEqual(notifications, [
+      { message: 'Latest assistant message has no text to annotate.', level: 'error' },
+    ]);
+    assert.deepEqual(pasted, []);
+    assert.equal(state.openCalls.length, 0);
+
+    state.findResult = createAnnotateLastMessageState().findResult;
+    await handler({}, ctx);
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Opened native annotation window.', level: 'info' },
+    ]);
+
+    runtimeWindow.emit('error', new Error('native window crashed'));
+    await flushAsyncWork();
+
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Annotation failed: native window crashed', level: 'error' },
+    ]);
+
+    state.windows.length = 0;
+    await handler({}, ctx);
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Annotation failed: No mock window queued', level: 'error' },
+    ]);
+  });
 });
 
 test('annotate-git-diff command orchestration covers guards, watcher cleanup, prompts, and window helpers', { concurrency: false }, async (t) => {
@@ -731,5 +776,133 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     ]);
 
     await shutdownHandler({}, ctx);
+  });
+
+  await t.test('surfaces repository, request, watcher, and runtime errors while cleaning up watchers', async () => {
+    const failingReviewWindow = createMockWindow('failing-review-window');
+    const initialReviewData = {
+      repoRoot: '/repo',
+      files: [{
+        id: 'file-1',
+        path: 'src/app.ts',
+        worktreeStatus: 'modified',
+        hasWorkingTreeFile: true,
+        inGitDiff: true,
+        gitDiff: {
+          status: 'modified',
+          oldPath: 'src/app.ts',
+          newPath: 'src/app.ts',
+          displayPath: 'src/app.ts',
+          hasOriginal: true,
+          hasModified: true,
+        },
+        kind: 'text',
+        mimeType: null,
+      }],
+      commits: [],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'abc123',
+      repositoryHasHead: true,
+    };
+    const state = createAnnotateGitDiffState({
+      windows: [failingReviewWindow],
+      getReviewWindowDataResults: [new Error('git metadata unavailable')],
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Existing editor text' });
+
+    await handler({}, ctx);
+    assert.deepEqual(notifications, [
+      { message: 'Review failed: git metadata unavailable', level: 'error' },
+    ]);
+    assert.deepEqual(pasted, []);
+    assert.equal(state.watchers.length, 0);
+
+    state.getReviewWindowDataResults.push(initialReviewData, new Error('refresh unavailable'));
+    state.loadFileResults.set('branch::file-1', new Error('file contents unavailable'));
+    state.commitFilesResults.set('deadbeef', new Error('commit metadata unavailable'));
+    state.clipboardReadError = new Error('clipboard denied');
+
+    await handler({}, ctx);
+    assert.equal(state.watchers.length, 1);
+
+    failingReviewWindow.emit('message', {
+      type: 'request-file',
+      requestId: 'file-error-1',
+      fileId: 'file-1',
+      scope: 'branch',
+      commitSha: null,
+    });
+    failingReviewWindow.emit('message', {
+      type: 'request-commit',
+      requestId: 'commit-error-1',
+      sha: 'deadbeef',
+    });
+    failingReviewWindow.emit('message', {
+      type: 'request-review-data',
+      requestId: 'refresh-error-1',
+    });
+    failingReviewWindow.emit('message', {
+      type: 'clipboard-read',
+      requestId: 'clipboard-error-1',
+    });
+    await flushAsyncWork();
+
+    const sentMessages = failingReviewWindow.sendCalls.map(parseReviewWindowMessage);
+    assert.deepEqual(sentMessages.find((message) => message.type === 'file-error'), {
+      type: 'file-error',
+      requestId: 'file-error-1',
+      fileId: 'file-1',
+      scope: 'branch',
+      commitSha: null,
+      message: 'file contents unavailable',
+    });
+    assert.deepEqual(sentMessages.find((message) => message.type === 'commit-error'), {
+      type: 'commit-error',
+      requestId: 'commit-error-1',
+      sha: 'deadbeef',
+      message: 'commit metadata unavailable',
+    });
+    assert.deepEqual(sentMessages.find((message) => message.type === 'review-data-error'), {
+      type: 'review-data-error',
+      requestId: 'refresh-error-1',
+      message: 'refresh unavailable',
+    });
+    assert.deepEqual(sentMessages.find((message) => message.type === 'clipboard-data'), {
+      type: 'clipboard-data',
+      requestId: 'clipboard-error-1',
+      text: '',
+      message: 'clipboard denied',
+    });
+
+    state.watchers[0].options.onError(new Error('fs watch unavailable'));
+    state.watchers[0].options.onError(new Error('ignored duplicate'));
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Review change watcher failed: fs watch unavailable', level: 'warning' },
+    ]);
+    assert.equal(
+      notifications.filter((notification) => notification.message.startsWith('Review change watcher failed:')).length,
+      1,
+    );
+
+    failingReviewWindow.emit('error', new Error('native host crashed'));
+    await flushAsyncWork();
+
+    assert.deepEqual(pasted, []);
+    assert.equal(state.disposedWatchers, 1);
+    assert.equal(state.watchers[0].disposed, true);
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Review failed: native host crashed', level: 'error' },
+    ]);
+
+    state.watchers[0].options.onError(new Error('late watcher error'));
+    assert.equal(
+      notifications.filter((notification) => notification.message.startsWith('Review change watcher failed:')).length,
+      1,
+    );
   });
 });
