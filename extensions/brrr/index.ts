@@ -159,8 +159,9 @@ function extractTextContent(content: unknown): string {
 		}
 		if (typeof part !== "object" || part === null) continue;
 
-		const maybeText = (part as { text?: unknown }).text;
-		if (typeof maybeText === "string") parts.push(maybeText);
+		const typedPart = part as { type?: unknown; text?: unknown };
+		if (typedPart.type !== undefined && typedPart.type !== "text") continue;
+		if (typeof typedPart.text === "string") parts.push(typedPart.text);
 	}
 
 	return parts.join("\n");
@@ -173,7 +174,7 @@ function lastAssistantMessage(messages: readonly unknown[]): string | undefined 
 		if ((message as { role?: unknown }).role !== "assistant") continue;
 
 		const text = extractTextContent((message as { content?: unknown }).content).trim();
-		if (text) return text;
+		return text || undefined;
 	}
 
 	return undefined;

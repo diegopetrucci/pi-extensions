@@ -40,6 +40,23 @@ function setAgentDirEnv(t, agentDir) {
   });
 }
 
+function setEnvVar(t, name, value) {
+  const original = process.env[name];
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+
+  t.after(() => {
+    if (original === undefined) {
+      delete process.env[name];
+      return;
+    }
+    process.env[name] = original;
+  });
+}
+
 function writeBrrrConfig(filePath, config) {
   writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`);
 }
@@ -74,6 +91,83 @@ function captureConsoleErrors(t) {
 
   return errors;
 }
+
+function createCommandContext({ cwd, hasUI = true, isProjectTrusted = () => true } = {}) {
+  const notifications = [];
+  const ctx = {
+    cwd,
+    hasUI,
+    isProjectTrusted,
+    ui: {
+      notify(message, level) {
+        notifications.push({ message, level });
+      },
+    },
+  };
+
+  return { ctx, notifications };
+}
+
+function getBrrrCommand(commands) {
+  const command = commands.get('brrr');
+  assert.ok(command, 'expected brrr command to be registered');
+  return command;
+}
+
+test('brrr status command reports webhook resolution and skips UI notifications when unavailable', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'BRRR_STATUS_WEBHOOK', 'https://api.brrr.now/v1/br_status_env');
+  setEnvVar(t, 'BRRR_STATUS_BRACED_WEBHOOK', 'https://api.brrr.now/v1/br_status_braced');
+
+  const configPath = path.join(agentDir, 'extensions', 'brrr.json');
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, commands } = createExtensionHarness();
+  brrrExtension(pi);
+
+  const handler = getBrrrCommand(commands).handler;
+  const { ctx, notifications } = createCommandContext({ cwd: projectDir });
+
+  writeBrrrConfig(configPath, {
+    enabled: true,
+    webhook: '$BRRR_STATUS_WEBHOOK',
+    idleSeconds: 5,
+  });
+  await handler([], ctx);
+
+  writeBrrrConfig(configPath, {
+    enabled: false,
+    webhook: '${BRRR_STATUS_BRACED_WEBHOOK}',
+    idleSeconds: null,
+  });
+  await handler([], ctx);
+
+  writeBrrrConfig(configPath, {
+    enabled: true,
+    webhook: 'https://example.com/not-brrr',
+    idleSeconds: 1,
+  });
+  await handler([], ctx);
+
+  const { ctx: noUiCtx, notifications: noUiNotifications } = createCommandContext({ cwd: projectDir, hasUI: false });
+  await handler([], noUiCtx);
+
+  assert.deepEqual(notifications, [
+    {
+      message: 'brrr is enabled; webhook configured; idle threshold 5s.',
+      level: 'info',
+    },
+    {
+      message: 'brrr is disabled; webhook configured; idle threshold off.',
+      level: 'info',
+    },
+    {
+      message: 'brrr is enabled; webhook invalid; idle threshold 1s.',
+      level: 'info',
+    },
+  ]);
+  assert.deepEqual(noUiNotifications, []);
+});
 
 test('brrr uses trusted project config over global config and formats webhook payloads', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
@@ -154,6 +248,72 @@ test('brrr uses trusted project config over global config and formats webhook pa
   );
 });
 
+test('brrr resolves $ENV and ${ENV} webhook references when sending notifications', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'BRRR_WEBHOOK_DOLLAR', 'https://api.brrr.now/v1/br_env_dollar');
+  setEnvVar(t, 'BRRR_WEBHOOK_BRACED', 'https://api.brrr.now/v1/br_env_braced');
+
+  const configPath = path.join(agentDir, 'extensions', 'brrr.json');
+  const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  brrrExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  writeBrrrConfig(configPath, {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: '$BRRR_WEBHOOK_DOLLAR',
+    idleSeconds: null,
+    includeLastAssistantMessage: false,
+    message: 'Dollar {project}',
+  });
+
+  await handler({ messages: [] }, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  writeBrrrConfig(configPath, {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: '${BRRR_WEBHOOK_BRACED}',
+    idleSeconds: null,
+    includeLastAssistantMessage: false,
+    message: 'Braced {project}',
+  });
+
+  await handler({ messages: [] }, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(
+    fetchCalls.map(({ url, options }) => ({ url, body: JSON.parse(options.body) })),
+    [
+      {
+        url: 'https://api.brrr.now/v1/br_env_dollar',
+        body: {
+          title: 'Pi finished',
+          message: 'Dollar sample-project',
+        },
+      },
+      {
+        url: 'https://api.brrr.now/v1/br_env_braced',
+        body: {
+          title: 'Pi finished',
+          message: 'Braced sample-project',
+        },
+      },
+    ],
+  );
+});
+
 test('brrr skips disabled, non-interactive, and invalid webhook configurations', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
@@ -206,7 +366,7 @@ test('brrr skips disabled, non-interactive, and invalid webhook configurations',
     isProjectTrusted: () => true,
   });
 
-  delete process.env.BRRR_WEBHOOK_URL;
+  setEnvVar(t, 'BRRR_WEBHOOK_URL', undefined);
   writeBrrrConfig(configPath, {
     enabled: true,
     onlyWhenInteractive: false,
@@ -221,6 +381,151 @@ test('brrr skips disabled, non-interactive, and invalid webhook configurations',
   });
 
   assert.equal(fetchCalls.length, 0);
+});
+
+test('brrr falls back to the valid config and warns when project config JSON is invalid', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeBrrrConfig(path.join(agentDir, 'extensions', 'brrr.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: 'https://api.brrr.now/v1/br_global_fallback',
+    idleSeconds: null,
+    includeLastAssistantMessage: false,
+    message: 'Global fallback {project}',
+  });
+  const invalidProjectConfigPath = path.join(projectDir, '.pi', 'brrr.json');
+  writeFileSync(invalidProjectConfigPath, '{ invalid json\n');
+
+  const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+  const consoleErrors = captureConsoleErrors(t);
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  brrrExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  await handler({ messages: [] }, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(
+    fetchCalls.map(({ url, options }) => ({ url, body: JSON.parse(options.body) })),
+    [
+      {
+        url: 'https://api.brrr.now/v1/br_global_fallback',
+        body: {
+          title: 'Pi finished',
+          message: 'Global fallback sample-project',
+        },
+      },
+    ],
+  );
+  assert.equal(consoleErrors.length, 1);
+  assert.match(consoleErrors[0], new RegExp(`Warning: Could not parse ${invalidProjectConfigPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`));
+});
+
+test('brrr extracts only text parts from the latest structured assistant message', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeBrrrConfig(path.join(agentDir, 'extensions', 'brrr.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: 'https://api.brrr.now/v1/br_structured',
+    idleSeconds: null,
+    includeLastAssistantMessage: true,
+    message: 'Fallback {project}',
+  });
+
+  const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  brrrExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  await handler(
+    {
+      messages: [
+        { role: 'assistant', content: 'Older reply that should not be used.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Ignore me' },
+            { type: 'tool_result', text: 'Ignore tool output' },
+            { type: 'text', text: 'Structured line 1' },
+            { type: 'text', text: 'Structured line 2' },
+          ],
+        },
+      ],
+    },
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
+
+  const [{ options }] = fetchCalls;
+  assert.deepEqual(JSON.parse(options.body), {
+    title: 'Pi finished',
+    message: 'Structured line 1\nStructured line 2',
+  });
+});
+
+test('brrr skips empty latest assistant content and falls back to the configured template', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeBrrrConfig(path.join(agentDir, 'extensions', 'brrr.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: 'https://api.brrr.now/v1/br_skip_latest_empty',
+    idleSeconds: null,
+    includeLastAssistantMessage: true,
+    message: 'Fallback {project}',
+  });
+
+  const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  brrrExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  await handler(
+    {
+      messages: [
+        { role: 'assistant', content: 'Older reply that should be ignored.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', name: 'bash', arguments: { command: 'pwd' } },
+            { type: 'image', source: 'ignored' },
+            { type: 'text', text: '   ' },
+          ],
+        },
+      ],
+    },
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
+
+  const [{ options }] = fetchCalls;
+  assert.deepEqual(JSON.parse(options.body), {
+    title: 'Pi finished',
+    message: 'Fallback sample-project',
+  });
 });
 
 test('brrr uses the last assistant message, truncates payloads, and logs webhook failures', async (t) => {
