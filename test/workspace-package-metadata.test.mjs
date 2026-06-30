@@ -42,10 +42,18 @@ function getRootCollectionRuntimeDeclarations() {
     .sort();
 }
 
+const standaloneOnlyWorkspacePackages = new Set(['git-footer']);
+
+function isStandaloneOnlyWorkspacePackage(packageDef) {
+  return standaloneOnlyWorkspacePackages.has(path.basename(packageDef.packageRoot));
+}
+
 function getExpectedRootCollectionRuntimeDeclarations() {
   const declarations = [];
 
   for (const packageDef of getWorkspacePackageDefs()) {
+    if (isStandaloneOnlyWorkspacePackage(packageDef)) continue;
+
     const manifest = readJson(packageDef.manifestPath);
     for (const { kind, entry } of getRuntimeDeclarations(manifest)) {
       const absoluteEntry = resolvePackageEntry(packageDef, entry);
@@ -97,8 +105,28 @@ test('workspace package manifests keep directory, publish, and runtime metadata 
   }
 });
 
-test('root collection manifest includes every workspace runtime declaration exactly once', () => {
+test('root collection manifest includes every non-standalone workspace runtime declaration exactly once', () => {
   assert.deepEqual(getRootCollectionRuntimeDeclarations(), getExpectedRootCollectionRuntimeDeclarations());
+
+  for (const packageDef of getWorkspacePackageDefs().filter(isStandaloneOnlyWorkspacePackage)) {
+    const manifest = readJson(packageDef.manifestPath);
+    const readme = readText(path.join(path.dirname(packageDef.manifestPath), 'README.md'));
+
+    assert.match(
+      readme,
+      /standalone-only and is not auto-loaded by the `@diegopetrucci\/pi-extensions` collection package/i,
+      `${path.basename(packageDef.packageRoot)} README should document its root collection exception`,
+    );
+
+    for (const { kind, entry } of getRuntimeDeclarations(manifest)) {
+      const absoluteEntry = resolvePackageEntry(packageDef, entry);
+      const relativeEntry = `${kind}:${toPosix(path.relative(repoRoot, absoluteEntry))}`;
+      assert.ok(
+        !getRootCollectionRuntimeDeclarations().includes(relativeEntry),
+        `${path.basename(packageDef.packageRoot)} runtime entry should remain standalone-only: ${relativeEntry}`,
+      );
+    }
+  }
 });
 
 test('workspace package READMEs include matching standalone install instructions and reload guidance', () => {
