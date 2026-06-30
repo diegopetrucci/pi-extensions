@@ -141,3 +141,70 @@ test('dirty-repo-guard prompts for dirty repo actions and respects the user choi
     },
   ]);
 });
+
+test('dirty-repo-guard ignores whitespace-only status output and treats dismissed prompts as cancellations', async () => {
+  const dirtyRepoGuard = await loadExtension('extensions/dirty-repo-guard/index.ts');
+
+  let whitespacePrompted = false;
+  const cleanHarness = createExtensionHarness({
+    async execImpl() {
+      return { stdout: '\n\n', code: 0 };
+    },
+  });
+  dirtyRepoGuard(cleanHarness.pi);
+  const cleanSwitch = getHandler(cleanHarness.handlers, 'session_before_switch');
+
+  assert.equal(
+    await cleanSwitch(
+      { reason: 'resume' },
+      {
+        hasUI: true,
+        ui: {
+          async select() {
+            whitespacePrompted = true;
+            return 'Yes, proceed anyway';
+          },
+          notify() {},
+        },
+      },
+    ),
+    undefined,
+  );
+  assert.equal(whitespacePrompted, false);
+
+  const prompts = [];
+  const notifications = [];
+  const dismissedHarness = createExtensionHarness({
+    async execImpl() {
+      return { stdout: '\n M src/index.ts\n\n?? test/new.test.mjs\n', code: 0 };
+    },
+  });
+  dirtyRepoGuard(dismissedHarness.pi);
+  const dismissedFork = getHandler(dismissedHarness.handlers, 'session_before_fork');
+
+  assert.deepEqual(
+    await dismissedFork(
+      {},
+      {
+        hasUI: true,
+        ui: {
+          async select(prompt, options) {
+            prompts.push({ prompt, options });
+            return undefined;
+          },
+          notify(message, level) {
+            notifications.push({ message, level });
+          },
+        },
+      },
+    ),
+    { cancel: true },
+  );
+  assert.deepEqual(prompts, [
+    {
+      prompt: 'You have 2 uncommitted file(s). fork anyway?',
+      options: ['Yes, proceed anyway', 'No, let me commit first'],
+    },
+  ]);
+  assert.deepEqual(notifications, [{ message: 'Commit your changes first', level: 'warning' }]);
+});

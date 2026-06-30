@@ -102,6 +102,54 @@ function captureStdout(t) {
   return writes;
 }
 
+function captureConsoleErrors(t) {
+  const errors = [];
+  const original = console.error;
+
+  console.error = (...args) => {
+    errors.push(args.map((value) => String(value)).join(' '));
+  };
+
+  t.after(() => {
+    console.error = original;
+  });
+
+  return errors;
+}
+
+function setEnvVar(t, name, value) {
+  const original = process.env[name];
+
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+
+  t.after(() => {
+    if (original === undefined) {
+      delete process.env[name];
+      return;
+    }
+    process.env[name] = original;
+  });
+}
+
+function setProcessPlatform(t, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', {
+    configurable: true,
+    enumerable: descriptor?.enumerable ?? true,
+    value,
+  });
+
+  t.after(() => {
+    if (descriptor) {
+      Object.defineProperty(process, 'platform', descriptor);
+    }
+  });
+}
+
 test('notify uses trusted project config over global config and ignores untrusted project config', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
@@ -295,4 +343,250 @@ test('notify skips none backends and swallows desktop and sound delivery failure
     { command: 'notify-send', args: ['Ready', 'Waiting'] },
     { command: '/bin/test-shell', args: ['-lc', 'printf fail'] },
   ]);
+});
+
+test('notify auto-selects terminal backends and preserves OSC formatting', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: 'Edge Title',
+    body: 'Edge Body',
+    channels: {
+      terminal: true,
+      desktop: false,
+      bell: false,
+      sound: false,
+    },
+    terminal: {
+      backend: 'auto',
+    },
+  });
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  setEnvVar(t, 'KITTY_WINDOW_ID', 'window-1');
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, [
+    '\x1b]99;i=1:d=0;Edge Title\x1b\\',
+    '\x1b]99;i=1:p=body;Edge Body\x1b\\',
+  ]);
+
+  writes.length = 0;
+  delete process.env.KITTY_WINDOW_ID;
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, [
+    '\x1b]777;notify;Edge Title;Edge Body\x07',
+  ]);
+});
+
+test('notify selects the expected desktop backend commands for auto detection', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'WT_SESSION', undefined);
+  setEnvVar(t, 'WSL_DISTRO_NAME', undefined);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: "Pi's App",
+    body: "Ready's body",
+    channels: {
+      terminal: false,
+      desktop: true,
+      bell: false,
+      sound: false,
+    },
+    desktop: {
+      backend: 'auto',
+    },
+  });
+
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  setProcessPlatform(t, 'linux');
+  setEnvVar(t, 'WT_SESSION', 'wt-session');
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  const windowsCall = execCalls.shift();
+  assert.equal(windowsCall?.command, 'powershell.exe');
+  assert.deepEqual(windowsCall?.args.slice(0, 2), ['-NoProfile', '-Command']);
+  assert.match(windowsCall?.args[2] ?? '', /ToastNotificationManager/);
+  assert.match(windowsCall?.args[2] ?? '', /CreateTextNode\('Ready''s body'\)/);
+  assert.match(windowsCall?.args[2] ?? '', /CreateToastNotifier\('Pi''s App'\)/);
+  assert.equal(windowsCall?.options, undefined);
+
+  delete process.env.WT_SESSION;
+  setProcessPlatform(t, 'darwin');
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(execCalls.shift(), {
+    command: 'osascript',
+    args: ['-e', 'display notification "Ready\'s body" with title "Pi\'s App"'],
+    options: undefined,
+  });
+
+  setProcessPlatform(t, 'linux');
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(execCalls.shift(), {
+    command: 'notify-send',
+    args: ["Pi's App", "Ready's body"],
+    options: undefined,
+  });
+  assert.equal(execCalls.length, 0);
+});
+
+test('notify selects sound commands and falls back from canberra to paplay on linux', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'WT_SESSION', undefined);
+  setEnvVar(t, 'WSL_DISTRO_NAME', undefined);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    channels: {
+      terminal: false,
+      desktop: false,
+      bell: false,
+      sound: true,
+    },
+    sound: {
+      backend: 'auto',
+      frequencyHz: 880,
+      durationMs: 120,
+      linuxSoundId: 'complete',
+    },
+  });
+
+  const execCalls = patchExecFile(t, ({ command, callback }) => {
+    if (command === 'canberra-gtk-play') {
+      callback(new Error('missing canberra'));
+      return;
+    }
+    callback(null, '', '');
+  });
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  setProcessPlatform(t, 'linux');
+  setEnvVar(t, 'WT_SESSION', 'wt-session');
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(execCalls.shift(), {
+    command: 'powershell.exe',
+    args: ['-NoProfile', '-Command', '[console]::beep(880, 120)'],
+    options: undefined,
+  });
+
+  delete process.env.WT_SESSION;
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(execCalls.splice(0), [
+    {
+      command: 'canberra-gtk-play',
+      args: ['-i', 'complete'],
+      options: undefined,
+    },
+    {
+      command: 'paplay',
+      args: ['/usr/share/sounds/freedesktop/stereo/complete.oga'],
+      options: undefined,
+    },
+  ]);
+});
+
+test('notify falls back to valid config and warns when project config JSON is invalid', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: 'Global Title',
+    body: 'Global Body',
+    channels: {
+      terminal: true,
+      desktop: false,
+      bell: false,
+      sound: false,
+    },
+    terminal: {
+      backend: 'osc777',
+    },
+  });
+
+  const invalidProjectConfigPath = path.join(projectDir, '.pi', 'notify.json');
+  writeFileSync(invalidProjectConfigPath, '{ invalid json\n');
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const consoleErrors = captureConsoleErrors(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_end');
+  assert.equal(typeof handler, 'function');
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, ['\x1b]777;notify;Global Title;Global Body\x07']);
+  assert.equal(consoleErrors.length, 1);
+  assert.match(consoleErrors[0], new RegExp(`Warning: Could not parse ${invalidProjectConfigPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`));
 });

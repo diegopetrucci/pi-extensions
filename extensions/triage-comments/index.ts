@@ -1883,10 +1883,18 @@ async function runPrMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, target?
 
 export const __test__ = {
 	assertToolPathInsideCwd,
+	buildCommandPayload,
+	buildSystemPrompt,
+	buildUserPrompt,
 	createTriageRuntimeGuardExtension,
+	ensureImplementationNote,
+	formatFetchedCommentsForSelection,
+	formatInlineFilterContext,
+	formatToolCall,
 	getBlockedBashReason,
 	normalizeComment,
 	normalizeInput,
+	parseSelectionList,
 	parseTriageCommandArgs,
 	prepareArguments,
 };

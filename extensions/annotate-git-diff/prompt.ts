@@ -43,6 +43,7 @@ function formatLocation(comment: DiffReviewComment, file: ReviewFile | undefined
 
 export function composeReviewPrompt(files: ReviewFile[], payload: ReviewSubmitPayload): string {
 	const fileMap = new Map(files.map((file) => [file.id, file]));
+	const comments = payload.comments.filter((comment) => comment.body.trim().length > 0);
 	const lines: string[] = [];
 
 	lines.push("Please address the following feedback");
@@ -54,7 +55,7 @@ export function composeReviewPrompt(files: ReviewFile[], payload: ReviewSubmitPa
 		lines.push("");
 	}
 
-	payload.comments.forEach((comment, index) => {
+	comments.forEach((comment, index) => {
 		const file = fileMap.get(comment.fileId);
 		lines.push(`${index + 1}. ${formatLocation(comment, file)}`);
 		lines.push(`   ${comment.body.trim()}`);

@@ -13,7 +13,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return undefined;
 
-		const command = event.input.command as string;
+		const command = event.input?.command;
+		if (typeof command !== "string" || command.trim() === "") {
+			return { block: true, reason: "Malformed bash command blocked" };
+		}
+
 		const isDangerous = dangerousPatterns.some((p) => p.test(command));
 
 		if (isDangerous) {

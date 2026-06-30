@@ -158,3 +158,42 @@ test('confirm-destructive confirms before forking and respects the selected choi
   ]);
   assert.deepEqual(notifications, [{ message: 'Fork cancelled', level: 'info' }]);
 });
+
+test('confirm-destructive skips prompts without UI and cancels on unexpected fork selections', async () => {
+  const confirmDestructive = await loadExtension('extensions/confirm-destructive/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  confirmDestructive(pi);
+
+  const beforeSwitch = getHandler(handlers, 'session_before_switch');
+  const beforeFork = getHandler(handlers, 'session_before_fork');
+
+  assert.equal(await beforeSwitch({ reason: 'new' }, { hasUI: false }), undefined);
+  assert.equal(await beforeFork({ entryId: 'abc' }, { hasUI: false }), undefined);
+
+  const prompts = [];
+  const notifications = [];
+  const cancelled = await beforeFork(
+    { entryId: 'abc' },
+    {
+      hasUI: true,
+      ui: {
+        async select(prompt, options) {
+          prompts.push({ prompt, options });
+          return undefined;
+        },
+        notify(message, level) {
+          notifications.push({ message, level });
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(cancelled, { cancel: true });
+  assert.deepEqual(prompts, [
+    {
+      prompt: 'Fork from entry abc?',
+      options: ['Yes, create fork', 'No, stay in current session'],
+    },
+  ]);
+  assert.deepEqual(notifications, [{ message: 'Fork cancelled', level: 'info' }]);
+});

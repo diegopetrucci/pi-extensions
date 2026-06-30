@@ -91,6 +91,10 @@ function getHandler(harness, name) {
   return handler;
 }
 
+function completionValues(result) {
+  return result?.map(({ value }) => value) ?? null;
+}
+
 function readBetaHeader(model) {
   return (model.headers?.['anthropic-beta'] ?? '')
     .split(',')
@@ -155,6 +159,112 @@ test('context-cap status, off, on, and toggle commands report and mutate the ses
   assert.equal(model.contextWindow, 400_000);
   assert.deepEqual(statuses.at(-1), { key: 'context-cap', value: undefined });
   assert.match(notifications.at(-1).message, /Context cap disabled for this extension session \(1 model window\(s\) restored\)\./);
+});
+
+test('context-cap offers completions, supports aliases, and warns on invalid usage', async () => {
+  const contextCapExtension = await loadExtension('extensions/context-cap/index.ts');
+  const harness = createExtensionHarness();
+  contextCapExtension(harness.pi);
+
+  const sessionStart = getHandler(harness, 'session_start');
+  const command = getCommand(harness, 'context-cap');
+  const model = { provider: 'anthropic', id: 'claude-opus-4-8', contextWindow: 400_000 };
+  const { ctx, notifications, statuses } = createContextCapContext({ model, registryModels: [model] });
+
+  assert.deepEqual(completionValues(command.getArgumentCompletions('')), ['on', 'off', 'toggle', 'status']);
+  assert.deepEqual(completionValues(command.getArgumentCompletions('  o')), ['on', 'off']);
+  assert.deepEqual(completionValues(command.getArgumentCompletions('t')), ['toggle']);
+
+  await sessionStart({}, ctx);
+  await command.handler('disable', ctx);
+  assert.equal(model.contextWindow, 400_000);
+  assert.deepEqual(statuses.at(-1), { key: 'context-cap', value: undefined });
+  assert.match(notifications.at(-1).message, /Context cap disabled for this extension session \(1 model window\(s\) restored\)\./);
+
+  await command.handler('enable', ctx);
+  assert.equal(model.contextWindow, 200_000);
+  assert.deepEqual(statuses.at(-1), { key: 'context-cap', value: 'ctx cap 200k' });
+  assert.match(notifications.at(-1).message, /Context cap enabled \(1 model window\(s\) capped\/restored\)\./);
+
+  await command.handler('bogus', ctx);
+  assert.deepEqual(notifications.at(-1), {
+    message: 'Usage: /context-cap on | off | toggle | status',
+    level: 'warning',
+  });
+});
+
+test('context-cap tolerates registry failures, reports no-model status, and skips UI updates for silent model selection', async () => {
+  const contextCapExtension = await loadExtension('extensions/context-cap/index.ts');
+  const harness = createExtensionHarness();
+  contextCapExtension(harness.pi);
+
+  const sessionStart = getHandler(harness, 'session_start');
+  const modelSelect = getHandler(harness, 'model_select');
+  const command = getCommand(harness, 'context-cap');
+
+  const activeModel = { provider: 'openai', id: 'gpt-5.5', contextWindow: 300_000 };
+  const registryFailureNotifications = [];
+  await sessionStart(
+    {},
+    {
+      model: activeModel,
+      hasUI: true,
+      ui: {
+        setStatus() {},
+        notify(message, level) {
+          registryFailureNotifications.push({ message, level });
+        },
+      },
+      modelRegistry: {
+        getAll() {
+          throw new Error('registry unavailable');
+        },
+      },
+    },
+  );
+  assert.equal(activeModel.contextWindow, 200_000);
+  assert.deepEqual(registryFailureNotifications, []);
+
+  const noModelNotifications = [];
+  await command.handler('status', {
+    model: undefined,
+    hasUI: true,
+    ui: {
+      setStatus() {},
+      notify(message, level) {
+        noModelNotifications.push({ message, level });
+      },
+    },
+    modelRegistry: {
+      getAll() {
+        throw new Error('registry unavailable');
+      },
+    },
+  });
+  assert.deepEqual(noModelNotifications, [{ message: 'Context cap is enabled. No model selected.', level: 'info' }]);
+
+  const selectedModel = { provider: 'anthropic', id: 'claude-opus-4-8', contextWindow: 500_000 };
+  const modelSelectStatuses = [];
+  await modelSelect(
+    { model: selectedModel },
+    {
+      model: selectedModel,
+      hasUI: false,
+      ui: {
+        setStatus(key, value) {
+          modelSelectStatuses.push({ key, value });
+        },
+        notify() {},
+      },
+      modelRegistry: {
+        getAll() {
+          return [];
+        },
+      },
+    },
+  );
+  assert.equal(selectedModel.contextWindow, 200_000);
+  assert.deepEqual(modelSelectStatuses, []);
 });
 
 test('openai-fast injects the priority service tier only for eligible OAuth Codex requests', async () => {

@@ -1104,10 +1104,15 @@ async function runAudit(
 }
 
 export const __test__ = {
+	appendRunBoundary,
 	assertToolPathInsideCwd,
+	buildSystemPrompt,
+	buildUserPrompt,
 	createAuditRuntimeGuardExtension,
+	formatToolCall,
 	getBlockedBashReason,
 	parseArgs,
+	renderCollapsedReport,
 };
 
 export default function agentWorkflowAuditExtension(pi: ExtensionAPI) {

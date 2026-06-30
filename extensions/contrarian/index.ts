@@ -1354,13 +1354,17 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 		parameters: ContrarianParams,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const rawTask = (params as { task?: unknown }).task;
+			const task = typeof rawTask === "string" ? rawTask.trim() : "";
+			if (!task) throw new Error("Invalid parameters: expected task to be a non-empty string.");
+
 			const explicitModel = parseModelPreference(params.model);
 			const defaultModel = parseModelPreference(preferences.model);
 			const configuredModel = explicitModel.model ?? defaultModel.model;
 			const configuredThinkingLevel =
 				params.thinkingLevel ?? explicitModel.thinkingLevel ?? preferences.thinkingLevel ?? defaultModel.thinkingLevel;
 			const uiRun: ContrarianUiRun = {
-				task: params.task,
+				task,
 				includeBash: params.includeBash ?? false,
 				startedAt: Date.now(),
 			};
@@ -1452,7 +1456,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 					uiRun.selection = attempt;
 					updateContrarianUi(ctx, activeRuns);
 
-					const result = await runContrarian(attempt, params, signal, handleUpdate, ctx.cwd);
+					const result = await runContrarian(attempt, { ...params, task }, signal, handleUpdate, ctx.cwd);
 					if (result.ok) {
 						return {
 							content: [{ type: "text", text: result.output }],

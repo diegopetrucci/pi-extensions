@@ -7,13 +7,13 @@ A collection of [pi](https://pi.dev) agent extensions I made.
 ### Subagents
 
 - [`contrarian`](./extensions/contrarian): Adds a read-only contrarian tool that spins up an isolated subprocess to stress-test plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.
-- [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.
 - [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, and cached repos expiring after 7 days of non-use.
+- [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.
 
 ### Providers
 
-- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.
 - [`claude-fast`](./extensions/claude-fast): Adds `/claude-fast` to enable Anthropic Claude Fast mode for supported Claude Opus models by injecting `speed: "fast"`.
+- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.
 
 ### UI
 
@@ -23,9 +23,9 @@ A collection of [pi](https://pi.dev) agent extensions I made.
 
 ### / Slash commands
 
+- [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
 - [`annotate-git-diff`](./extensions/annotate-git-diff): Adds `/annotate-git-diff`, a native Glimpse UI for annotating git diffs and appending structured feedback prompts to the editor.
 - [`annotate-last-message`](./extensions/annotate-last-message): Adds `/annotate-last-message`, a native Glimpse UI for annotating the latest assistant reply and sending planning-oriented feedback back through the editor.
--  [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
 - [`review`](./extensions/review): Adds `/review` and `/end-review` for interactive code reviews of local changes, commits, PRs, and selected paths.
 - [`triage-comments`](./extensions/triage-comments): Adds `/triage-comments` and a read-only `triage_comments` subagent tool that can auto-detect the current branch's PR, filter resolved/outdated inline comments, classify selected review comments with evidence, and suggest handling options without implementing changes
 
@@ -37,8 +37,8 @@ A collection of [pi](https://pi.dev) agent extensions I made.
 ### Safety
 
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
-- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
+- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
 
 ### Quality of life
 

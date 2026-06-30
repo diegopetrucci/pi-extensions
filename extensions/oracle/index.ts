@@ -1277,13 +1277,17 @@ export default function oracleExtension(pi: ExtensionAPI) {
 		parameters: OracleParams,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const rawTask = (params as { task?: unknown }).task;
+			const task = typeof rawTask === "string" ? rawTask.trim() : "";
+			if (!task) throw new Error("Invalid parameters: expected task to be a non-empty string.");
+
 			const explicitModel = parseModelPreference(params.model);
 			const defaultModel = parseModelPreference(preferences.model);
 			const configuredModel = explicitModel.model ?? defaultModel.model;
 			const configuredThinkingLevel =
 				params.thinkingLevel ?? explicitModel.thinkingLevel ?? preferences.thinkingLevel ?? defaultModel.thinkingLevel;
 			const uiRun: OracleUiRun = {
-				task: params.task,
+				task,
 				includeBash: params.includeBash ?? false,
 				startedAt: Date.now(),
 			};
@@ -1375,7 +1379,7 @@ export default function oracleExtension(pi: ExtensionAPI) {
 					uiRun.selection = attempt;
 					updateOracleUi(ctx, activeRuns);
 
-					const result = await runOracle(attempt, params, signal, handleUpdate, ctx.cwd);
+					const result = await runOracle(attempt, { ...params, task }, signal, handleUpdate, ctx.cwd);
 					if (result.ok) {
 						return {
 							content: [{ type: "text", text: result.output }],

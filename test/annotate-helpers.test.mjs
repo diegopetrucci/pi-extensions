@@ -42,7 +42,7 @@ async function importTsModule(relativePath) {
 const { __testing: clipboardTesting, readSystemClipboard, writeSystemClipboard } = await importTsModule(
   'extensions/annotate-git-diff/clipboard.ts',
 );
-const { __testing: gitTesting } = await importTsModule('extensions/annotate-git-diff/git.ts');
+const { __testing: gitTesting, getCommitFiles } = await importTsModule('extensions/annotate-git-diff/git.ts');
 const { composeReviewPrompt } = await importTsModule('extensions/annotate-git-diff/prompt.ts');
 const { __testing: watchTesting } = await importTsModule('extensions/annotate-git-diff/watch.ts');
 const {
@@ -288,6 +288,147 @@ test('annotate-git-diff prompt helper composes scoped review feedback for branch
   );
 });
 
+test('annotate-git-diff prompt helper skips blank comments while preserving numbering for meaningful feedback', () => {
+  const files = [
+    {
+      id: 'branch-file',
+      path: 'src/app.ts',
+      worktreeStatus: 'modified',
+      hasWorkingTreeFile: true,
+      inGitDiff: true,
+      gitDiff: {
+        status: 'modified',
+        oldPath: 'src/app.ts',
+        newPath: 'src/app.ts',
+        displayPath: 'src/app.ts',
+        hasOriginal: true,
+        hasModified: true,
+      },
+      kind: 'text',
+      mimeType: null,
+    },
+  ];
+
+  const prompt = composeReviewPrompt(files, {
+    type: 'submit',
+    overallComment: '  Keep the scope tight.  ',
+    comments: [
+      {
+        id: 'comment-blank',
+        fileId: 'branch-file',
+        scope: 'branch',
+        side: 'modified',
+        startLine: 4,
+        endLine: 4,
+        body: '   ',
+      },
+      {
+        id: 'comment-real',
+        fileId: 'branch-file',
+        scope: 'all',
+        side: 'file',
+        startLine: null,
+        endLine: null,
+        body: '  Mention the unaffected file context. ',
+      },
+    ],
+  });
+
+  assert.equal(
+    prompt,
+    [
+      'Please address the following feedback',
+      '',
+      'Keep the scope tight.',
+      '',
+      '1. [all files] src/app.ts',
+      '   Mention the unaffected file context.',
+    ].join('\n'),
+  );
+});
+
+test('annotate-git-diff commit file helper sorts files and preserves rename metadata', async () => {
+  const execCalls = [];
+  const pi = {
+    async exec(command, args, options) {
+      execCalls.push({ command, args, options });
+      assert.equal(command, 'git');
+      assert.deepEqual(args, [
+        'diff-tree',
+        '--root',
+        '--find-renames',
+        '-M',
+        '--name-status',
+        '--no-commit-id',
+        '-r',
+        'abc123',
+      ]);
+      assert.deepEqual(options, { cwd: '/repo' });
+      return {
+        code: 0,
+        stdout: 'D\tsrc/z-last.ts\nR100\tsrc/old-name.ts\tsrc/new-name.ts\nA\tsrc/a-first.ts\nX\tsrc/ignored.ts\n',
+      };
+    },
+  };
+
+  const files = await getCommitFiles(pi, '/repo', 'abc123');
+
+  assert.deepEqual(files, [
+    {
+      id: 'commit::abc123::src/a-first.ts',
+      path: 'src/a-first.ts',
+      worktreeStatus: null,
+      hasWorkingTreeFile: false,
+      inGitDiff: true,
+      gitDiff: {
+        status: 'added',
+        oldPath: null,
+        newPath: 'src/a-first.ts',
+        displayPath: 'src/a-first.ts',
+        hasOriginal: false,
+        hasModified: true,
+      },
+      kind: 'text',
+      mimeType: null,
+    },
+    {
+      id: 'commit::abc123::src/old-name.ts -> src/new-name.ts',
+      path: 'src/new-name.ts',
+      worktreeStatus: null,
+      hasWorkingTreeFile: false,
+      inGitDiff: true,
+      gitDiff: {
+        status: 'renamed',
+        oldPath: 'src/old-name.ts',
+        newPath: 'src/new-name.ts',
+        displayPath: 'src/old-name.ts -> src/new-name.ts',
+        hasOriginal: true,
+        hasModified: true,
+      },
+      kind: 'text',
+      mimeType: null,
+    },
+    {
+      id: 'commit::abc123::src/z-last.ts',
+      path: 'src/z-last.ts',
+      worktreeStatus: null,
+      hasWorkingTreeFile: false,
+      inGitDiff: true,
+      gitDiff: {
+        status: 'deleted',
+        oldPath: 'src/z-last.ts',
+        newPath: null,
+        displayPath: 'src/z-last.ts',
+        hasOriginal: true,
+        hasModified: false,
+      },
+      kind: 'text',
+      mimeType: null,
+    },
+  ]);
+  assert.equal(execCalls.length, 1);
+});
+
 test('annotate-last-message session helper reports missing, incomplete, empty, and successful assistant lookups', async (t) => {
   await t.test('returns missing when no assistant message exists on the branch', () => {
     const result = findLastAssistantMessage([{ type: 'message', message: { role: 'user' } }]);
@@ -360,6 +501,40 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
             endLine: 3,
             preview: 'Second line',
             text: 'Second line',
+          },
+        ],
+      },
+    });
+  });
+
+  await t.test('joins multiple text parts and truncates long section previews', () => {
+    const longFirstLine = 'A'.repeat(120);
+    const result = findLastAssistantMessage([
+      createAssistantEntry({
+        content: [
+          { type: 'text', text: `${longFirstLine}\nContinuation` },
+          { type: 'text', text: 'Trailing part' },
+        ],
+      }),
+    ]);
+
+    assert.deepEqual(result, {
+      ok: true,
+      data: {
+        text: `${longFirstLine}\nContinuation\nTrailing part`,
+        lines: [
+          { number: 1, text: longFirstLine },
+          { number: 2, text: 'Continuation' },
+          { number: 3, text: 'Trailing part' },
+        ],
+        sections: [
+          {
+            id: 'section-1',
+            index: 1,
+            startLine: 1,
+            endLine: 3,
+            preview: `${'A'.repeat(95)}…`,
+            text: `${longFirstLine}\nContinuation\nTrailing part`,
           },
         ],
       },

@@ -142,6 +142,12 @@ function createStatusOutput({
   return `${lines.join('\n')}\n`;
 }
 
+function createCommandUnavailableError(command) {
+  const error = new Error(`spawn ${command} ENOENT`);
+  error.code = 'ENOENT';
+  return error;
+}
+
 const gitFooterTesting = (await importTsModule('extensions/git-footer/index.ts')).__testing;
 const minimalFooterTesting = (await importTsModule('extensions/minimal-footer/index.ts')).__testing;
 
@@ -253,6 +259,43 @@ test('footer status helpers format git and PR footer segments consistently', asy
   }
 });
 
+
+test('footer status helpers handle formatting oddities without rendering junk', async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, () => {
+      assert.deepEqual(
+        testing.parseGitStatusPorcelainV2('# branch.head   feature/oddities  \n# branch.ab +oops -1\n'),
+        {
+          branch: 'feature/oddities',
+          staged: 0,
+          unstaged: 0,
+          untracked: 0,
+          conflict: 0,
+          ahead: 0,
+          behind: 0,
+        },
+      );
+
+      assert.equal(
+        testing.formatGitStatusFooterSegment({
+          branch: 'feature/oddities',
+          staged: Number.POSITIVE_INFINITY,
+          unstaged: 1.8,
+          untracked: Number.NEGATIVE_INFINITY,
+          conflict: 0,
+          ahead: 0,
+          behind: 4.7,
+        }),
+        '~1 ↓4',
+      );
+      assert.equal(testing.formatPullRequestFooterSegment({ number: 4.2 }), undefined);
+      assert.equal(testing.formatPullRequestFooterSegment({ number: Number.MAX_SAFE_INTEGER + 1 }), undefined);
+      assert.equal(testing.formatPullRequestFooterSegment({ number: '\n42\t' }), 'PR #42');
+      assert.equal(testing.formatGitFooterStatus(undefined, { number: '\n42\t' }), 'PR #42');
+    });
+  }
+});
+
 test('footer status caches use fake runners and clocks without invoking real git or gh', async (t) => {
   for (const { name, testing } of suites) {
     await t.test(name, async () => {
@@ -355,6 +398,7 @@ test('footer status caches dedupe in-flight refreshes and abort runners on dispo
     await t.test(name, async () => {
       const fakeClock = createFakeClock();
       const calls = [];
+      let changes = 0;
       let resolveGit;
       const runner = (command, args, options) => {
         calls.push({ command, args: [...args], signal: options.signal });
@@ -375,6 +419,9 @@ test('footer status caches dedupe in-flight refreshes and abort runners on dispo
         cwd: () => '/tmp/footer-status',
         runner,
         clock: fakeClock.clock,
+        onChange: () => {
+          changes += 1;
+        },
       });
 
       const firstRefresh = cache.refresh();
@@ -391,6 +438,280 @@ test('footer status caches dedupe in-flight refreshes and abort runners on dispo
       await firstRefresh;
       await cache.refresh();
       assert.equal(calls.length, 1);
+      assert.equal(changes, 0);
+    });
+  }
+});
+
+
+test('footer status caches preserve last good snapshots on transient runner failures', async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, async () => {
+      const fakeClock = createFakeClock();
+      let changes = 0;
+      const transientError = new Error('temporary failure');
+      const { calls, runner, queue } = createScriptedRunner([
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/transient-cache', ahead: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '{"number":7,"state":"OPEN"}',
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({
+              branch: 'feature/transient-cache',
+              ahead: 2,
+              trackedLines: ['1 .M N... 100644 100644 100644 1234567890abcdef src/dirty.ts'],
+            }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: () => {
+            throw transientError;
+          },
+        },
+        {
+          command: 'git',
+          result: () => {
+            throw transientError;
+          },
+        },
+      ]);
+
+      const cache = new testing.GitFooterCache({
+        cwd: () => '/tmp/footer-status',
+        runner,
+        clock: fakeClock.clock,
+        onChange: () => {
+          changes += 1;
+        },
+      });
+
+      await cache.refresh();
+      assert.deepEqual(cache.getStatusSnapshot(), {
+        branch: 'feature/transient-cache',
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+        conflict: 0,
+        ahead: 1,
+        behind: 0,
+      });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: 'OPEN' });
+      assert.equal(changes, 1);
+
+      await cache.refresh();
+      assert.deepEqual(cache.getStatusSnapshot(), {
+        branch: 'feature/transient-cache',
+        staged: 0,
+        unstaged: 1,
+        untracked: 0,
+        conflict: 0,
+        ahead: 2,
+        behind: 0,
+      });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: 'OPEN' });
+      assert.equal(changes, 2);
+
+      await cache.refresh();
+      assert.deepEqual(cache.getStatusSnapshot(), {
+        branch: 'feature/transient-cache',
+        staged: 0,
+        unstaged: 1,
+        untracked: 0,
+        conflict: 0,
+        ahead: 2,
+        behind: 0,
+      });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: 'OPEN' });
+      assert.equal(changes, 2);
+      assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git', 'gh', 'git']);
+      assert.equal(queue.length, 0);
+
+      cache.dispose();
+    });
+  }
+});
+
+
+test('footer status caches clear stale PR snapshots when gh no longer returns a PR', async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, async () => {
+      const fakeClock = createFakeClock();
+      let changes = 0;
+      const { calls, runner, queue } = createScriptedRunner([
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/pr-cache', ahead: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '{"number":7,"state":"OPEN"}',
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/pr-cache', ahead: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '',
+            stderr: 'no pull requests found',
+            exitCode: 1,
+          },
+        },
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/pr-cache', ahead: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '{"number":"9"}',
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/pr-cache', ahead: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: () => {
+            throw createCommandUnavailableError('gh');
+          },
+        },
+      ]);
+
+      const cache = new testing.GitFooterCache({
+        cwd: () => '/tmp/footer-status',
+        runner,
+        clock: fakeClock.clock,
+        onChange: () => {
+          changes += 1;
+        },
+      });
+
+      await cache.refresh();
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: 'OPEN' });
+      assert.equal(changes, 1);
+
+      await cache.refresh();
+      assert.equal(cache.getPullRequestSnapshot(), undefined);
+      assert.equal(changes, 2);
+
+      await cache.refresh();
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: '9' });
+      assert.equal(changes, 3);
+
+      await cache.refresh();
+      assert.equal(cache.getPullRequestSnapshot(), undefined);
+      assert.equal(changes, 4);
+      assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git', 'gh', 'git', 'gh', 'git', 'gh']);
+      assert.equal(queue.length, 0);
+
+      cache.dispose();
+    });
+  }
+});
+
+
+test('footer status caches clear stale snapshots when git becomes unavailable', async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, async () => {
+      const fakeClock = createFakeClock();
+      let changes = 0;
+      const { calls, runner, queue } = createScriptedRunner([
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/missing-git', ahead: 1, untracked: 1 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '{"number":11}',
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'git',
+          result: () => {
+            throw createCommandUnavailableError('git');
+          },
+        },
+      ]);
+
+      const cache = new testing.GitFooterCache({
+        cwd: () => '/tmp/footer-status',
+        runner,
+        clock: fakeClock.clock,
+        onChange: () => {
+          changes += 1;
+        },
+      });
+
+      await cache.refresh();
+      assert.deepEqual(cache.getStatusSnapshot(), {
+        branch: 'feature/missing-git',
+        staged: 0,
+        unstaged: 0,
+        untracked: 1,
+        conflict: 0,
+        ahead: 1,
+        behind: 0,
+      });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 11 });
+      assert.equal(changes, 1);
+
+      await cache.refresh();
+      assert.equal(cache.getStatusSnapshot(), undefined);
+      assert.equal(cache.getPullRequestSnapshot(), undefined);
+      assert.equal(changes, 2);
+      assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git']);
+      assert.equal(queue.length, 0);
+
+      cache.dispose();
     });
   }
 });
