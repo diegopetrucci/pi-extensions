@@ -146,8 +146,20 @@ test('triage-comments command completes arguments and handles help, no-UI, and c
   assert.equal(pasteCancelContext.notifications.at(-1).level, 'warning');
   assert.match(pasteCancelContext.notifications.at(-1).message, /No feedback was provided/);
 
+  const pasteIdleContext = createCommandContext({ editorResult: 'Use <details> for the summary.' });
+  await command.handler('paste', pasteIdleContext.ctx);
+  assert.equal(pasteIdleContext.notifications.at(-1).level, 'info');
+  assert.match(pasteIdleContext.notifications.at(-1).message, /Sent 1 selected comment\(s\) to the main agent/);
+  assert.match(harness.sentUserMessages[0].message, /Task: start read-only review-feedback triage for 1 selected item\(s\)\./);
+  assert.match(harness.sentUserMessages[0].message, /"body": "Use <details> for the summary\."/);
+  assert.equal(harness.sentUserMessages[0].options, undefined);
+
+  const pasteFollowUpContext = createCommandContext({ editorResult: 'Second pass', isIdle: false });
+  await command.handler('paste', pasteFollowUpContext.ctx);
+  assert.equal(pasteFollowUpContext.notifications.at(-1).level, 'info');
+  assert.equal(harness.sentUserMessages[1].options?.deliverAs, 'followUp');
+
   assert.deepEqual(harness.execCalls, []);
-  assert.deepEqual(harness.sentUserMessages, []);
 });
 
 test('triage_comments tool rejects missing model and invalid input before launching triage work', async () => {

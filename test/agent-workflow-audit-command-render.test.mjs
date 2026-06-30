@@ -45,7 +45,7 @@ function createAuditHarness({ execImpl } = {}) {
   };
 }
 
-function createCommandContext({ model } = {}) {
+function createCommandContext({ model, hasUI = true } = {}) {
   const notifications = [];
   let confirmCalls = 0;
   let waitForIdleCalls = 0;
@@ -61,7 +61,7 @@ function createCommandContext({ model } = {}) {
     ctx: {
       cwd: repoRoot,
       model,
-      hasUI: true,
+      hasUI,
       signal: undefined,
       ui: {
         theme: {
@@ -137,6 +137,21 @@ test('agent-workflow-audit command provides flag completions and handles help/er
   assert.match(noModelContext.notifications.at(-1).message, /needs an active model/);
   assert.equal(noModelContext.confirmCalls, 0);
   assert.equal(noModelContext.waitForIdleCalls, 0);
+
+  const nonInteractiveWarnings = [];
+  const originalConsoleLog = console.log;
+  console.log = (message) => {
+    nonInteractiveWarnings.push(String(message));
+  };
+  try {
+    const noUiContext = createCommandContext({ model: {}, hasUI: false });
+    await command.handler('focus notes', noUiContext.ctx);
+    assert.equal(noUiContext.confirmCalls, 0);
+    assert.equal(noUiContext.waitForIdleCalls, 0);
+    assert.match(nonInteractiveWarnings.at(-1), /Non-interactive execution mode requires --yes or --plan-only/);
+  } finally {
+    console.log = originalConsoleLog;
+  }
 
   assert.deepEqual(harness.execCalls, []);
   assert.deepEqual(harness.sentMessages, []);
