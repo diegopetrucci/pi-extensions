@@ -65,8 +65,26 @@ function getExpectedRootCollectionRuntimeDeclarations() {
   return declarations.sort();
 }
 
-function getRootReadmeExtensionEntries() {
-  return [...readText('README.md').matchAll(/^- \[`([^`]+)`\]\(\.\/extensions\/[^)]+\):/gm)].map((match) => match[1]);
+function getRootReadmeExtensionSections() {
+  const sections = [];
+  let currentSection = null;
+
+  for (const line of readText('README.md').split(/\r?\n/)) {
+    const sectionMatch = line.match(/^###\s+(.+)$/);
+    if (sectionMatch) {
+      currentSection = { heading: sectionMatch[1], entries: [] };
+      sections.push(currentSection);
+      continue;
+    }
+
+    const entryMatch = line.match(/^- +\[`([^`]+)`\]\(\.\/extensions\/[^)]+\):/);
+    if (!entryMatch) continue;
+
+    assert.ok(currentSection, `README extension entry should appear under a section heading: ${entryMatch[1]}`);
+    currentSection.entries.push(entryMatch[1]);
+  }
+
+  return sections.filter((section) => section.entries.length > 0);
 }
 
 test('workspace package manifests keep directory, publish, and runtime metadata consistent', () => {
@@ -144,14 +162,24 @@ test('workspace package READMEs include matching standalone install instructions
   }
 });
 
-test('root README keeps the extension list alphabetical and install docs aligned with published packages', () => {
+test('root README keeps grouped extension lists alphabetical and install docs aligned with published packages', () => {
   const rootReadme = readText('README.md');
-  const listedExtensions = getRootReadmeExtensionEntries();
+  const readmeSections = getRootReadmeExtensionSections();
+  const listedExtensions = readmeSections.flatMap((section) => section.entries);
   const workspaceDirs = getWorkspacePackageDefs().map((packageDef) => path.basename(packageDef.packageRoot)).sort();
   const documentedInstallTargets = [...rootReadme.matchAll(/pi install npm:(@diegopetrucci\/pi[-a-z]+)/g)].map((match) => match[1]);
 
   assert.ok(listedExtensions.length > 0, 'expected README to list workspace extensions');
-  assert.deepEqual(listedExtensions, [...listedExtensions].sort((left, right) => left.localeCompare(right)));
+
+  for (const section of readmeSections) {
+    assert.deepEqual(
+      section.entries,
+      [...section.entries].sort((left, right) => left.localeCompare(right)),
+      `README section should list extensions alphabetically: ${section.heading}`,
+    );
+  }
+
+  assert.equal(new Set(listedExtensions).size, listedExtensions.length, 'expected README extension entries to be unique');
   assert.deepEqual([...listedExtensions].sort(), workspaceDirs);
   assert.ok(documentedInstallTargets.includes('@diegopetrucci/pi-extensions'));
   assert.ok(
