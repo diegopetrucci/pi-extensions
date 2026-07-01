@@ -107,6 +107,40 @@ function createFakeClock() {
   };
 }
 
+function installFakeTimeouts() {
+  const handles = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+
+  globalThis.setTimeout = (callback, ms = 0, ...args) => {
+    const handle = {
+      callback: () => callback(...args),
+      ms,
+      cleared: false,
+    };
+    handles.push(handle);
+    return handle;
+  };
+
+  globalThis.clearTimeout = (handle) => {
+    if (handle && typeof handle === 'object') handle.cleared = true;
+  };
+
+  return {
+    handles,
+    firePending() {
+      const handle = handles.find((entry) => !entry.cleared);
+      assert.ok(handle, 'Expected a pending timeout');
+      handle.cleared = true;
+      handle.callback();
+    },
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+  };
+}
+
 function createScriptedRunner(steps) {
   const calls = [];
   const queue = [...steps];
@@ -773,6 +807,243 @@ test('minimal-footer cache clears cached status when project git becomes unavail
 
   await cache.refresh();
   assert.equal(changes, 2);
+
+  cache.dispose();
+});
+
+
+test('minimal-footer cache clears stale snapshots on non-repo git exits', async () => {
+  const fakeClock = createFakeClock();
+  let changes = 0;
+  const { calls, runner, queue } = createScriptedRunner([
+    {
+      command: 'git',
+      result: {
+        stdout: createStatusOutput({ branch: 'feature/non-repo', ahead: 1, untracked: 1 }),
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'gh',
+      result: {
+        stdout: '{"number":23,"state":"OPEN"}',
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'git',
+      result: {
+        stdout: '',
+        stderr: 'fatal: not a git repository',
+        exitCode: 128,
+      },
+    },
+  ]);
+
+  const cache = new minimalFooterTesting.GitFooterCache({
+    cwd: () => '/tmp/minimal-footer',
+    runner,
+    clock: fakeClock.clock,
+    onChange: () => {
+      changes += 1;
+    },
+  });
+
+  await cache.refresh();
+  assert.deepEqual(cache.getStatusSnapshot(), {
+    branch: 'feature/non-repo',
+    staged: 0,
+    unstaged: 0,
+    untracked: 1,
+    conflict: 0,
+    ahead: 1,
+    behind: 0,
+  });
+  assert.deepEqual(cache.getPullRequestSnapshot(), { number: 23, state: 'OPEN' });
+  assert.equal(changes, 1);
+
+  await cache.refresh();
+  assert.equal(cache.getStatusSnapshot(), undefined);
+  assert.equal(cache.getPullRequestSnapshot(), undefined);
+  assert.equal(changes, 2);
+  assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git']);
+  assert.equal(queue.length, 0);
+
+  cache.dispose();
+});
+
+
+test('minimal-footer cache clears stale PR state when branch changes and gh times out', { concurrency: false }, async () => {
+  const fakeClock = createFakeClock();
+  const fakeTimeouts = installFakeTimeouts();
+  let cache;
+  let changes = 0;
+  let pendingGhSignal;
+  let notifyGhStarted;
+  const ghStarted = new Promise((resolve) => {
+    notifyGhStarted = resolve;
+  });
+  const { calls, runner, queue } = createScriptedRunner([
+    {
+      command: 'git',
+      result: {
+        stdout: createStatusOutput({ branch: 'feature/branch-one', ahead: 1 }),
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'gh',
+      result: {
+        stdout: '{"number":31,"state":"OPEN"}',
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'git',
+      result: {
+        stdout: createStatusOutput({ branch: 'feature/branch-two', ahead: 1 }),
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'gh',
+      result: ({ options }) => {
+        pendingGhSignal = options.signal;
+        notifyGhStarted();
+        return new Promise((resolve) => {
+          options.signal.addEventListener(
+            'abort',
+            () => resolve({ stdout: '', stderr: 'timed out', exitCode: null }),
+            { once: true },
+          );
+        });
+      },
+    },
+  ]);
+
+  try {
+    cache = new minimalFooterTesting.GitFooterCache({
+      cwd: () => '/tmp/minimal-footer',
+      runner,
+      clock: fakeClock.clock,
+      ghTimeoutMs: 17,
+      onChange: () => {
+        changes += 1;
+      },
+    });
+
+    await cache.refresh();
+    assert.deepEqual(cache.getStatusSnapshot(), {
+      branch: 'feature/branch-one',
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflict: 0,
+      ahead: 1,
+      behind: 0,
+    });
+    assert.deepEqual(cache.getPullRequestSnapshot(), { number: 31, state: 'OPEN' });
+    assert.equal(changes, 1);
+
+    const refreshPromise = cache.refresh();
+    await ghStarted;
+    assert.ok(pendingGhSignal, 'Expected gh runner to receive an abort signal');
+    assert.equal(pendingGhSignal.aborted, false);
+    assert.equal(fakeTimeouts.handles.at(-1)?.ms, 17);
+
+    fakeTimeouts.firePending();
+    await refreshPromise;
+
+    assert.equal(pendingGhSignal.aborted, true);
+    assert.deepEqual(cache.getStatusSnapshot(), {
+      branch: 'feature/branch-two',
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflict: 0,
+      ahead: 1,
+      behind: 0,
+    });
+    assert.equal(cache.getPullRequestSnapshot(), undefined);
+    assert.equal(changes, 2);
+    assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git', 'gh']);
+    assert.equal(queue.length, 0);
+  } finally {
+    cache?.dispose();
+    fakeTimeouts.restore();
+  }
+});
+
+
+test('minimal-footer cache swallows render callback errors', async () => {
+  const fakeClock = createFakeClock();
+  let callbackCalls = 0;
+  const { calls, runner, queue } = createScriptedRunner([
+    {
+      command: 'git',
+      result: {
+        stdout: createStatusOutput({ branch: 'feature/render-one', ahead: 1 }),
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'gh',
+      result: {
+        stdout: '{"number":41}',
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'git',
+      result: {
+        stdout: createStatusOutput({ branch: 'feature/render-two', ahead: 2, untracked: 1 }),
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+    {
+      command: 'gh',
+      result: {
+        stdout: '{"number":42}',
+        stderr: '',
+        exitCode: 0,
+      },
+    },
+  ]);
+
+  const cache = new minimalFooterTesting.GitFooterCache({
+    cwd: () => '/tmp/minimal-footer',
+    runner,
+    clock: fakeClock.clock,
+    onChange: () => {
+      callbackCalls += 1;
+      throw new Error('render failed');
+    },
+  });
+
+  await cache.refresh();
+  await cache.refresh();
+
+  assert.equal(callbackCalls, 2);
+  assert.deepEqual(cache.getStatusSnapshot(), {
+    branch: 'feature/render-two',
+    staged: 0,
+    unstaged: 0,
+    untracked: 1,
+    conflict: 0,
+    ahead: 2,
+    behind: 0,
+  });
+  assert.deepEqual(cache.getPullRequestSnapshot(), { number: 42 });
+  assert.deepEqual(calls.map(({ command }) => command), ['git', 'gh', 'git', 'gh']);
+  assert.equal(queue.length, 0);
 
   cache.dispose();
 });

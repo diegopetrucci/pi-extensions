@@ -751,6 +751,76 @@ class GitFooterCache {
 	}
 }
 
+function renderFooterLines(options: {
+	width: number;
+	cwd: string;
+	config: MinimalFooterConfig;
+	branch: string;
+	gitStatus?: string;
+	contextUsage?: { percent?: number | null; tokens?: number | null };
+	modelId?: string;
+	modelProvider?: string;
+	thinkingLevel: string;
+	theme: { fg(color: DumbZoneColor | "dim", text: string): string };
+	usageSnapshot?: UsageSnapshot;
+}): string[] {
+	const repo = basename(options.cwd);
+	const branchText = options.gitStatus
+		? [options.branch, options.gitStatus].filter(Boolean).join(" · ")
+		: options.branch;
+
+	const context = options.contextUsage?.percent == null
+		? "?"
+		: `${options.contextUsage.percent.toFixed(1)}%`;
+	const dumbZone = options.config.context.dumbZone;
+	const inDumbZone = dumbZone.enabled
+		&& (options.contextUsage?.tokens ?? 0) > dumbZone.thresholdTokens;
+	const usageSummary = shouldShowCodexUsage(options.config)
+		&& isOpenAICodexProvider(options.modelProvider)
+		? formatUsageSummary(options.usageSnapshot, options.config.codexUsage.windows)
+		: undefined;
+
+	const model = options.modelId ?? "no-model";
+	const modelText = options.thinkingLevel === "off"
+		? model
+		: `${model} ${options.thinkingLevel}`;
+
+	const branchStyled = options.theme.fg("dim", branchText);
+	const repoStyled = options.theme.fg("dim", repo);
+	const contextParts: string[] = [];
+	if (options.config.context.showPercent) contextParts.push(options.theme.fg("dim", context));
+	if (inDumbZone) contextParts.push(options.theme.fg(dumbZone.color, dumbZone.label));
+	if (usageSummary) contextParts.push(options.theme.fg("dim", usageSummary));
+	if (shouldShowExperimentalMarker(options.config)) {
+		const marker = options.config.experimentalMarker;
+		contextParts.push(options.theme.fg(marker.color, marker.label));
+	}
+	const contextStyled = contextParts.join(options.theme.fg("dim", " · "));
+	const modelStyled = options.theme.fg("dim", modelText);
+
+	const renderSplitLine = (left: string, right: string): string => {
+		const gap = " ".repeat(Math.max(2, options.width - visibleWidth(left) - visibleWidth(right)));
+		return truncateToWidth(left + gap + right, options.width);
+	};
+
+	const line1Fits = visibleWidth(branchStyled) + visibleWidth(repoStyled) + 2 <= options.width;
+	const line2Fits = visibleWidth(contextStyled) + visibleWidth(modelStyled) + 2 <= options.width;
+
+	if (line1Fits && line2Fits) {
+		return [
+			renderSplitLine(branchStyled, repoStyled),
+			renderSplitLine(contextStyled, modelStyled),
+		];
+	}
+
+	return [
+		truncateToWidth(branchStyled, options.width),
+		truncateToWidth(repoStyled, options.width),
+		truncateToWidth(contextStyled, options.width),
+		truncateToWidth(modelStyled, options.width),
+	];
+}
+
 function clearUsageState(state: UsageSessionState): void {
 	state.snapshot = undefined;
 	state.lastFetchedAt = undefined;
@@ -859,64 +929,24 @@ export default function (pi: ExtensionAPI) {
 				},
 				invalidate() {},
 				render(width: number): string[] {
-					const repo = basename(ctx.cwd);
-					const gitStatus = shouldShowGitStatus(state.config)
-						? formatGitFooterStatus(
-							state.gitCache?.getStatusSnapshot(),
-							state.gitCache?.getPullRequestSnapshot(),
-						)
-						: undefined;
-					const branch = footerData.getGitBranch()
-						?? state.gitCache?.getStatusSnapshot()?.branch
-						?? "";
-					const branchText = gitStatus ? [branch, gitStatus].filter(Boolean).join(" · ") : branch;
-
-					const usage = ctx.getContextUsage();
-					const context = usage?.percent == null ? "?" : `${usage.percent.toFixed(1)}%`;
-					const dumbZone = state.config.context.dumbZone;
-					const inDumbZone = dumbZone.enabled && (usage?.tokens ?? 0) > dumbZone.thresholdTokens;
-					const usageSummary = shouldShowCodexUsage(state.config) && isOpenAICodexProvider(ctx.model?.provider)
-						? formatUsageSummary(state.snapshot, state.config.codexUsage.windows)
-						: undefined;
-
-					const model = ctx.model?.id ?? "no-model";
-					const thinking = pi.getThinkingLevel();
-					const modelText = thinking === "off" ? model : `${model} ${thinking}`;
-
-					const branchStyled = theme.fg("dim", branchText);
-					const repoStyled = theme.fg("dim", repo);
-					const contextParts: string[] = [];
-					if (state.config.context.showPercent) contextParts.push(theme.fg("dim", context));
-					if (inDumbZone) contextParts.push(theme.fg(dumbZone.color, dumbZone.label));
-					if (usageSummary) contextParts.push(theme.fg("dim", usageSummary));
-					if (shouldShowExperimentalMarker(state.config)) {
-						const marker = state.config.experimentalMarker;
-						contextParts.push(theme.fg(marker.color, marker.label));
-					}
-					const contextStyled = contextParts.join(theme.fg("dim", " · "));
-					const modelStyled = theme.fg("dim", modelText);
-
-					const renderSplitLine = (left: string, right: string): string => {
-						const gap = " ".repeat(Math.max(2, width - visibleWidth(left) - visibleWidth(right)));
-						return truncateToWidth(left + gap + right, width);
-					};
-
-					const line1Fits = visibleWidth(branchStyled) + visibleWidth(repoStyled) + 2 <= width;
-					const line2Fits = visibleWidth(contextStyled) + visibleWidth(modelStyled) + 2 <= width;
-
-					if (line1Fits && line2Fits) {
-						return [
-							renderSplitLine(branchStyled, repoStyled),
-							renderSplitLine(contextStyled, modelStyled),
-						];
-					}
-
-					return [
-						truncateToWidth(branchStyled, width),
-						truncateToWidth(repoStyled, width),
-						truncateToWidth(contextStyled, width),
-						truncateToWidth(modelStyled, width),
-					];
+					return renderFooterLines({
+						width,
+						cwd: ctx.cwd,
+						config: state.config,
+						branch: footerData.getGitBranch() ?? state.gitCache?.getStatusSnapshot()?.branch ?? "",
+						gitStatus: shouldShowGitStatus(state.config)
+							? formatGitFooterStatus(
+								state.gitCache?.getStatusSnapshot(),
+								state.gitCache?.getPullRequestSnapshot(),
+							)
+							: undefined,
+						contextUsage: ctx.getContextUsage(),
+						modelId: ctx.model?.id,
+						modelProvider: ctx.model?.provider,
+						thinkingLevel: pi.getThinkingLevel(),
+						theme,
+						usageSnapshot: state.snapshot,
+					});
 				},
 			};
 		});
@@ -947,6 +977,8 @@ export const __testing = {
 	GitFooterCache,
 	GIT_STATUS_ARGS,
 	GH_PR_VIEW_ARGS,
+	loadConfig,
+	renderFooterLines,
 	parseGitStatusPorcelainV2,
 	parsePullRequestJson,
 	formatGitStatusFooterSegment,
