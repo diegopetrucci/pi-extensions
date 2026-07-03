@@ -38,7 +38,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 	}
 
 	async function openAnnotationWindow(ctx: ExtensionCommandContext): Promise<void> {
-		if (!ctx.hasUI) {
+		if (ctx.mode !== "tui") {
 			ctx.ui.notify("annotate-last-message requires interactive mode.", "error");
 			return;
 		}

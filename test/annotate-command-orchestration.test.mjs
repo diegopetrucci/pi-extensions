@@ -43,7 +43,7 @@ function createMockWindow(name = 'window') {
   return new MockWindow();
 }
 
-function createCommandContext({ hasUI = true, editorText = '', branch = [], cwd = '/repo' } = {}) {
+function createCommandContext({ hasUI = true, mode = 'tui', editorText = '', branch = [], cwd = '/repo' } = {}) {
   const notifications = [];
   const pasted = [];
 
@@ -52,6 +52,7 @@ function createCommandContext({ hasUI = true, editorText = '', branch = [], cwd 
     pasted,
     ctx: {
       hasUI,
+      mode,
       cwd,
       ui: {
         notify(message, level) {
@@ -337,11 +338,16 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
 
     const handler = commands.get('annotate-last-message').handler;
     const shutdownHandler = handlers.get('session_shutdown');
-    const { ctx: noUiCtx, notifications: noUiNotifications } = createCommandContext({ hasUI: false });
+    const { ctx: noUiCtx, notifications: noUiNotifications } = createCommandContext({ hasUI: false, mode: 'rpc' });
+    const { ctx: rpcCtx, notifications: rpcNotifications } = createCommandContext({ hasUI: true, mode: 'rpc' });
     const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Seed prompt' });
 
     await handler({}, noUiCtx);
+    await handler({}, rpcCtx);
     assert.deepEqual(noUiNotifications, [
+      { message: 'annotate-last-message requires interactive mode.', level: 'error' },
+    ]);
+    assert.deepEqual(rpcNotifications, [
       { message: 'annotate-last-message requires interactive mode.', level: 'error' },
     ]);
     assert.equal(state.openCalls.length, 0);
@@ -550,11 +556,16 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
 
     const handler = commands.get('annotate-git-diff').handler;
     const shutdownHandler = handlers.get('session_shutdown');
-    const { ctx: noUiCtx, notifications: noUiNotifications } = createCommandContext({ hasUI: false });
+    const { ctx: noUiCtx, notifications: noUiNotifications } = createCommandContext({ hasUI: false, mode: 'rpc' });
+    const { ctx: rpcCtx, notifications: rpcNotifications } = createCommandContext({ hasUI: true, mode: 'rpc' });
     const { ctx, notifications, pasted } = createCommandContext();
 
     await handler({}, noUiCtx);
+    await handler({}, rpcCtx);
     assert.deepEqual(noUiNotifications, [
+      { message: 'annotate-git-diff requires interactive mode.', level: 'error' },
+    ]);
+    assert.deepEqual(rpcNotifications, [
       { message: 'annotate-git-diff requires interactive mode.', level: 'error' },
     ]);
     assert.equal(state.openCalls.length, 0);

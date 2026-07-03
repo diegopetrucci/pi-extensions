@@ -94,7 +94,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function reviewRepository(ctx: ExtensionCommandContext): Promise<void> {
-		if (!ctx.hasUI) {
+		if (ctx.mode !== "tui") {
 			ctx.ui.notify("annotate-git-diff requires interactive mode.", "error");
 			return;
 		}

@@ -179,7 +179,7 @@ test('todo reconstructs branch-local state from tool result snapshots on session
   });
 });
 
-test('todos command reports missing UI and closes custom UI on escape or ctrl+c', async () => {
+test('todos command requires TUI mode and closes custom UI on escape or ctrl+c', async () => {
   const todoExtension = await loadExtension('extensions/todo/index.ts');
   const { pi, tools, commands } = createExtensionHarness();
   todoExtension(pi);
@@ -193,19 +193,36 @@ test('todos command reports missing UI and closes custom UI on escape or ctrl+c'
   const notifications = [];
   await command.handler('', {
     hasUI: false,
+    mode: 'rpc',
     ui: {
       notify(message, level) {
         notifications.push({ message, level });
       },
     },
   });
-  assert.deepEqual(notifications, [{ message: '/todos requires interactive mode', level: 'error' }]);
+  await command.handler('', {
+    hasUI: true,
+    mode: 'rpc',
+    ui: {
+      notify(message, level) {
+        notifications.push({ message, level });
+      },
+      async custom() {
+        throw new Error('RPC mode should not open custom todo UI');
+      },
+    },
+  });
+  assert.deepEqual(notifications, [
+    { message: '/todos requires interactive mode', level: 'error' },
+    { message: '/todos requires interactive mode', level: 'error' },
+  ]);
 
   let customCalls = 0;
   for (const closeKey of ['\x1b', '\x03']) {
     let closeCalls = 0;
     await command.handler('', {
       hasUI: true,
+      mode: 'tui',
       ui: {
         async custom(factory) {
           customCalls += 1;

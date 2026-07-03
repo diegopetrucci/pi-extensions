@@ -6,16 +6,16 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 
 | Provider | Intended top pick | Notes |
 |---|---|---|
-| `amazon-bedrock` | `claude-fable-5` | Falls back through newer Claude Fable/Opus/Sonnet Bedrock IDs, then other reasoning models. |
+| `amazon-bedrock` | `claude-fable-5` | Falls back through newer Claude Fable/Opus IDs, then Claude Sonnet 5 before Claude Sonnet 4 Bedrock IDs, then other reasoning models. |
 | `ant-ling` | `Ling-2.6-1T` | Then Ling 2.6 Flash. |
-| `anthropic` | `claude-fable-5` | Prefers Fable, then Opus, then Sonnet. |
+| `anthropic` | `claude-fable-5` | Prefers Fable, then Opus, then Claude Sonnet 5 before Claude Sonnet 4. |
 | `azure-openai-responses` | `gpt-5.5-pro` | Then other GPT-5 / o-series reasoning models. |
 | `cerebras` | `gpt-oss-120b` | Then ZAI/Cerebras fallbacks. |
 | `cloudflare-ai-gateway` | `claude-fable-5` | Then newer Claude Opus, GPT-5.x, and Workers AI reasoning models. |
 | `cloudflare-workers-ai` | `@cf/moonshotai/kimi-k2.7-code` | Then GLM 5.2, Kimi K2.6, Nemotron, GPT OSS, and GLM fallbacks. |
 | `deepseek` | `deepseek-v4-pro` | Then DeepSeek V4 Flash. |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | Then Kimi K2.7 Code, GLM 5.2, MiniMax M3, Qwen, and GPT OSS. |
-| `github-copilot` | `claude-fable-5` | Then Opus 4.8/4.7/4.6/4.5, GPT-5.x, Gemini, Sonnet. |
+| `github-copilot` | `claude-fable-5` | Then Opus 4.8/4.7/4.6/4.5, GPT-5.x, Gemini, then Claude Sonnet 5 before Claude Sonnet 4. |
 | `google` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.1/3 Pro / Gemini 2.5 Pro variants. |
 | `google-vertex` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3 Pro / 2.5 Pro. |
 | `groq` | `openai/gpt-oss-120b` | Then Groq compound/qwen/kimi/llama options. |
@@ -33,7 +33,7 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `opencode-go` | `deepseek-v4-pro` | Then GLM 5.2/5.1, Qwen 3.7/3.6, MiMo, MiniMax M3/M2.7, and Kimi K2.7/K2.6. |
 | `openrouter` | `anthropic/claude-fable-5` | Then Claude Fable latest, Claude Opus, OpenAI GPT-5.x, Gemini Pro, Kimi K2.7, DeepSeek, MiniMax M3, and GLM 5.2. |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | Then GLM, Kimi K2.7/K2.6, Qwen 3.7/3.6, MiniMax M3/M2.7, GPT OSS, and older reasoning fallbacks. |
-| `vercel-ai-gateway` | `anthropic/claude-fable-5` | Then Claude Opus/Sonnet, OpenAI GPT-5.x, Kimi K2.7, DeepSeek, Qwen 3.7, Gemini, xAI, MiniMax M3, and GLM 5.2. |
+| `vercel-ai-gateway` | `anthropic/claude-fable-5` | Then Claude Opus, then Claude Sonnet 5 before Claude Sonnet 4, OpenAI GPT-5.x, Kimi K2.7, DeepSeek, Qwen 3.7, Gemini, xAI, MiniMax M3, and GLM 5.2. |
 | `xai` | `grok-4.3` | Then Grok 4.20 reasoning / Grok 4 fast variants. |
 | `xiaomi` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
 | `xiaomi-token-plan-ams` | `mimo-v2.5-pro` | Then MiMo 2.5 / 2.0 fallbacks. |
