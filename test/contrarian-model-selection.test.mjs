@@ -74,6 +74,32 @@ test('contrarian auto-selection prefers an opposite provider and model family wh
   assert.match(result.selection.selectionReason, /opposite provider\/model family/i);
 });
 
+test('contrarian auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 across providers when Opus and Fable are unavailable', async () => {
+  const { selectContrarianModel } = await loadContrarianTestUtils();
+  const result = await selectContrarianModel(
+    createContext({
+      model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+      available: [
+        { provider: 'amazon-bedrock', id: 'claude-sonnet-4-6', reasoning: true },
+        { provider: 'vercel-ai-gateway', id: 'anthropic/claude-sonnet-5.0', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.selection.modelRef, 'vercel-ai-gateway/anthropic/claude-sonnet-5.0');
+  assert.deepEqual(
+    result.ordered.map((candidate) => candidate.modelRef),
+    [
+      'vercel-ai-gateway/anthropic/claude-sonnet-5.0',
+      'amazon-bedrock/claude-sonnet-4-6',
+    ],
+  );
+  assert.match(result.selection.selectionReason, /hardcoded preference lists while preferring an opposite provider\/model family/i);
+});
+
 test('contrarian auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
   const { selectContrarianModel } = await loadContrarianTestUtils();
   const result = await selectContrarianModel(

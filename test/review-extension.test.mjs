@@ -10,7 +10,7 @@ const reviewModule = await import(pathToFileURL(path.join(repoRoot, 'extensions/
 const reviewExtension = reviewModule.default;
 const reviewTestApi = reviewModule.__test__;
 
-function createReviewStateContext({ branchEntries = [], entries = branchEntries } = {}) {
+function createReviewStateContext({ branchEntries = [], entries = branchEntries, mode = 'tui' } = {}) {
   const widgetCalls = [];
   const notifications = [];
 
@@ -19,6 +19,7 @@ function createReviewStateContext({ branchEntries = [], entries = branchEntries 
     notifications,
     ctx: {
       hasUI: true,
+      mode,
       ui: {
         notify(message, level) {
           notifications.push({ message, level });
@@ -83,6 +84,7 @@ function createReviewHarness({ execImpl } = {}) {
 
 function createReviewCommandContext({
   hasUI = true,
+  mode = 'tui',
   entries = [],
   branchEntries = entries,
   leafId = 'leaf-1',
@@ -117,6 +119,7 @@ function createReviewCommandContext({
     waitForIdleCalls,
     ctx: {
       hasUI,
+      mode,
       cwd: repoRoot,
       ui: {
         notify(message, level) {
@@ -420,6 +423,32 @@ test('review restores persisted review state and settings on session events', { 
   assert.deepEqual(widgetCalls.at(-1), { name: 'review', widget: undefined });
 });
 
+test('review state restoration skips component widgets outside TUI mode', { concurrency: false }, () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const { ctx, widgetCalls } = createReviewStateContext({
+    mode: 'rpc',
+    branchEntries: [
+      {
+        type: 'custom',
+        customType: 'review-session',
+        data: { active: true, originId: 'origin-rpc' },
+      },
+    ],
+  });
+
+  reviewTestApi.applyReviewState(ctx);
+
+  assert.deepEqual(reviewTestApi.getReviewRuntimeState(), {
+    reviewOriginId: 'origin-rpc',
+    endReviewInProgress: false,
+    reviewLoopFixingEnabled: false,
+    reviewCustomInstructions: undefined,
+    reviewLoopInProgress: false,
+  });
+  assert.deepEqual(widgetCalls, [{ name: 'review', widget: undefined }]);
+});
+
 test('review prompt helpers build merge-base prompts, fallback prompts, and final prompt sections', { concurrency: false }, async () => {
   reviewTestApi.resetReviewRuntimeState();
 
@@ -493,11 +522,18 @@ test('review prompt helpers build merge-base prompts, fallback prompts, and fina
   assert.doesNotMatch(minimalPrompt, /This project has additional instructions for code reviews/);
 });
 
-test('review command guards no-UI, active-review, and missing-git-repo paths before starting work', { concurrency: false }, async () => {
+test('review command guards non-TUI, active-review, and missing-git-repo paths before starting work', { concurrency: false }, async () => {
   reviewTestApi.resetReviewRuntimeState();
 
+  const rpcHarness = createReviewHarness();
+  const rpcContext = createReviewCommandContext({ hasUI: true, mode: 'rpc' });
+  await rpcHarness.reviewHandler('', rpcContext.ctx);
+  assert.deepEqual(rpcContext.notifications, [{ message: 'Review requires interactive mode', level: 'error' }]);
+  assert.deepEqual(rpcHarness.execCalls, []);
+  assert.deepEqual(rpcHarness.sentUserMessages, []);
+
   const noUiHarness = createReviewHarness();
-  const noUiContext = createReviewCommandContext({ hasUI: false });
+  const noUiContext = createReviewCommandContext({ hasUI: false, mode: 'rpc' });
   await noUiHarness.reviewHandler('', noUiContext.ctx);
   assert.deepEqual(noUiContext.notifications, [{ message: 'Review requires interactive mode', level: 'error' }]);
   assert.deepEqual(noUiHarness.execCalls, []);
@@ -616,6 +652,45 @@ test('end-review exits early when no review is active and never opens the finish
     },
   ]);
   assert.deepEqual(harness.appendEntries, []);
+});
+
+test('end-review keeps RPC-capable selection dialogs but skips the custom summary loader outside TUI mode', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const branchEntries = [
+    {
+      type: 'custom',
+      customType: 'review-session',
+      data: { active: true, originId: 'origin-rpc-end-review' },
+    },
+  ];
+  const activeReviewState = createReviewStateContext({ branchEntries });
+  reviewTestApi.applyReviewState(activeReviewState.ctx);
+
+  const harness = createReviewHarness();
+  const context = createReviewCommandContext({
+    hasUI: true,
+    mode: 'rpc',
+    branchEntries,
+    selectResponses: ['Return and summarize'],
+  });
+
+  await harness.endReviewHandler('', context.ctx);
+
+  assert.deepEqual(context.selectCalls.map((call) => call.prompt), ['Finish review:']);
+  assert.equal(context.customCalls.length, 0);
+  assert.equal(context.navigateCalls.length, 1);
+  assert.deepEqual(context.navigateCalls[0], {
+    id: 'origin-rpc-end-review',
+    options: {
+      summarize: true,
+      customInstructions: reviewTestApi.REVIEW_SUMMARY_PROMPT,
+      replaceInstructions: true,
+    },
+  });
+  assert.deepEqual(context.setEditorTextCalls, ['Act on the review findings']);
+  assert.deepEqual(context.notifications, [{ message: 'Review complete! Returned and summarized.', level: 'info' }]);
+  assert.deepEqual(harness.appendEntries, [{ customType: 'review-session', data: { active: false } }]);
 });
 
 test('review summary prompt preserves the required handoff sections and reviewer callout guidance', { concurrency: false }, () => {

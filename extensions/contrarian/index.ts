@@ -72,7 +72,20 @@ const COLLAPSED_LINE_LIMIT = 8;
 const CONTRARIAN_STATUS_ID = "contrarian";
 const CONTRARIAN_WIDGET_ID = "contrarian";
 const CONTRARIAN_CONFIG_FILE = "contrarian.json";
-const CONTRARIAN_MODEL_PREFERENCES = ["gpt-5.5", "claude-opus-4-8", "claude-opus-4.8"];
+const CONTRARIAN_MODEL_PREFERENCES = [
+	"gpt-5.5",
+	"claude-opus-4-8",
+	"claude-opus-4.8",
+	"claude-sonnet-5-0",
+	"claude-sonnet-5.0",
+	"claude-sonnet-5",
+	"claude-sonnet-4-6",
+	"claude-sonnet-4.6",
+	"claude-sonnet-4-5",
+	"claude-sonnet-4.5",
+	"claude-sonnet-4-0",
+	"claude-sonnet-4",
+];
 
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
@@ -83,6 +96,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-opus-4-5",
 		"claude-opus-4-1",
 		"claude-opus-4",
+		"claude-sonnet-5",
 		"claude-sonnet-4-6",
 		"claude-sonnet-4-5",
 		"claude-sonnet-4",
@@ -107,6 +121,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-opus-4.1",
 		"claude-opus-4-0",
 		"claude-opus-4",
+		"claude-sonnet-5-0",
+		"claude-sonnet-5.0",
+		"claude-sonnet-5",
 		"claude-sonnet-4-6",
 		"claude-sonnet-4.6",
 		"claude-sonnet-4-5",
@@ -185,6 +202,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5",
 		"gemini-3.1-pro-preview",
 		"gemini-3-pro-preview",
+		"claude-sonnet-5.0",
+		"claude-sonnet-5",
 		"claude-sonnet-4.6",
 		"claude-sonnet-4.5",
 		"gemini-2.5-pro",
@@ -360,6 +379,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"anthropic/claude-opus-4.6",
 		"anthropic/claude-opus-4.5",
 		"anthropic/claude-opus-4.1",
+		"anthropic/claude-sonnet-5.0",
+		"anthropic/claude-sonnet-5",
 		"anthropic/claude-sonnet-4.6",
 		"openai/gpt-5.5-pro",
 		"openai/gpt-5.5",
