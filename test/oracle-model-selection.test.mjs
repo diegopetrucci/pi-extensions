@@ -60,6 +60,29 @@ test('oracle auto-selection prefers the current provider hardcoded top reasoning
   assert.match(result.selection.selectionReason, /hardcoded preference list for openai/i);
 });
 
+test('oracle auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 when Fable and Opus are unavailable', async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  const result = await selectOracleModel(
+    createContext({
+      model: { provider: 'anthropic', id: 'claude-3-7-sonnet', reasoning: true },
+      available: [
+        { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
+        { provider: 'anthropic', id: 'claude-sonnet-5.0', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.selection.modelRef, 'anthropic/claude-sonnet-5.0');
+  assert.deepEqual(
+    result.ordered.map((candidate) => candidate.modelRef),
+    ['anthropic/claude-sonnet-5.0', 'anthropic/claude-sonnet-4.6'],
+  );
+  assert.match(result.selection.selectionReason, /hardcoded preference list for anthropic/i);
+});
+
 test('oracle auto-selection stays on the current provider when it has no reasoning models', async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
