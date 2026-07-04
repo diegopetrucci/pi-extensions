@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-confirm-destructive",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A pi extension that confirms destructive session actions.",
   "keywords": [
     "pi-package",

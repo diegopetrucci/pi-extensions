@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-triage-comments",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A pi extension that adds /triage-comments and a read-only triage_comments subagent tool for review-comment triage.",
   "keywords": [
     "pi-package",
