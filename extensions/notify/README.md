@@ -4,6 +4,8 @@ A pi extension that sends notifications when the agent finishes and is waiting f
 
 This started from the original `notify.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/notify.ts), but now supports multiple notification channels and JSON configuration.
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 ## Supported notification channels
 
 ### Terminal notifications

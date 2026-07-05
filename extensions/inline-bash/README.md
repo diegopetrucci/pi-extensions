@@ -4,6 +4,8 @@ A pi extension that expands inline bash commands in user prompts before they are
 
 This started from the original `inline-bash.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/inline-bash.ts), with small packaging and safety tweaks.
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 ## Usage
 
 Write inline commands with `!{...}`:

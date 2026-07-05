@@ -2,6 +2,8 @@
 
 Adds `/triage-comments` plus a read-only `triage_comments` subagent tool for evidence-based review-comment triage.
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 Use it when you want The Last Harness to inspect selected PR feedback, classify whether each comment is valid, cite local evidence, draft review-thread responses, and propose handling options. It does **not** implement changes; after triage, the main agent should ask which handling option to take before editing anything.
 
 ## Install

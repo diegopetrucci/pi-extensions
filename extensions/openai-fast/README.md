@@ -2,6 +2,8 @@
 
 A pi extension that enables OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5.
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 When active, the extension injects this into eligible OpenAI Codex request payloads:
 
 ```json

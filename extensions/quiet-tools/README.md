@@ -6,6 +6,8 @@ When enabled, each collapsed tool row renders as one invocation line plus a sepa
 
 `quiet-tools` only changes the visual renderer. It does not truncate, summarize, or rewrite the actual tool results sent to the model.
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 ## Covered tools
 
 - `bash`

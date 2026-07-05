@@ -4,6 +4,8 @@ A pi extension that adds `/context`, a local HTML dashboard for understanding wh
 
 Pi's footer can tell you that the session is at 30% of the context window. `context-inspector` answers the next question: what is inside that 30%?
 
+This forked package is maintained to serve The Last Harness (tlh) default extension set and is not intended as a general standalone distribution target outside tlh use.
+
 ## What it shows
 
 - A first-glance donut and stacked bar by context component.
