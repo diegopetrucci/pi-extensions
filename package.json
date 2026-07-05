@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-extensions",
-  "version": "0.1.54",
+  "version": "0.1.55",
   "description": "A collection of pi extensions and skills for annotation UIs, context management, workflow audits, contrarian review, review-comment triage, notifications, brrr push alerts, safety guards, GitHub research, repo-local knowledge, todos, tool rendering, model/provider helpers, and Xiaohei-style article illustrations.",
   "keywords": [
     "pi-package",
@@ -45,10 +45,11 @@
       "./extensions/annotate-last-message/index.ts",
       "./extensions/brrr/index.ts",
       "./extensions/claude-fast/index.ts",
+      "./extensions/code-reviewer/index.ts",
       "./extensions/confirm-destructive/index.ts",
-      "./extensions/contrarian/index.ts",
       "./extensions/context-cap/index.ts",
       "./extensions/context-inspector/index.ts",
+      "./extensions/contrarian/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
       "./extensions/gnosis/index.ts",
       "./extensions/inline-bash/index.ts",
