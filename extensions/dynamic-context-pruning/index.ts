@@ -155,7 +155,7 @@ export interface PruneThresholds {
 	minCharsSaved: number;
 }
 
-/** Per-strategy toggles/config (pe-u8gd). Each strategy can be disabled independently. */
+/** Per-strategy toggles/config (pe-u8gd, pe-qs8j). Each strategy can be disabled independently. */
 export interface StrategiesConfig {
 	dedupe: { enabled: boolean };
 	errorPurge: {
@@ -163,6 +163,8 @@ export interface StrategiesConfig {
 		/** A tool call's input is only eligible for purging once it is older than this many turns. */
 		minTurnsOld: number;
 	};
+	/** Superseded file-ops strategy (pe-qs8j): stale read/write/edit outputs replaced by a placeholder. */
+	supersededFileOps: { enabled: boolean };
 }
 
 /** Net-benefit gate operating mode (pe-s2ho). */
@@ -216,6 +218,7 @@ export function defaultConfig(): DynamicContextPruningConfig {
 		strategies: {
 			dedupe: { enabled: true },
 			errorPurge: { enabled: true, minTurnsOld: DEFAULT_ERROR_PURGE_MIN_TURNS_OLD },
+			supersededFileOps: { enabled: true },
 		},
 		gate: {
 			mode: "on",
@@ -283,6 +286,9 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 	const rawErrorPurge = (rawStrategies.errorPurge && typeof rawStrategies.errorPurge === "object"
 		? rawStrategies.errorPurge
 		: {}) as Record<string, unknown>;
+	const rawSupersededFileOps = (rawStrategies.supersededFileOps && typeof rawStrategies.supersededFileOps === "object"
+		? rawStrategies.supersededFileOps
+		: {}) as Record<string, unknown>;
 
 	return {
 		enabled: typeof raw.enabled === "boolean" ? raw.enabled : defaults.enabled,
@@ -299,6 +305,9 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 			errorPurge: {
 				enabled: asBoolean(rawErrorPurge.enabled, defaults.strategies.errorPurge.enabled),
 				minTurnsOld: asNonNegativeInt(rawErrorPurge.minTurnsOld, defaults.strategies.errorPurge.minTurnsOld),
+			},
+			supersededFileOps: {
+				enabled: asBoolean(rawSupersededFileOps.enabled, defaults.strategies.supersededFileOps.enabled),
 			},
 		},
 		gate: {
@@ -1096,6 +1105,16 @@ export interface StrategyProposeInput {
 	 * (see `isDecisionProtected`); strategies do not need to re-check it.
 	 */
 	config: DynamicContextPruningConfig;
+	/**
+	 * Session working directory (pe-qs8j), used to normalize relative file
+	 * paths (e.g. from read/write/edit tool args) against an absolute base so
+	 * the same file referenced via different relative/absolute spellings is
+	 * recognized as the same path. Optional/backward-compatible: undefined
+	 * when the caller doesn't have a cwd available (e.g. older callers/tests);
+	 * strategies that need it should degrade gracefully (best-effort relative
+	 * normalization only) rather than throw.
+	 */
+	cwd?: string;
 }
 
 export interface PruneStrategy {
@@ -1248,10 +1267,250 @@ export const errorPurgeStrategy: PruneStrategy = {
 	},
 };
 
+// ----------------------------------------------------------------------
+// Strategy 3: superseded file operations (pe-qs8j)
+// ----------------------------------------------------------------------
+//
+// When the same file path is read and/or written multiple times in a
+// session, older read/write/edit tool *outputs* for that path can become
+// stale relative to a later operation. This strategy proposes replacing
+// those older outputs with a placeholder, per the following CONSERVATIVE,
+// binding rules (do not loosen without an architect decision):
+//
+//   1. A full-file read (no offset/limit args) is superseded by a LATER
+//      full-file read of the same normalized path.
+//   2. A partial read (offset/limit args present) is NOT superseded by a
+//      later partial read UNLESS the later read's range fully covers the
+//      earlier one's range. If range coverage can't be reliably determined
+//      from the args (e.g. earlier read has no limit — reads to EOF — but
+//      the later read is bounded), skip: do not propose supersession.
+//      Full-file reads are represented as the range [1, EOF); comparing
+//      that representation via the same coverage check naturally satisfies
+//      rule 1 as a special case of rule 2 (see `readRangeCovers`).
+//   3. ANY read of a path (full or partial) is superseded once a LATER
+//      *successful* (non-error) write/edit to that same path occurs — the
+//      old read output is now known-stale regardless of read-vs-read range
+//      comparisons. The placeholder explicitly notes the file has since
+//      changed. An ERRORED later write/edit does NOT count (the file may be
+//      unchanged; conservative).
+//   4. Older write/edit outputs for a path are superseded by a LATER
+//      *successful* write/edit to that same path (again, a later errored
+//      write/edit never supersedes). Write/edit tool outputs are usually
+//      small, so proposals are only ever emitted when there is a non-empty
+//      result to prune; the shared net-benefit gate additionally decides
+//      whether the estimated savings are worth the cache-bust cost.
+//
+// The NEWEST operation for a given path (by message order) is never
+// superseded/pruned, regardless of kind — there is nothing later to point
+// the placeholder at.
+//
+// Path extraction is defensive: pi's built-in `read`/`write`/`edit` tools
+// all accept a `path` argument (see packages/coding-agent/src/core/tools/
+// {read,write,edit}.ts); some tool-call renderers also fall back to a
+// legacy `file_path` name, and `filePath` is accepted as a further
+// defensive fallback. `bash` is explicitly OUT of scope: this strategy does
+// not attempt to parse shell commands for file paths.
+
+const SUPERSEDED_FILE_OPS_STRATEGY_ID = "superseded-file-ops";
+
+type FileOpKind = "read" | "write" | "edit";
+
+const FILE_OP_TOOL_NAMES: ReadonlySet<string> = new Set(["read", "write", "edit"]);
+
+/** Extract a file path from tool-call arguments, checking common arg names defensively. */
+export function extractFileOpPathArg(args: Record<string, unknown> | undefined): string | undefined {
+	if (!args || typeof args !== "object") return undefined;
+	const raw = (args.path ?? args.file_path ?? args.filePath) as unknown;
+	return typeof raw === "string" && raw.trim().length > 0 ? raw : undefined;
+}
+
+/**
+ * Normalize a raw path for path-identity comparisons. When `cwd` is
+ * provided, relative paths are resolved against it so `"a.txt"`,
+ * `"./a.txt"`, and `"<cwd>/a.txt"` are all recognized as the same file.
+ * Without a `cwd` (best-effort/back-compat), only structural normalization
+ * (`./` prefixes, redundant separators) is applied — relative vs. absolute
+ * spellings of the same file will NOT be unified in that case.
+ */
+export function normalizeFileOpsPath(rawPath: string, cwd: string | undefined): string {
+	const trimmed = rawPath.trim();
+	if (!trimmed) return trimmed;
+	const absoluteOrRelative = cwd && !path.isAbsolute(trimmed) ? path.resolve(cwd, trimmed) : trimmed;
+	return path.normalize(absoluteOrRelative);
+}
+
+/** A read's line range. `end === undefined` means the read continues through end-of-file. */
+export interface FileReadRange {
+	start: number;
+	end: number | undefined;
+}
+
+/** Compute a read's line range from its `offset`/`limit` args (see pi's `read` tool: 1-indexed offset, line-count limit). */
+export function computeFileReadRange(args: Record<string, unknown> | undefined): FileReadRange {
+	const offsetRaw = args?.offset;
+	const limitRaw = args?.limit;
+	const offset = typeof offsetRaw === "number" && Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : undefined;
+	const limit = typeof limitRaw === "number" && Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+	const start = offset ?? 1;
+	const end = limit !== undefined ? start + limit - 1 : undefined;
+	return { start, end };
+}
+
+/** True when a range represents a full-file read (starts at line 1, no limit). */
+export function isFullFileReadRange(range: FileReadRange): boolean {
+	return range.start === 1 && range.end === undefined;
+}
+
+/**
+ * Conservative range-coverage check: does `later` fully cover `earlier`?
+ * Implements rules 1+2 above via one unified representation (a full-file
+ * read is just the range [1, EOF)):
+ *   - `later` must start at or before `earlier` (later.start <= earlier.start).
+ *   - If `later` has no end (reads to EOF), it covers any bounded-or-unbounded
+ *     earlier range that starts at/after it (the earlier read already proved
+ *     the file has at least `earlier.end` lines, if bounded).
+ *   - If `later` IS bounded but `earlier` is unbounded (reads to EOF),
+ *     coverage can't be reliably determined (later might stop short of the
+ *     file's actual end) — conservatively return false (skip).
+ *   - Otherwise (both bounded), `later` covers `earlier` iff later.end >= earlier.end.
+ */
+export function readRangeCovers(later: FileReadRange, earlier: FileReadRange): boolean {
+	if (later.start > earlier.start) return false;
+	if (later.end === undefined) return true;
+	if (earlier.end === undefined) return false;
+	return later.end >= earlier.end;
+}
+
+interface FileOpOccurrence {
+	toolCallId: string;
+	kind: FileOpKind;
+	normalizedPath: string;
+	range: FileReadRange | undefined;
+	isError: boolean;
+	resultTextLength: number;
+	assistantIndex: number;
+}
+
+function collectFileOpOccurrences(messages: MinimalMessage[], cwd: string | undefined): FileOpOccurrence[] {
+	const occurrences: FileOpOccurrence[] = [];
+	for (const occurrence of collectCompletedToolCallOccurrences(messages)) {
+		const kind = occurrence.toolName.trim().toLowerCase();
+		if (!FILE_OP_TOOL_NAMES.has(kind)) continue;
+		const rawPath = extractFileOpPathArg(occurrence.arguments);
+		if (!rawPath) continue; // can't safely correlate without a path
+		const normalizedPath = normalizeFileOpsPath(rawPath, cwd);
+		if (!normalizedPath) continue;
+		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
+		occurrences.push({
+			toolCallId: occurrence.toolCallId,
+			kind: kind as FileOpKind,
+			normalizedPath,
+			range: kind === "read" ? computeFileReadRange(occurrence.arguments) : undefined,
+			isError: occurrence.isError,
+			resultTextLength: contentTextLength(resultMessage.content),
+			assistantIndex: occurrence.assistantIndex,
+		});
+	}
+	return occurrences;
+}
+
+function buildFileChangedPlaceholder(normalizedPath: string, supersedingKind: FileOpKind, supersedingToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: file has since changed — ${normalizedPath} was modified by a later ${supersedingKind} (call ${supersedingToolCallId})]`;
+}
+
+function buildSupersededReadPlaceholder(normalizedPath: string, supersedingToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: superseded by newer read of ${normalizedPath} (call ${supersedingToolCallId})]`;
+}
+
+function buildSupersededWritePlaceholder(normalizedPath: string, supersedingKind: FileOpKind, supersedingToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: superseded by newer ${supersedingKind} of ${normalizedPath} (call ${supersedingToolCallId})]`;
+}
+
+export const supersededFileOpsStrategy: PruneStrategy = {
+	id: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+	propose(input: StrategyProposeInput): ProposedPrune[] {
+		if (input.config.strategies.supersededFileOps.enabled === false) return [];
+
+		const occurrences = collectFileOpOccurrences(input.messages, input.cwd);
+		const byPath = new Map<string, FileOpOccurrence[]>();
+		for (const occurrence of occurrences) {
+			const group = byPath.get(occurrence.normalizedPath);
+			if (group) group.push(occurrence);
+			else byPath.set(occurrence.normalizedPath, [occurrence]);
+		}
+
+		const proposals: ProposedPrune[] = [];
+		for (const group of byPath.values()) {
+			// `group` is already in message/chronological order because
+			// `collectCompletedToolCallOccurrences` iterates messages in order.
+			for (let i = 0; i < group.length; i++) {
+				// Never supersede the newest operation for this path (rule: "never
+				// supersede the newest op for a path").
+				if (i === group.length - 1) continue;
+				const occurrence = group[i];
+				const later = group.slice(i + 1);
+
+				if (occurrence.kind === "read") {
+					// Rule 3 takes priority: any later successful write/edit makes
+					// this read stale outright, regardless of read-vs-read coverage.
+					const laterWrite = later.find((candidate) => candidate.kind !== "read" && !candidate.isError);
+					if (laterWrite) {
+						if (occurrence.resultTextLength <= 0) continue; // rule 4: skip zero-length proposals
+						proposals.push({
+							strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+							toolCallId: occurrence.toolCallId,
+							kind: "tool_result_content",
+							reason: `${occurrence.normalizedPath} has since been modified (see ${laterWrite.kind} call ${laterWrite.toolCallId})`,
+							placeholder: buildFileChangedPlaceholder(occurrence.normalizedPath, laterWrite.kind, laterWrite.toolCallId),
+						});
+						continue;
+					}
+
+					// Rules 1+2: superseded by a later read whose range covers this one's.
+					const laterCoveringRead = later.find(
+						(candidate) =>
+							candidate.kind === "read" &&
+							candidate.range !== undefined &&
+							occurrence.range !== undefined &&
+							readRangeCovers(candidate.range, occurrence.range),
+					);
+					if (laterCoveringRead) {
+						if (occurrence.resultTextLength <= 0) continue;
+						proposals.push({
+							strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+							toolCallId: occurrence.toolCallId,
+							kind: "tool_result_content",
+							reason: `superseded by newer read of ${occurrence.normalizedPath} (call ${laterCoveringRead.toolCallId})`,
+							placeholder: buildSupersededReadPlaceholder(occurrence.normalizedPath, laterCoveringRead.toolCallId),
+						});
+					}
+					continue;
+				}
+
+				// occurrence.kind is "write" or "edit": rule 4 — superseded only by a
+				// LATER *successful* write/edit (an errored later write/edit never
+				// supersedes; reads never supersede writes/edits).
+				const laterSuccessfulWrite = later.find((candidate) => candidate.kind !== "read" && !candidate.isError);
+				if (laterSuccessfulWrite) {
+					if (occurrence.resultTextLength <= 0) continue; // rule 4: skip zero-length proposals
+					proposals.push({
+						strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+						toolCallId: occurrence.toolCallId,
+						kind: "tool_result_content",
+						reason: `superseded by newer ${laterSuccessfulWrite.kind} of ${occurrence.normalizedPath} (call ${laterSuccessfulWrite.toolCallId})`,
+						placeholder: buildSupersededWritePlaceholder(occurrence.normalizedPath, laterSuccessfulWrite.kind, laterSuccessfulWrite.toolCallId),
+					});
+				}
+			}
+		}
+		return proposals;
+	},
+};
+
 /**
  * Strategies PROPOSE prunes; only this pipeline ever APPLIES them.
  */
-export const STRATEGIES: PruneStrategy[] = [dedupeStrategy, errorPurgeStrategy];
+export const STRATEGIES: PruneStrategy[] = [dedupeStrategy, errorPurgeStrategy, supersededFileOpsStrategy];
 
 function collectProposals(input: StrategyProposeInput): ProposedPrune[] {
 	const proposals: ProposedPrune[] = [];
@@ -1281,6 +1540,8 @@ export interface PipelineInput {
 	 * mid-loop vs idle. Defaults to "idle" until callers wire real detection.
 	 */
 	agentState?: AgentState;
+	/** Session working directory (pe-qs8j), forwarded to strategies for path normalization. */
+	cwd?: string;
 }
 
 export interface PipelineResult {
@@ -1334,6 +1595,7 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 		protections: input.config.protections,
 		estimateTokens: estimateTokensForText,
 		config: input.config,
+		cwd: input.cwd,
 	});
 
 	const seenKeys = new Set(input.persistedDecisions.map((decision) => decision.idempotencyKey));
@@ -1473,6 +1735,7 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			// Real mid-loop/idle agent-state detection lands in a follow-up ticket;
 			// "idle" is the safe default until it's wired through ctx.
 			agentState: "idle",
+			cwd: ctx.sessionManager.getCwd(),
 		});
 
 		for (const decision of result.newlyAppliedDecisions) {
