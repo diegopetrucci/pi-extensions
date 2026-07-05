@@ -126,6 +126,12 @@ const DEFAULT_PROTECTED_PATH_GLOBS = [
 
 const DEFAULT_MIN_CHARS_SAVED = 200;
 
+/** Default "older than N turns" threshold for the error-input purge strategy. */
+const DEFAULT_ERROR_PURGE_MIN_TURNS_OLD = 4;
+
+const DEDUPE_STRATEGY_ID = "dedupe";
+const ERROR_PURGE_STRATEGY_ID = "error-purge";
+
 // ============================================================================
 // Config
 // ============================================================================
@@ -147,6 +153,16 @@ export interface PruneThresholds {
 	 * Not enforced by this pipeline yet.
 	 */
 	minCharsSaved: number;
+}
+
+/** Per-strategy toggles/config (pe-u8gd). Each strategy can be disabled independently. */
+export interface StrategiesConfig {
+	dedupe: { enabled: boolean };
+	errorPurge: {
+		enabled: boolean;
+		/** A tool call's input is only eligible for purging once it is older than this many turns. */
+		minTurnsOld: number;
+	};
 }
 
 /** Net-benefit gate operating mode (pe-s2ho). */
@@ -183,6 +199,7 @@ export interface DynamicContextPruningConfig {
 	protections: PruneProtections;
 	thresholds: PruneThresholds;
 	gate: PruneGateConfig;
+	strategies: StrategiesConfig;
 }
 
 export function defaultConfig(): DynamicContextPruningConfig {
@@ -195,6 +212,10 @@ export function defaultConfig(): DynamicContextPruningConfig {
 		},
 		thresholds: {
 			minCharsSaved: DEFAULT_MIN_CHARS_SAVED,
+		},
+		strategies: {
+			dedupe: { enabled: true },
+			errorPurge: { enabled: true, minTurnsOld: DEFAULT_ERROR_PURGE_MIN_TURNS_OLD },
 		},
 		gate: {
 			mode: "on",
@@ -233,6 +254,10 @@ function asGateMode(value: unknown, fallback: GateMode): GateMode {
 	return value === "on" || value === "off" || value === "always-apply" ? value : fallback;
 }
 
+function asBoolean(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
+}
+
 /** Merge a partially-shaped parsed config (e.g. from disk) onto defaults. Never throws. */
 export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 	const defaults = defaultConfig();
@@ -250,6 +275,14 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 	const rawGateByState = (rawGate.breakEvenThresholdByState && typeof rawGate.breakEvenThresholdByState === "object"
 		? rawGate.breakEvenThresholdByState
 		: {}) as Record<string, unknown>;
+	const rawStrategies = (raw.strategies && typeof raw.strategies === "object" ? raw.strategies : {}) as Record<string, unknown>;
+	const rawDedupe = (rawStrategies.dedupe && typeof rawStrategies.dedupe === "object" ? rawStrategies.dedupe : {}) as Record<
+		string,
+		unknown
+	>;
+	const rawErrorPurge = (rawStrategies.errorPurge && typeof rawStrategies.errorPurge === "object"
+		? rawStrategies.errorPurge
+		: {}) as Record<string, unknown>;
 
 	return {
 		enabled: typeof raw.enabled === "boolean" ? raw.enabled : defaults.enabled,
@@ -260,6 +293,13 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 		},
 		thresholds: {
 			minCharsSaved: asNonNegativeInt(rawThresholds.minCharsSaved, defaults.thresholds.minCharsSaved),
+		},
+		strategies: {
+			dedupe: { enabled: asBoolean(rawDedupe.enabled, defaults.strategies.dedupe.enabled) },
+			errorPurge: {
+				enabled: asBoolean(rawErrorPurge.enabled, defaults.strategies.errorPurge.enabled),
+				minTurnsOld: asNonNegativeInt(rawErrorPurge.minTurnsOld, defaults.strategies.errorPurge.minTurnsOld),
+			},
 		},
 		gate: {
 			mode: asGateMode(rawGate.mode, defaults.gate.mode),
@@ -445,6 +485,19 @@ export function computeRecencyBoundaryIndex(messages: MinimalMessage[], recentTu
 
 export function isWithinRecencyWindow(index: number, boundaryIndex: number): boolean {
 	return index >= boundaryIndex;
+}
+
+/**
+ * Number of user-started turns that have elapsed strictly after `index`.
+ * Used by the error-input purge strategy's "older than N turns" rule; a
+ * message at the very end of the conversation has 0 turns elapsed.
+ */
+export function computeTurnsElapsedSince(messages: MinimalMessage[], index: number): number {
+	let count = 0;
+	for (let i = index + 1; i < messages.length; i++) {
+		if (messages[i].role === "user") count++;
+	}
+	return count;
 }
 
 // ============================================================================
@@ -1036,6 +1089,13 @@ export interface StrategyProposeInput {
 	messages: MinimalMessage[];
 	protections: PruneProtections;
 	estimateTokens: TokenEstimator;
+	/**
+	 * Full config, so strategies can read their own enable flag and any
+	 * strategy-specific settings (e.g. error-purge's `minTurnsOld`).
+	 * Protection/recency filtering is handled centrally by the pipeline
+	 * (see `isDecisionProtected`); strategies do not need to re-check it.
+	 */
+	config: DynamicContextPruningConfig;
 }
 
 export interface PruneStrategy {
@@ -1043,11 +1103,155 @@ export interface PruneStrategy {
 	propose(input: StrategyProposeInput): ProposedPrune[];
 }
 
+// ----------------------------------------------------------------------
+// Argument canonicalization (shared by the dedupe strategy; exported for
+// direct unit testing of key-order/nesting/whitespace behavior).
+// ----------------------------------------------------------------------
+
 /**
- * Strategies PROPOSE prunes; only this pipeline ever APPLIES them. Empty
- * until follow-up tickets register concrete strategies here.
+ * Recursively canonicalize a parsed tool-call arguments value: object keys
+ * are sorted (recursively); array order and all string/number/boolean VALUES
+ * are left untouched (per ticket: never normalize argument values beyond
+ * structural key ordering). Serializing the result via JSON.stringify then
+ * yields a deterministic, whitespace-free representation regardless of the
+ * original key order.
  */
-export const STRATEGIES: PruneStrategy[] = [];
+export function canonicalizeArguments(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map((item) => canonicalizeArguments(item));
+	if (value && typeof value === "object") {
+		const obj = value as Record<string, unknown>;
+		const sorted: Record<string, unknown> = {};
+		for (const key of Object.keys(obj).sort()) sorted[key] = canonicalizeArguments(obj[key]);
+		return sorted;
+	}
+	return value;
+}
+
+/** Canonical JSON string for a tool call's arguments (see `canonicalizeArguments`). */
+export function canonicalizeArgumentsJSON(args: unknown): string {
+	return JSON.stringify(canonicalizeArguments(args ?? {}));
+}
+
+/** Dedup key: identical tool name (case-insensitive) + canonicalized args JSON. */
+export function buildDedupeKey(toolName: string, args: unknown): string {
+	return `${toolName.trim().toLowerCase()}::${canonicalizeArgumentsJSON(args)}`;
+}
+
+interface ToolCallOccurrence {
+	toolCallId: string;
+	toolName: string;
+	arguments: Record<string, unknown> | undefined;
+	assistantIndex: number;
+	resultIndex: number;
+	isError: boolean;
+}
+
+/** Collect every assistant toolCall block that has a matching toolResult message, in message order. */
+function collectCompletedToolCallOccurrences(messages: MinimalMessage[]): ToolCallOccurrence[] {
+	const resultIndexById = new Map<string, number>();
+	const isErrorById = new Map<string, boolean>();
+	messages.forEach((message, index) => {
+		if (message.role === "toolResult") {
+			const result = message as MinimalToolResultMessage;
+			resultIndexById.set(result.toolCallId, index);
+			isErrorById.set(result.toolCallId, result.isError);
+		}
+	});
+
+	const occurrences: ToolCallOccurrence[] = [];
+	messages.forEach((message, assistantIndex) => {
+		if (message.role !== "assistant") return;
+		for (const block of (message as MinimalAssistantMessage).content) {
+			if (block.type !== "toolCall") continue;
+			const resultIndex = resultIndexById.get(block.id);
+			if (resultIndex === undefined) continue; // still in flight; nothing to dedupe/purge yet
+			occurrences.push({
+				toolCallId: block.id,
+				toolName: block.name,
+				arguments: block.arguments,
+				assistantIndex,
+				resultIndex,
+				isError: isErrorById.get(block.id) ?? false,
+			});
+		}
+	});
+	return occurrences;
+}
+
+// ----------------------------------------------------------------------
+// Strategy 1: deduplication (pe-u8gd)
+// ----------------------------------------------------------------------
+
+/** Placeholder text for a duplicate tool result whose content was replaced. */
+export function buildDedupePlaceholder(toolName: string, newestToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: duplicate ${toolName} call result; see newest occurrence (call ${newestToolCallId})]`;
+}
+
+export const dedupeStrategy: PruneStrategy = {
+	id: DEDUPE_STRATEGY_ID,
+	propose(input: StrategyProposeInput): ProposedPrune[] {
+		if (input.config.strategies.dedupe.enabled === false) return [];
+
+		const occurrences = collectCompletedToolCallOccurrences(input.messages);
+		const groups = new Map<string, ToolCallOccurrence[]>();
+		for (const occurrence of occurrences) {
+			const key = buildDedupeKey(occurrence.toolName, occurrence.arguments);
+			const group = groups.get(key);
+			if (group) group.push(occurrence);
+			else groups.set(key, [occurrence]);
+		}
+
+		const proposals: ProposedPrune[] = [];
+		for (const group of groups.values()) {
+			if (group.length < 2) continue;
+			// Occurrences are collected in message order, so the last one is newest.
+			const newest = group[group.length - 1];
+			for (const occurrence of group.slice(0, -1)) {
+				proposals.push({
+					strategyId: DEDUPE_STRATEGY_ID,
+					toolCallId: occurrence.toolCallId,
+					kind: "tool_result_content",
+					reason: `duplicate ${occurrence.toolName} call; see result of call ${newest.toolCallId}`,
+					placeholder: buildDedupePlaceholder(occurrence.toolName, newest.toolCallId),
+				});
+			}
+		}
+		return proposals;
+	},
+};
+
+// ----------------------------------------------------------------------
+// Strategy 2: error-input purge (pe-u8gd)
+// ----------------------------------------------------------------------
+
+export const errorPurgeStrategy: PruneStrategy = {
+	id: ERROR_PURGE_STRATEGY_ID,
+	propose(input: StrategyProposeInput): ProposedPrune[] {
+		if (input.config.strategies.errorPurge.enabled === false) return [];
+		const minTurnsOld = input.config.strategies.errorPurge.minTurnsOld;
+
+		const occurrences = collectCompletedToolCallOccurrences(input.messages);
+		const proposals: ProposedPrune[] = [];
+		for (const occurrence of occurrences) {
+			if (!occurrence.isError) continue;
+			const turnsElapsed = computeTurnsElapsedSince(input.messages, occurrence.assistantIndex);
+			// Strictly older than `minTurnsOld` turns (e.g. default 4: eligible at 5+, not at exactly 4).
+			if (turnsElapsed <= minTurnsOld) continue;
+			proposals.push({
+				strategyId: ERROR_PURGE_STRATEGY_ID,
+				toolCallId: occurrence.toolCallId,
+				kind: "tool_call_input",
+				reason: `errored ${occurrence.toolName} call input older than ${minTurnsOld} turns`,
+			});
+		}
+		return proposals;
+	},
+};
+
+/**
+ * Strategies PROPOSE prunes; only this pipeline ever APPLIES them.
+ */
+export const STRATEGIES: PruneStrategy[] = [dedupeStrategy, errorPurgeStrategy];
 
 function collectProposals(input: StrategyProposeInput): ProposedPrune[] {
 	const proposals: ProposedPrune[] = [];
@@ -1129,6 +1333,7 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 		messages,
 		protections: input.config.protections,
 		estimateTokens: estimateTokensForText,
+		config: input.config,
 	});
 
 	const seenKeys = new Set(input.persistedDecisions.map((decision) => decision.idempotencyKey));
