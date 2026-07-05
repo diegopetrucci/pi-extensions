@@ -82,8 +82,19 @@ export interface MinimalSessionEntry {
 const EXTENSION_ID = "dynamic-context-pruning";
 const CONFIG_FILE_NAME = "dynamic-context-pruning.json";
 const DECISION_ENTRY_TYPE = "dynamic-context-pruning:decision";
+const STATS_ENTRY_TYPE = "dynamic-context-pruning:stats";
 
 const DEFAULT_RECENT_TURNS = 4;
+
+/** Cache cost model default: fraction of full (non-cached) price still paid for cached tokens. */
+const DEFAULT_CACHED_PRICE_RATIO = 0.1;
+
+/**
+ * Default net-benefit gate threshold (max amortization calls). Explicitly
+ * PROVISIONAL per pe-s2ho ticket notes: pe-e9pv's realized-benefit benchmark
+ * will supply the final, data-backed default(s). Do not treat "5" as tuned.
+ */
+const DEFAULT_BREAK_EVEN_THRESHOLD = 5;
 
 /** Tool names never pruned by default: orchestration/subagent-style tools and todo-like state. */
 const DEFAULT_PROTECTED_TOOL_NAMES = [
@@ -130,17 +141,48 @@ export interface PruneProtections {
 
 export interface PruneThresholds {
 	/**
-	 * Minimum characters a prune must remove to be worth persisting.
-	 * Reserved for the net-benefit gate landing in a follow-up ticket; not
-	 * enforced by this pipeline yet.
+	 * Minimum characters a prune must remove to be worth persisting. Reserved
+	 * for a future minimum-size filter; NOT used by the net-benefit gate
+	 * (see `PruneGateConfig`/`gate`), which uses break-even token math instead.
+	 * Not enforced by this pipeline yet.
 	 */
 	minCharsSaved: number;
+}
+
+/** Net-benefit gate operating mode (pe-s2ho). */
+export type GateMode = "on" | "off" | "always-apply";
+
+/**
+ * State-conditioning hook (pe-s2ho notes): lets the gate use a different
+ * break-even threshold depending on whether the agent is mid-loop (actively
+ * making tool calls) vs idle (waiting on the user). Both states default to
+ * the same threshold today; a future ticket can widen/narrow either once
+ * real usage data (pe-e9pv) exists.
+ */
+export type AgentState = "idle" | "mid_loop";
+
+export interface PruneGateConfig {
+	/** "on": gate rejects new prunes above threshold. "off": gate is bypassed
+	 * entirely (no cost modelling, everything applies). "always-apply": cost
+	 * is still modelled (for stats/observability) but nothing is ever rejected. */
+	mode: GateMode;
+	/** Fraction of full price still paid for cached ( r ). Default 0.1. */
+	cachedPriceRatio: number;
+	/**
+	 * Default break-even threshold (max future calls to amortize a cache
+	 * bust) used when no state-specific override applies. PROVISIONAL default;
+	 * see DEFAULT_BREAK_EVEN_THRESHOLD.
+	 */
+	breakEvenThreshold: number;
+	/** Per-agent-state threshold overrides; both default to `breakEvenThreshold`. */
+	breakEvenThresholdByState: { idle: number; mid_loop: number };
 }
 
 export interface DynamicContextPruningConfig {
 	enabled: boolean;
 	protections: PruneProtections;
 	thresholds: PruneThresholds;
+	gate: PruneGateConfig;
 }
 
 export function defaultConfig(): DynamicContextPruningConfig {
@@ -153,6 +195,12 @@ export function defaultConfig(): DynamicContextPruningConfig {
 		},
 		thresholds: {
 			minCharsSaved: DEFAULT_MIN_CHARS_SAVED,
+		},
+		gate: {
+			mode: "on",
+			cachedPriceRatio: DEFAULT_CACHED_PRICE_RATIO,
+			breakEvenThreshold: DEFAULT_BREAK_EVEN_THRESHOLD,
+			breakEvenThresholdByState: { idle: DEFAULT_BREAK_EVEN_THRESHOLD, mid_loop: DEFAULT_BREAK_EVEN_THRESHOLD },
 		},
 	};
 }
@@ -169,6 +217,22 @@ function asNonNegativeInt(value: unknown, fallback: number): number {
 	return Math.floor(parsed);
 }
 
+function asNonNegativeNumber(value: unknown, fallback: number): number {
+	const parsed = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+	return parsed;
+}
+
+function asRatio(value: unknown, fallback: number): number {
+	const parsed = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return fallback;
+	return parsed;
+}
+
+function asGateMode(value: unknown, fallback: GateMode): GateMode {
+	return value === "on" || value === "off" || value === "always-apply" ? value : fallback;
+}
+
 /** Merge a partially-shaped parsed config (e.g. from disk) onto defaults. Never throws. */
 export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 	const defaults = defaultConfig();
@@ -182,6 +246,10 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 		string,
 		unknown
 	>;
+	const rawGate = (raw.gate && typeof raw.gate === "object" ? raw.gate : {}) as Record<string, unknown>;
+	const rawGateByState = (rawGate.breakEvenThresholdByState && typeof rawGate.breakEvenThresholdByState === "object"
+		? rawGate.breakEvenThresholdByState
+		: {}) as Record<string, unknown>;
 
 	return {
 		enabled: typeof raw.enabled === "boolean" ? raw.enabled : defaults.enabled,
@@ -192,6 +260,15 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 		},
 		thresholds: {
 			minCharsSaved: asNonNegativeInt(rawThresholds.minCharsSaved, defaults.thresholds.minCharsSaved),
+		},
+		gate: {
+			mode: asGateMode(rawGate.mode, defaults.gate.mode),
+			cachedPriceRatio: asRatio(rawGate.cachedPriceRatio, defaults.gate.cachedPriceRatio),
+			breakEvenThreshold: asNonNegativeNumber(rawGate.breakEvenThreshold, defaults.gate.breakEvenThreshold),
+			breakEvenThresholdByState: {
+				idle: asNonNegativeNumber(rawGateByState.idle, defaults.gate.breakEvenThresholdByState.idle),
+				mid_loop: asNonNegativeNumber(rawGateByState.mid_loop, defaults.gate.breakEvenThresholdByState.mid_loop),
+			},
 		},
 	};
 }
@@ -238,6 +315,49 @@ export function estimateTokensForContent(content: string | (MinimalTextContent |
 }
 
 export type TokenEstimator = (text: string) => number;
+
+/** Resolve which break-even threshold applies for a given agent state (pe-s2ho state-conditioning hook). */
+export function resolveBreakEvenThreshold(gateConfig: PruneGateConfig, agentState: AgentState): number {
+	const override = gateConfig.breakEvenThresholdByState[agentState];
+	return typeof override === "number" && Number.isFinite(override) ? override : gateConfig.breakEvenThreshold;
+}
+
+/** Estimate the token cost of a single message (all content kinds), for tail/context-size accounting. */
+function estimateMessageTokens(message: MinimalMessage, estimateTokens: TokenEstimator): number {
+	if (message.role === "user" || message.role === "toolResult") {
+		const content = (message as MinimalUserMessage | MinimalToolResultMessage).content;
+		return estimateTokensForContent(content as string | (MinimalTextContent | MinimalImageContent)[]);
+	}
+	if (message.role === "assistant") {
+		let total = 0;
+		for (const block of (message as MinimalAssistantMessage).content) {
+			if (block.type === "text") total += estimateTokens(block.text);
+			else if (block.type === "thinking") total += estimateTokens(block.thinking);
+			else if (block.type === "toolCall") total += estimateTokens(JSON.stringify(block.arguments ?? {}));
+		}
+		return total;
+	}
+	return 0;
+}
+
+/**
+ * Sum estimated tokens for messages from `fromIndex` to the end of the array.
+ * Used both for cache-bust tail sizing (pe-s2ho cost model) and for raw/
+ * effective context-size snapshots. Clamped to valid indices; an out-of-range
+ * `fromIndex` (e.g. the very last message, or beyond) degrades gracefully.
+ */
+export function estimateTailTokens(
+	messages: MinimalMessage[],
+	fromIndex: number,
+	estimateTokens: TokenEstimator = estimateTokensForText,
+): number {
+	let total = 0;
+	const start = Math.max(0, fromIndex);
+	for (let i = start; i < messages.length; i++) {
+		total += estimateMessageTokens(messages[i], estimateTokens);
+	}
+	return total;
+}
 
 // ============================================================================
 // Protections
@@ -423,6 +543,13 @@ export function resolveMessageIndexForEntry(
 
 export type PruneTargetKind = "tool_result_content" | "tool_call_input";
 
+/**
+ * Where a decision came from. "manual" decisions (e.g. a future /prune
+ * picker, pe-8re9) always bypass the net-benefit gate: user intent wins.
+ * Absent/unspecified defaults to "auto".
+ */
+export type PruneDecisionSource = "auto" | "manual";
+
 /** What a strategy proposes. The pipeline decides whether/how to apply it. */
 export interface ProposedPrune {
 	strategyId: string;
@@ -430,6 +557,8 @@ export interface ProposedPrune {
 	kind: PruneTargetKind;
 	reason: string;
 	placeholder?: string;
+	/** Defaults to "auto"; set to "manual" for user-initiated prunes that must bypass the gate. */
+	source?: PruneDecisionSource;
 }
 
 /** What actually gets persisted once the pipeline applies a proposal. */
@@ -441,6 +570,7 @@ export interface PruneDecisionRecord {
 	reason: string;
 	placeholder?: string;
 	createdAt: string;
+	source: PruneDecisionSource;
 }
 
 export function buildIdempotencyKey(proposal: ProposedPrune): string {
@@ -456,6 +586,7 @@ export function proposalToDecisionRecord(proposal: ProposedPrune, createdAt: str
 		reason: proposal.reason,
 		placeholder: proposal.placeholder,
 		createdAt,
+		source: proposal.source ?? "auto",
 	};
 }
 
@@ -468,6 +599,7 @@ export function parseDecisionRecord(data: unknown): PruneDecisionRecord | undefi
 	if (raw.kind !== "tool_result_content" && raw.kind !== "tool_call_input") return undefined;
 	if (typeof raw.reason !== "string") return undefined;
 	if (typeof raw.createdAt !== "string") return undefined;
+	const source: PruneDecisionSource = raw.source === "manual" ? "manual" : "auto";
 
 	const rawCorrelation = raw.correlation as Record<string, unknown> | undefined;
 	let correlation: PruneDecisionRecord["correlation"] | undefined;
@@ -486,6 +618,7 @@ export function parseDecisionRecord(data: unknown): PruneDecisionRecord | undefi
 		reason: raw.reason,
 		placeholder: typeof raw.placeholder === "string" ? raw.placeholder : undefined,
 		createdAt: raw.createdAt,
+		source,
 	};
 }
 
@@ -596,6 +729,306 @@ export function isDecisionProtected(
 }
 
 // ============================================================================
+// Savings estimation, cache cost model & net-benefit gate (pe-s2ho)
+// ============================================================================
+
+export interface DecisionSavingsEstimate {
+	/** Earliest message index this decision changes; used for cache-bust tail sizing. */
+	position: number;
+	/** Estimated tokens removed by this decision, via the shared estimator. */
+	tokensRemoved: number;
+}
+
+/**
+ * Estimate the token savings and affected position of a single decision
+ * without mutating the caller's `messages`. Returns undefined when the
+ * decision's target is absent or the decision would not actually apply
+ * (mirrors `applyPruneDecision`'s no-op conditions).
+ */
+export function estimateDecisionSavings(
+	messages: MinimalMessage[],
+	decision: PruneDecisionRecord,
+	estimateTokens: TokenEstimator = estimateTokensForText,
+): DecisionSavingsEstimate | undefined {
+	if (decision.correlation.type !== "toolCallId") return undefined;
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId);
+
+	// Apply against a shallow copy of the array (not the message objects) so
+	// the caller's messages/content are never mutated by this preview.
+	const preview = messages.slice();
+	const result = applyPruneDecision(preview, decision);
+	if (!result.applied) return undefined;
+
+	if (decision.kind === "tool_result_content") {
+		if (pair.resultIndex === undefined) return undefined;
+		const before = messages[pair.resultIndex] as MinimalToolResultMessage;
+		const after = preview[pair.resultIndex] as MinimalToolResultMessage;
+		const tokensBefore = estimateTokensForContent(before.content);
+		const tokensAfter = estimateTokensForContent(after.content);
+		return { position: pair.resultIndex, tokensRemoved: Math.max(0, tokensBefore - tokensAfter) };
+	}
+
+	if (decision.kind === "tool_call_input") {
+		if (pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined) return undefined;
+		const beforeBlock = (messages[pair.assistantIndex] as MinimalAssistantMessage).content[
+			pair.toolCallBlockIndex
+		] as MinimalToolCallContent;
+		const afterBlock = (preview[pair.assistantIndex] as MinimalAssistantMessage).content[
+			pair.toolCallBlockIndex
+		] as MinimalToolCallContent;
+		const tokensBefore = estimateTokens(JSON.stringify(beforeBlock.arguments ?? {}));
+		const tokensAfter = estimateTokens(JSON.stringify(afterBlock.arguments ?? {}));
+		return { position: pair.assistantIndex, tokensRemoved: Math.max(0, tokensBefore - tokensAfter) };
+	}
+
+	return undefined;
+}
+
+/**
+ * Cache-aware cost model (pe-s2ho ticket NOTES, binding over the looser prose
+ * in the ticket body): prompt caches are prefix-based, so pruning at message
+ * position p invalidates ('busts') the cached tail from p onward exactly
+ * once. Modelled per NOTES as:
+ *
+ *   penalty          ~= (1 - r) * tailTokensAfterEarliestChange
+ *   recurringSaving  ~= r * tokensRemoved
+ *   breakEvenCalls   =  penalty / recurringSaving
+ *
+ * where r is `cachedPriceRatio` (fraction of full price still paid for
+ * cached tokens; default 0.1). `breakEvenCalls` is the number of subsequent
+ * calls needed to amortize the one-time cache bust via the recurring saving.
+ */
+export interface CacheCostModelInput {
+	tailTokensAfterEarliestChange: number;
+	tokensRemoved: number;
+	cachedPriceRatio: number;
+}
+
+export interface CacheCostModelResult {
+	penalty: number;
+	recurringSaving: number;
+	/** Infinity when there is a penalty but no recurring saving to amortize it. */
+	breakEvenCalls: number;
+}
+
+export function computeCacheCostModel(input: CacheCostModelInput): CacheCostModelResult {
+	const r = Number.isFinite(input.cachedPriceRatio) ? Math.min(1, Math.max(0, input.cachedPriceRatio)) : DEFAULT_CACHED_PRICE_RATIO;
+	const tailTokens = Math.max(0, input.tailTokensAfterEarliestChange);
+	const tokensRemoved = Math.max(0, input.tokensRemoved);
+	const penalty = (1 - r) * tailTokens;
+	const recurringSaving = r * tokensRemoved;
+	const breakEvenCalls = recurringSaving > 0 ? penalty / recurringSaving : penalty > 0 ? Infinity : 0;
+	return { penalty, recurringSaving, breakEvenCalls };
+}
+
+/** A fresh, automatic (non-manual, non-persisted) decision pending the net-benefit gate. */
+export interface GateCandidate {
+	decision: PruneDecisionRecord;
+	position: number;
+	tokensRemoved: number;
+}
+
+export interface NetBenefitGateResult {
+	accepted: PruneDecisionRecord[];
+	rejected: PruneDecisionRecord[];
+	mode: GateMode;
+	threshold: number;
+	earliestPosition: number | undefined;
+	tailTokensAfterEarliestChange: number;
+	totalTokensRemoved: number;
+	cost: CacheCostModelResult | undefined;
+}
+
+/**
+ * Net-benefit gate (pe-s2ho): decides whether fresh, automatic prune
+ * proposals are worth the one-time cache bust they cause. Batch-aware: since
+ * prompt caches are a single linear prefix, every candidate in one pipeline
+ * pass is "behind" the earliest changed position and shares that one cache
+ * bust, so the whole batch is evaluated (and accepted/rejected) jointly.
+ *
+ * Already-applied/persisted decisions and manual decisions never reach this
+ * gate (the pipeline routes them around it entirely; see
+ * `runDynamicContextPruningPipeline`).
+ */
+export function evaluateNetBenefitGate(
+	candidates: GateCandidate[],
+	messages: MinimalMessage[],
+	gateConfig: PruneGateConfig,
+	agentState: AgentState = "idle",
+	estimateTokens: TokenEstimator = estimateTokensForText,
+): NetBenefitGateResult {
+	const threshold = resolveBreakEvenThreshold(gateConfig, agentState);
+
+	if (candidates.length === 0) {
+		return {
+			accepted: [],
+			rejected: [],
+			mode: gateConfig.mode,
+			threshold,
+			earliestPosition: undefined,
+			tailTokensAfterEarliestChange: 0,
+			totalTokensRemoved: 0,
+			cost: undefined,
+		};
+	}
+
+	if (gateConfig.mode === "off") {
+		// Gate fully bypassed: no cost modelling performed at all.
+		return {
+			accepted: candidates.map((c) => c.decision),
+			rejected: [],
+			mode: "off",
+			threshold,
+			earliestPosition: undefined,
+			tailTokensAfterEarliestChange: 0,
+			totalTokensRemoved: candidates.reduce((sum, c) => sum + c.tokensRemoved, 0),
+			cost: undefined,
+		};
+	}
+
+	const earliestPosition = Math.min(...candidates.map((c) => c.position));
+	const tailTokensAfterEarliestChange = estimateTailTokens(messages, earliestPosition, estimateTokens);
+	const totalTokensRemoved = candidates.reduce((sum, c) => sum + c.tokensRemoved, 0);
+	const cost = computeCacheCostModel({
+		tailTokensAfterEarliestChange,
+		tokensRemoved: totalTokensRemoved,
+		cachedPriceRatio: gateConfig.cachedPriceRatio,
+	});
+
+	if (gateConfig.mode === "always-apply" || cost.breakEvenCalls <= threshold) {
+		return {
+			accepted: candidates.map((c) => c.decision),
+			rejected: [],
+			mode: gateConfig.mode,
+			threshold,
+			earliestPosition,
+			tailTokensAfterEarliestChange,
+			totalTokensRemoved,
+			cost,
+		};
+	}
+
+	return {
+		accepted: [],
+		rejected: candidates.map((c) => c.decision),
+		mode: gateConfig.mode,
+		threshold,
+		earliestPosition,
+		tailTokensAfterEarliestChange,
+		totalTokensRemoved,
+		cost,
+	};
+}
+
+// ============================================================================
+// Savings accounting & stats API (consumed by pe-8re9 /context-pruning stats
+// and the pe-e9pv benchmark harness)
+// ============================================================================
+
+export interface PruneStatsRecord {
+	idempotencyKey: string;
+	strategyId: string;
+	tokensRemoved: number;
+	appliedAt: string;
+}
+
+export function buildStatsRecord(
+	decision: PruneDecisionRecord,
+	tokensRemoved: number,
+	appliedAt: string = new Date().toISOString(),
+): PruneStatsRecord {
+	return {
+		idempotencyKey: decision.idempotencyKey,
+		strategyId: decision.strategyId,
+		tokensRemoved: Math.max(0, tokensRemoved),
+		appliedAt,
+	};
+}
+
+/** Parse a persisted stats CustomEntry payload back into a record. Returns undefined if malformed. */
+export function parseStatsRecord(data: unknown): PruneStatsRecord | undefined {
+	if (!data || typeof data !== "object") return undefined;
+	const raw = data as Record<string, unknown>;
+	if (typeof raw.idempotencyKey !== "string" || !raw.idempotencyKey) return undefined;
+	if (typeof raw.strategyId !== "string") return undefined;
+	if (typeof raw.tokensRemoved !== "number" || !Number.isFinite(raw.tokensRemoved)) return undefined;
+	if (typeof raw.appliedAt !== "string") return undefined;
+	return { idempotencyKey: raw.idempotencyKey, strategyId: raw.strategyId, tokensRemoved: raw.tokensRemoved, appliedAt: raw.appliedAt };
+}
+
+export interface StrategyStats {
+	tokensRemoved: number;
+	pruneCount: number;
+}
+
+export interface CumulativePruneStats {
+	totalTokensRemoved: number;
+	totalPruneCount: number;
+	byStrategy: Record<string, StrategyStats>;
+}
+
+export function emptyCumulativeStats(): CumulativePruneStats {
+	return { totalTokensRemoved: 0, totalPruneCount: 0, byStrategy: {} };
+}
+
+/** Fold a single stats record into cumulative stats (pure; returns a new object). */
+export function foldStatsRecord(stats: CumulativePruneStats, record: PruneStatsRecord): CumulativePruneStats {
+	const existing = stats.byStrategy[record.strategyId] ?? { tokensRemoved: 0, pruneCount: 0 };
+	return {
+		totalTokensRemoved: stats.totalTokensRemoved + record.tokensRemoved,
+		totalPruneCount: stats.totalPruneCount + 1,
+		byStrategy: {
+			...stats.byStrategy,
+			[record.strategyId]: {
+				tokensRemoved: existing.tokensRemoved + record.tokensRemoved,
+				pruneCount: existing.pruneCount + 1,
+			},
+		},
+	};
+}
+
+export interface RebuiltStatsState {
+	stats: CumulativePruneStats;
+	seenKeys: Set<string>;
+}
+
+/**
+ * Rebuild cumulative stats from persisted CustomEntry records on a branch.
+ * Idempotent/rebuildable like `rebuildDecisionStateFromEntries`: duplicate or
+ * replayed entries for the same idempotencyKey collapse to a single fold.
+ */
+export function rebuildStatsStateFromEntries(entries: MinimalSessionEntry[]): RebuiltStatsState {
+	let stats = emptyCumulativeStats();
+	const seenKeys = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type !== "custom" || entry.customType !== STATS_ENTRY_TYPE) continue;
+		const record = parseStatsRecord(entry.data);
+		if (!record) continue;
+		if (seenKeys.has(record.idempotencyKey)) continue;
+		seenKeys.add(record.idempotencyKey);
+		stats = foldStatsRecord(stats, record);
+	}
+	return { stats, seenKeys };
+}
+
+/** Live (non-persisted) snapshot of raw vs effective (post-prune) context size for a single call. */
+export interface ContextSizeSnapshot {
+	rawTokens: number;
+	effectiveTokens: number;
+	tokensSavedThisCall: number;
+}
+
+export function computeContextSizeSnapshot(
+	rawMessages: MinimalMessage[],
+	effectiveMessages: MinimalMessage[],
+	estimateTokens: TokenEstimator = estimateTokensForText,
+): ContextSizeSnapshot {
+	const rawTokens = estimateTailTokens(rawMessages, 0, estimateTokens);
+	const effectiveTokens = estimateTailTokens(effectiveMessages, 0, estimateTokens);
+	return { rawTokens, effectiveTokens, tokensSavedThisCall: Math.max(0, rawTokens - effectiveTokens) };
+}
+
+// ============================================================================
 // Strategy registry (populated by follow-up tickets pe-u8gd/pe-qs8j)
 // ============================================================================
 
@@ -638,12 +1071,24 @@ export interface PipelineInput {
 	persistedDecisions: PruneDecisionRecord[];
 	/** Idempotency keys already known/persisted; used to avoid re-emitting appendEntry calls. */
 	knownIdempotencyKeys: ReadonlySet<string>;
+	/**
+	 * State-conditioning hook (pe-s2ho notes): lets the net-benefit gate use a
+	 * different break-even threshold depending on whether the agent is
+	 * mid-loop vs idle. Defaults to "idle" until callers wire real detection.
+	 */
+	agentState?: AgentState;
 }
 
 export interface PipelineResult {
 	messages: MinimalMessage[];
 	/** Decisions that were applied this call and are not yet persisted; caller should appendEntry these once. */
 	newlyAppliedDecisions: PruneDecisionRecord[];
+	/** Stats records to persist 1:1 alongside `newlyAppliedDecisions` (same idempotencyKey, same order). */
+	newlyAppliedStats: PruneStatsRecord[];
+	/** Live (non-persisted) snapshot of raw vs effective context size for this call. */
+	contextSizeSnapshot: ContextSizeSnapshot;
+	/** Net-benefit gate outcome for this call's fresh automatic proposals (debug/stats consumers). */
+	gate: NetBenefitGateResult;
 }
 
 /**
@@ -651,12 +1096,32 @@ export interface PipelineResult {
  * copy of the messages array. Strategies only propose; this function is the
  * single place that mutates content. Pairing invariants are preserved by
  * construction: messages/blocks are never added or removed, only replaced.
+ *
+ * Net-benefit gate (pe-s2ho): only NEW, automatic (non-manual) proposals are
+ * gated; already-persisted decisions stay applied (their cache bust already
+ * happened) and manual decisions always bypass the gate (user intent wins).
  */
 export function runDynamicContextPruningPipeline(input: PipelineInput): PipelineResult {
 	if (!input.config.enabled) {
-		return { messages: input.messages, newlyAppliedDecisions: [] };
+		return {
+			messages: input.messages,
+			newlyAppliedDecisions: [],
+			newlyAppliedStats: [],
+			contextSizeSnapshot: computeContextSizeSnapshot(input.messages, input.messages),
+			gate: {
+				accepted: [],
+				rejected: [],
+				mode: input.config.gate.mode,
+				threshold: resolveBreakEvenThreshold(input.config.gate, input.agentState ?? "idle"),
+				earliestPosition: undefined,
+				tailTokensAfterEarliestChange: 0,
+				totalTokensRemoved: 0,
+				cost: undefined,
+			},
+		};
 	}
 
+	const agentState = input.agentState ?? "idle";
 	const messages = input.messages.map((message) => ({ ...message }));
 	const recencyBoundaryIndex = computeRecencyBoundaryIndex(messages, input.config.protections.recentTurns);
 
@@ -681,8 +1146,28 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 		dedupedFresh.push(decision);
 	}
 
-	const allCandidates = [...input.persistedDecisions, ...dedupedFresh];
+	// Manual decisions (source: "manual") always bypass the net-benefit gate.
+	// Only fresh *automatic* proposals are ever gated; gating happens here
+	// against the pre-mutation `messages` clone, before the apply loop below
+	// mutates anything.
+	const freshManual = dedupedFresh.filter((decision) => decision.source === "manual");
+	const freshAutomatic = dedupedFresh.filter((decision) => decision.source !== "manual");
+
+	const savingsByKey = new Map<string, number>();
+	const gateCandidates: GateCandidate[] = [];
+	for (const decision of freshAutomatic) {
+		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex)) continue;
+		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText);
+		if (!estimate || estimate.tokensRemoved <= 0) continue;
+		savingsByKey.set(decision.idempotencyKey, estimate.tokensRemoved);
+		gateCandidates.push({ decision, position: estimate.position, tokensRemoved: estimate.tokensRemoved });
+	}
+
+	const gate = evaluateNetBenefitGate(gateCandidates, messages, input.config.gate, agentState, estimateTokensForText);
+
+	const allCandidates = [...input.persistedDecisions, ...freshManual, ...gate.accepted];
 	const newlyAppliedDecisions: PruneDecisionRecord[] = [];
+	const newlyAppliedStats: PruneStatsRecord[] = [];
 
 	for (const decision of allCandidates) {
 		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex)) continue;
@@ -690,10 +1175,17 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 		if (!result.applied) continue; // graceful no-op: target absent/already safe
 		if (!input.knownIdempotencyKeys.has(decision.idempotencyKey)) {
 			newlyAppliedDecisions.push(decision);
+			const tokensRemoved =
+				savingsByKey.get(decision.idempotencyKey) ??
+				estimateDecisionSavings(input.messages, decision, estimateTokensForText)?.tokensRemoved ??
+				0;
+			newlyAppliedStats.push(buildStatsRecord(decision, tokensRemoved));
 		}
 	}
 
-	return { messages, newlyAppliedDecisions };
+	const contextSizeSnapshot = computeContextSizeSnapshot(input.messages, messages, estimateTokensForText);
+
+	return { messages, newlyAppliedDecisions, newlyAppliedStats, contextSizeSnapshot, gate };
 }
 
 // ============================================================================
@@ -743,12 +1235,17 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 	let config: DynamicContextPruningConfig = defaultConfig();
 	let persistedDecisions: PruneDecisionRecord[] = [];
 	let knownIdempotencyKeys = new Set<string>();
+	let cumulativeStats: CumulativePruneStats = emptyCumulativeStats();
+	let knownStatsKeys = new Set<string>();
 
 	const rebuildState = (ctx: ExtensionContext) => {
 		const branchEntries = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
-		const rebuilt = rebuildDecisionStateFromEntries(branchEntries);
-		persistedDecisions = rebuilt.decisions;
-		knownIdempotencyKeys = rebuilt.idempotencyKeys;
+		const rebuiltDecisions = rebuildDecisionStateFromEntries(branchEntries);
+		persistedDecisions = rebuiltDecisions.decisions;
+		knownIdempotencyKeys = rebuiltDecisions.idempotencyKeys;
+		const rebuiltStats = rebuildStatsStateFromEntries(branchEntries);
+		cumulativeStats = rebuiltStats.stats;
+		knownStatsKeys = rebuiltStats.seenKeys;
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -768,6 +1265,9 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			config,
 			persistedDecisions,
 			knownIdempotencyKeys,
+			// Real mid-loop/idle agent-state detection lands in a follow-up ticket;
+			// "idle" is the safe default until it's wired through ctx.
+			agentState: "idle",
 		});
 
 		for (const decision of result.newlyAppliedDecisions) {
@@ -779,6 +1279,17 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			} catch {
 				// Persisting a decision for a call that never completes (abort/retry)
 				// is harmless: pruning is recomputed fresh on every call. Swallow.
+			}
+		}
+
+		for (const statRecord of result.newlyAppliedStats) {
+			if (knownStatsKeys.has(statRecord.idempotencyKey)) continue;
+			knownStatsKeys.add(statRecord.idempotencyKey);
+			cumulativeStats = foldStatsRecord(cumulativeStats, statRecord);
+			try {
+				pi.appendEntry(STATS_ENTRY_TYPE, statRecord);
+			} catch {
+				// Same reasoning as decision persistence above: safe to drop on abort/retry.
 			}
 		}
 

@@ -164,8 +164,13 @@ test('propose/apply split: a strategy proposes, the pipeline applies and reports
   });
 
   const messages = toolCallMessages();
-  // Recency protection is orthogonal to propose/apply/persist; disable it here.
-  const config = { ...defaultConfig(), protections: { ...defaultConfig().protections, recentTurns: 0 } };
+  // Recency protection and the net-benefit gate are orthogonal to
+  // propose/apply/persist; disable both here.
+  const config = {
+    ...defaultConfig(),
+    protections: { ...defaultConfig().protections, recentTurns: 0 },
+    gate: { ...defaultConfig().gate, mode: 'off' },
+  };
   const idempotencyKey = buildIdempotencyKey({ strategyId: 'test-strategy', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'x' });
 
   // First call: nothing persisted yet -> the proposal must be applied and reported once.
