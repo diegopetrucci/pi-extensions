@@ -2,7 +2,7 @@
 
 [![Total npm downloads](https://img.shields.io/npm/dt/%40diegopetrucci%2Fpi-extensions?label=total%20npm%20downloads)](https://www.npmjs.com/package/@diegopetrucci/pi-extensions)
 
-A collection of [pi](https://pi.dev) agent extensions I made.
+A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also building my own harness on top of pi](https://github.com/diegopetrucci/the-last-harness). have a look!)
 
 ### Subagents
 
