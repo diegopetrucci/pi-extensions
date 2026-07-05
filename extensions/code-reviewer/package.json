@@ -1,0 +1,35 @@
+{
+  "name": "@diegopetrucci/pi-code-reviewer",
+  "version": "0.1.0",
+  "description": "A standalone pi extension that adds a read-only code_reviewer subagent tool for isolated code reviews.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "review",
+    "code-review",
+    "subagent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/code-reviewer"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
