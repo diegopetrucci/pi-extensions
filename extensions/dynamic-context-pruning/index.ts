@@ -83,6 +83,14 @@ const EXTENSION_ID = "dynamic-context-pruning";
 const CONFIG_FILE_NAME = "dynamic-context-pruning.json";
 const DECISION_ENTRY_TYPE = "dynamic-context-pruning:decision";
 const STATS_ENTRY_TYPE = "dynamic-context-pruning:stats";
+/**
+ * Restore/undo entries (pe-8re9): a lightweight tombstone that records "the
+ * decision with this idempotencyKey should be treated as reverted". See
+ * `resolvePruneTombstoneState` for the exact chronological resolution rule.
+ */
+const RESTORE_ENTRY_TYPE = "dynamic-context-pruning:restore";
+/** strategyId used for user-initiated prunes from the /prune picker (pe-8re9). Always source:"manual". */
+const MANUAL_STRATEGY_ID = "manual";
 
 const DEFAULT_RECENT_TURNS = 4;
 
@@ -685,6 +693,106 @@ export function parseDecisionRecord(data: unknown): PruneDecisionRecord | undefi
 }
 
 // ============================================================================
+// Restore / undo (pe-8re9): tombstones that reverse a persisted decision
+// ============================================================================
+
+/**
+ * A restore record is a tombstone: it records that the decision identified by
+ * `idempotencyKey` should stop being applied, WITHOUT deleting or mutating
+ * the original decision entry (the branch's persisted-entry log is
+ * append-only, same as decisions/stats). Restoring never "forgets" that a
+ * prune happened; it just flips it inactive.
+ *
+ * Restores are resolved chronologically against decision entries for the
+ * SAME idempotencyKey (see `resolvePruneTombstoneState`): whichever entry
+ * (decision or restore) for a given key is LATEST wins. This makes
+ * prune -> restore -> re-prune -> restore ... sequences behave correctly and
+ * idempotently no matter how many times they replay, without needing to
+ * mutate or delete anything.
+ */
+export interface RestoreRecord {
+	idempotencyKey: string;
+	createdAt: string;
+}
+
+export function buildRestoreRecord(idempotencyKey: string, createdAt: string = new Date().toISOString()): RestoreRecord {
+	return { idempotencyKey, createdAt };
+}
+
+/** Parse a persisted CustomEntry payload back into a restore record. Returns undefined if malformed. */
+export function parseRestoreRecord(data: unknown): RestoreRecord | undefined {
+	if (!data || typeof data !== "object") return undefined;
+	const raw = data as Record<string, unknown>;
+	if (typeof raw.idempotencyKey !== "string" || !raw.idempotencyKey) return undefined;
+	if (typeof raw.createdAt !== "string") return undefined;
+	return { idempotencyKey: raw.idempotencyKey, createdAt: raw.createdAt };
+}
+
+/** Build the manual-prune proposal a /prune picker "prune" action emits. Always source: "manual" (gate bypass). */
+export function buildManualPruneProposal(toolCallId: string, reason: string = "manual prune via /prune"): ProposedPrune {
+	return { strategyId: MANUAL_STRATEGY_ID, toolCallId, kind: "tool_result_content", reason, source: "manual" };
+}
+
+export interface PruneTombstoneState {
+	/** Decisions whose most recent event (decision vs restore) for their idempotencyKey is a decision. */
+	activeDecisions: PruneDecisionRecord[];
+	/** idempotencyKeys of `activeDecisions`, for pipeline seen/known-key checks. */
+	activeIdempotencyKeys: Set<string>;
+	/** idempotencyKeys whose most recent event is a restore: currently tombstoned/inactive. */
+	restoredKeys: Set<string>;
+	/** Most-recently-seen decision record per key, regardless of current tombstone state (for /prune history display). */
+	lastDecisionByKey: Map<string, PruneDecisionRecord>;
+}
+
+/**
+ * Chronologically resolve decision + restore CustomEntry records on a branch
+ * into "currently active" vs "currently restored (tombstoned)" state, per
+ * idempotencyKey. For each key, whichever entry (decision or restore)
+ * appears LAST in `entries` wins. This is the single source of truth
+ * consumed both by the pipeline (to stop automatic strategies from silently
+ * re-persisting a just-restored decision) and by the /prune picker (to show
+ * accurate status and support prune/restore/re-prune).
+ *
+ * Idempotent/rebuildable like `rebuildDecisionStateFromEntries`: replaying
+ * the same entries any number of times yields identical results.
+ */
+export function resolvePruneTombstoneState(entries: MinimalSessionEntry[]): PruneTombstoneState {
+	const lastDecisionByKey = new Map<string, PruneDecisionRecord>();
+	const lastEventKindByKey = new Map<string, "decision" | "restore">();
+
+	for (const entry of entries) {
+		if (entry.type !== "custom") continue;
+		if (entry.customType === DECISION_ENTRY_TYPE) {
+			const record = parseDecisionRecord(entry.data);
+			if (!record) continue;
+			lastDecisionByKey.set(record.idempotencyKey, record);
+			lastEventKindByKey.set(record.idempotencyKey, "decision");
+		} else if (entry.customType === RESTORE_ENTRY_TYPE) {
+			const record = parseRestoreRecord(entry.data);
+			if (!record) continue;
+			lastEventKindByKey.set(record.idempotencyKey, "restore");
+		}
+	}
+
+	const activeDecisions: PruneDecisionRecord[] = [];
+	const activeIdempotencyKeys = new Set<string>();
+	const restoredKeys = new Set<string>();
+	for (const [key, kind] of lastEventKindByKey) {
+		if (kind === "decision") {
+			const record = lastDecisionByKey.get(key);
+			if (record) {
+				activeDecisions.push(record);
+				activeIdempotencyKeys.add(key);
+			}
+		} else {
+			restoredKeys.add(key);
+		}
+	}
+
+	return { activeDecisions, activeIdempotencyKeys, restoredKeys, lastDecisionByKey };
+}
+
+// ============================================================================
 // Apply step (content-replacement only; never drops messages)
 // ============================================================================
 
@@ -1156,7 +1264,8 @@ export function buildDedupeKey(toolName: string, args: unknown): string {
 	return `${toolName.trim().toLowerCase()}::${canonicalizeArgumentsJSON(args)}`;
 }
 
-interface ToolCallOccurrence {
+/** Exported for /prune picker item building (pe-8re9) and direct unit testing. */
+export interface ToolCallOccurrence {
 	toolCallId: string;
 	toolName: string;
 	arguments: Record<string, unknown> | undefined;
@@ -1166,7 +1275,7 @@ interface ToolCallOccurrence {
 }
 
 /** Collect every assistant toolCall block that has a matching toolResult message, in message order. */
-function collectCompletedToolCallOccurrences(messages: MinimalMessage[]): ToolCallOccurrence[] {
+export function collectCompletedToolCallOccurrences(messages: MinimalMessage[]): ToolCallOccurrence[] {
 	const resultIndexById = new Map<string, number>();
 	const isErrorById = new Map<string, boolean>();
 	messages.forEach((message, index) => {
@@ -1535,6 +1644,17 @@ export interface PipelineInput {
 	/** Idempotency keys already known/persisted; used to avoid re-emitting appendEntry calls. */
 	knownIdempotencyKeys: ReadonlySet<string>;
 	/**
+	 * Idempotency keys most-recently restored/undone via the /prune picker
+	 * (pe-8re9; see `resolvePruneTombstoneState`). Fresh AUTOMATIC proposals
+	 * matching one of these keys are dropped so a restored decision does not
+	 * silently re-apply on the very next context event. Manual re-prunes
+	 * always use a fresh idempotencyKey namespaced by "manual" (see
+	 * `buildManualPruneProposal`), so they are unaffected by this filter and
+	 * always work regardless of tombstone state. Optional/back-compat: an
+	 * absent set behaves as if nothing was ever restored.
+	 */
+	restoredIdempotencyKeys?: ReadonlySet<string>;
+	/**
 	 * State-conditioning hook (pe-s2ho notes): lets the net-benefit gate use a
 	 * different break-even threshold depending on whether the agent is
 	 * mid-loop vs idle. Defaults to "idle" until callers wire real detection.
@@ -1599,8 +1719,10 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	});
 
 	const seenKeys = new Set(input.persistedDecisions.map((decision) => decision.idempotencyKey));
+	const restoredKeys = input.restoredIdempotencyKeys ?? new Set<string>();
 	const freshDecisions = proposals
 		.filter((proposal) => !seenKeys.has(buildIdempotencyKey(proposal)))
+		.filter((proposal) => !restoredKeys.has(buildIdempotencyKey(proposal)))
 		.map((proposal) => proposalToDecisionRecord(proposal));
 
 	// De-dup fresh proposals against each other too (multiple strategies could
@@ -1680,6 +1802,291 @@ export function rebuildDecisionStateFromEntries(entries: MinimalSessionEntry[]):
 }
 
 // ============================================================================
+// /prune picker helpers (pe-8re9)
+// ============================================================================
+
+/** Convert branch entries into the plain message array the pipeline/pickers correlate against. */
+export function sessionEntriesToMessages(entries: MinimalSessionEntry[]): MinimalMessage[] {
+	const messages: MinimalMessage[] = [];
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.message) messages.push(entry.message);
+	}
+	return messages;
+}
+
+/** Truncated, canonicalized single-line digest of a tool call's arguments, for compact picker display. */
+export function buildArgsDigest(args: unknown, maxLength = 80): string {
+	const json = canonicalizeArgumentsJSON(args);
+	if (json.length <= maxLength) return json;
+	return `${json.slice(0, Math.max(0, maxLength - 1))}\u2026`;
+}
+
+export type PrunableItemStatus = "active" | "pruned" | "restored";
+
+export interface PrunableItem {
+	toolCallId: string;
+	toolName: string;
+	argsDigest: string;
+	/** Estimated tokens of the ORIGINAL (unpruned) tool result content, i.e. what pruning would save / restoring would bring back. */
+	estimatedTokens: number;
+	status: PrunableItemStatus;
+	/** Set only when status === "pruned": the currently-active decision pruning this result. */
+	activeDecision?: PruneDecisionRecord;
+}
+
+/**
+ * Build picker rows for every completed tool call whose result is eligible
+ * for manual prune/restore. `activeByToolCallId` should be built from
+ * currently-ACTIVE decisions only (kind: "tool_result_content"), keyed by
+ * toolCallId; `restoredToolCallIds` from currently-restored keys' underlying
+ * toolCallId (see `buildActiveResultDecisionMap`/`extractToolCallIdFromDecisionKey`
+ * usage in the extension wiring).
+ */
+export function buildPrunableItems(
+	messages: MinimalMessage[],
+	activeByToolCallId: Map<string, PruneDecisionRecord>,
+	restoredToolCallIds: ReadonlySet<string>,
+	_estimateTokens: TokenEstimator = estimateTokensForText,
+): PrunableItem[] {
+	const items: PrunableItem[] = [];
+	for (const occurrence of collectCompletedToolCallOccurrences(messages)) {
+		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
+		const estimatedTokens = estimateTokensForContent(resultMessage.content);
+		const activeDecision = activeByToolCallId.get(occurrence.toolCallId);
+		const status: PrunableItemStatus = activeDecision
+			? "pruned"
+			: restoredToolCallIds.has(occurrence.toolCallId)
+				? "restored"
+				: "active";
+		items.push({
+			toolCallId: occurrence.toolCallId,
+			toolName: occurrence.toolName,
+			argsDigest: buildArgsDigest(occurrence.arguments),
+			estimatedTokens,
+			status,
+			activeDecision,
+		});
+	}
+	return items;
+}
+
+/** Build a Map<toolCallId, decision> from active decisions, restricted to tool_result_content kind. First match per toolCallId wins. */
+export function buildActiveResultDecisionMap(activeDecisions: PruneDecisionRecord[]): Map<string, PruneDecisionRecord> {
+	const map = new Map<string, PruneDecisionRecord>();
+	for (const decision of activeDecisions) {
+		if (decision.kind !== "tool_result_content") continue;
+		if (decision.correlation.type !== "toolCallId") continue;
+		if (!map.has(decision.correlation.toolCallId)) map.set(decision.correlation.toolCallId, decision);
+	}
+	return map;
+}
+
+/** Single-line label for a /prune picker option row. */
+export function formatPrunableItemOption(item: PrunableItem): string {
+	const statusLabel =
+		item.status === "pruned"
+			? `pruned by ${item.activeDecision?.strategyId ?? "?"}${item.activeDecision?.source === "manual" ? " (manual)" : ""}`
+			: item.status === "restored"
+				? "restored (prunable again)"
+				: "not pruned";
+	return `${item.toolName} ${item.argsDigest} \u2014 ~${item.estimatedTokens} tok \u2014 ${statusLabel}`;
+}
+
+/** Multi-line detail text for a /prune confirm dialog, describing the item and (when pruning) the predicted cache-bust cost. */
+export function formatPrunableItemDetail(item: PrunableItem, cost?: CacheCostModelResult): string {
+	const lines = [`Tool: ${item.toolName}`, `Args: ${item.argsDigest}`, `Estimated tokens: ${item.estimatedTokens}`];
+	if (item.status === "pruned" && item.activeDecision) {
+		lines.push(`Currently pruned by "${item.activeDecision.strategyId}": ${item.activeDecision.reason}`);
+	}
+	if (cost) {
+		lines.push(
+			`Predicted cache-bust cost: penalty \u2248${cost.penalty.toFixed(0)} tok, recurring saving \u2248${cost.recurringSaving.toFixed(0)} tok/call, break-even \u2248${Number.isFinite(cost.breakEvenCalls) ? cost.breakEvenCalls.toFixed(1) : "\u221e"} calls.`,
+			"Manual prunes always bypass the net-benefit gate, so this preview is informational only.",
+		);
+	}
+	return lines.join("\n");
+}
+
+/** Plain-text report used both by the non-UI /prune fallback and as a debugging aid. */
+export function formatPrunableItemsReport(items: PrunableItem[]): string[] {
+	if (items.length === 0) return ["No prunable tool results found in this session."];
+	return items.map((item, index) => `${index + 1}. ${formatPrunableItemOption(item)}`);
+}
+
+// ============================================================================
+// /context-pruning control + status/stats helpers (pe-8re9)
+// ============================================================================
+
+export type StrategyKey = "dedupe" | "errorPurge" | "supersededFileOps";
+
+const STRATEGY_ALIASES: Record<string, StrategyKey> = {
+	dedupe: "dedupe",
+	"error-purge": "errorPurge",
+	errorpurge: "errorPurge",
+	error_purge: "errorPurge",
+	errorPurge: "errorPurge",
+	"superseded-file-ops": "supersededFileOps",
+	supersededfileops: "supersededFileOps",
+	superseded_file_ops: "supersededFileOps",
+	supersededFileOps: "supersededFileOps",
+};
+
+const STRATEGY_DISPLAY_NAMES: Record<StrategyKey, string> = {
+	dedupe: "dedupe",
+	errorPurge: "error-purge",
+	supersededFileOps: "superseded-file-ops",
+};
+
+export type ContextPruningSubcommand =
+	| { kind: "help" }
+	| { kind: "status" }
+	| { kind: "stats" }
+	| { kind: "enabled"; value: boolean }
+	| { kind: "toggle" }
+	| { kind: "strategy"; strategy: StrategyKey; value: boolean }
+	| { kind: "gate"; mode: GateMode }
+	| { kind: "unknown"; raw: string };
+
+/** Parse `/context-pruning <...>` arguments into a typed subcommand. Pure; never throws. */
+export function parseContextPruningArgs(rawArgs: string): ContextPruningSubcommand {
+	const tokens = rawArgs.trim().split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return { kind: "help" };
+	const [head, ...rest] = tokens;
+	const cmd = head.toLowerCase();
+
+	switch (cmd) {
+		case "help":
+		case "-h":
+		case "--help":
+			return { kind: "help" };
+		case "status":
+			return { kind: "status" };
+		case "stats":
+			return { kind: "stats" };
+		case "on":
+			return { kind: "enabled", value: true };
+		case "off":
+			return { kind: "enabled", value: false };
+		case "toggle":
+			return { kind: "toggle" };
+		case "strategy": {
+			const [nameRaw, valueRaw] = rest;
+			const key = nameRaw ? STRATEGY_ALIASES[nameRaw.toLowerCase()] ?? STRATEGY_ALIASES[nameRaw] : undefined;
+			const value = valueRaw?.toLowerCase();
+			if (!key || (value !== "on" && value !== "off")) return { kind: "unknown", raw: rawArgs };
+			return { kind: "strategy", strategy: key, value: value === "on" };
+		}
+		case "gate": {
+			const modeRaw = rest[0]?.toLowerCase();
+			if (modeRaw === "on" || modeRaw === "off" || modeRaw === "always-apply") return { kind: "gate", mode: modeRaw };
+			return { kind: "unknown", raw: rawArgs };
+		}
+		default:
+			return { kind: "unknown", raw: rawArgs };
+	}
+}
+
+export function contextPruningUsage(): string {
+	return [
+		"Usage: /context-pruning <status|stats|on|off|toggle|strategy <name> on|off|gate <on|off|always-apply>>",
+		"",
+		"  status                        Show enabled state, strategies, protections, and context size.",
+		"  stats                         Show cumulative tokens saved per strategy.",
+		"  on | off | toggle             Enable/disable dynamic context pruning entirely.",
+		"  strategy <name> on|off        Toggle one strategy: dedupe | error-purge | superseded-file-ops.",
+		"  gate on|off|always-apply      Control the net-benefit gate: reject/bypass/model-only.",
+	].join("\n");
+}
+
+export interface ConfigMutationResult {
+	config: DynamicContextPruningConfig;
+	message: string;
+}
+
+/** Apply a config-mutating subcommand ((enabled|toggle|strategy|gate)) to a config. Pure; returns a new config object. */
+export function applyContextPruningConfigMutation(
+	config: DynamicContextPruningConfig,
+	subcommand: Extract<ContextPruningSubcommand, { kind: "enabled" | "toggle" | "strategy" | "gate" }>,
+): ConfigMutationResult {
+	if (subcommand.kind === "enabled") {
+		return {
+			config: { ...config, enabled: subcommand.value },
+			message: `Dynamic context pruning ${subcommand.value ? "enabled" : "disabled"}.`,
+		};
+	}
+	if (subcommand.kind === "toggle") {
+		const value = !config.enabled;
+		return { config: { ...config, enabled: value }, message: `Dynamic context pruning ${value ? "enabled" : "disabled"}.` };
+	}
+	if (subcommand.kind === "strategy") {
+		const strategies = {
+			...config.strategies,
+			[subcommand.strategy]: { ...config.strategies[subcommand.strategy], enabled: subcommand.value },
+		};
+		return {
+			config: { ...config, strategies },
+			message: `Strategy "${STRATEGY_DISPLAY_NAMES[subcommand.strategy]}" ${subcommand.value ? "enabled" : "disabled"}.`,
+		};
+	}
+	return {
+		config: { ...config, gate: { ...config.gate, mode: subcommand.mode } },
+		message: `Net-benefit gate set to "${subcommand.mode}".`,
+	};
+}
+
+export interface StatusReportInput {
+	config: DynamicContextPruningConfig;
+	contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+	lastSnapshot?: ContextSizeSnapshot;
+}
+
+/** Human-readable `/context-pruning status` report lines. Pure; testable with fixture inputs. */
+export function formatStatusReport(input: StatusReportInput): string[] {
+	const { config, contextUsage, lastSnapshot } = input;
+	const lines: string[] = [];
+	lines.push(`Dynamic context pruning: ${config.enabled ? "ENABLED" : "disabled"}`);
+	lines.push(
+		`Gate: mode=${config.gate.mode} threshold=${config.gate.breakEvenThreshold} cachedPriceRatio=${config.gate.cachedPriceRatio}`,
+	);
+	lines.push("Strategies:");
+	lines.push(`  dedupe: ${config.strategies.dedupe.enabled ? "on" : "off"}`);
+	lines.push(
+		`  error-purge: ${config.strategies.errorPurge.enabled ? "on" : "off"} (minTurnsOld=${config.strategies.errorPurge.minTurnsOld})`,
+	);
+	lines.push(`  superseded-file-ops: ${config.strategies.supersededFileOps.enabled ? "on" : "off"}`);
+	lines.push(
+		`Protections: recentTurns=${config.protections.recentTurns}, protectedTools=${config.protections.toolNames.length}, protectedPathGlobs=${config.protections.pathGlobs.length}`,
+	);
+	if (lastSnapshot) {
+		lines.push(
+			`Last call: raw=${lastSnapshot.rawTokens} tok, effective=${lastSnapshot.effectiveTokens} tok, saved=${lastSnapshot.tokensSavedThisCall} tok`,
+		);
+	} else {
+		lines.push("Last call: no context snapshot yet (nothing has run through the pipeline this session).");
+	}
+	if (contextUsage) {
+		const percent = contextUsage.percent != null ? ` (${contextUsage.percent.toFixed(1)}%)` : "";
+		lines.push(`Current context usage: ${contextUsage.tokens ?? "unknown"} / ${contextUsage.contextWindow} tokens${percent}`);
+	}
+	return lines;
+}
+
+/** Human-readable `/context-pruning stats` report lines. Pure; testable with fixture inputs. */
+export function formatStatsReport(stats: CumulativePruneStats): string[] {
+	const lines: string[] = [`Total tokens saved: ${stats.totalTokensRemoved} across ${stats.totalPruneCount} prune(s).`];
+	const strategyIds = Object.keys(stats.byStrategy).sort();
+	if (strategyIds.length === 0) {
+		lines.push("No prunes recorded yet.");
+		return lines;
+	}
+	for (const id of strategyIds) {
+		const s = stats.byStrategy[id];
+		lines.push(`  ${id}: ${s.tokensRemoved} tok saved across ${s.pruneCount} prune(s)`);
+	}
+	return lines;
+}
+
+// ============================================================================
 // Extension wiring
 // ============================================================================
 
@@ -1702,14 +2109,19 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 	let config: DynamicContextPruningConfig = defaultConfig();
 	let persistedDecisions: PruneDecisionRecord[] = [];
 	let knownIdempotencyKeys = new Set<string>();
+	let restoredIdempotencyKeys = new Set<string>();
+	let lastDecisionByKey = new Map<string, PruneDecisionRecord>();
 	let cumulativeStats: CumulativePruneStats = emptyCumulativeStats();
 	let knownStatsKeys = new Set<string>();
+	let lastContextSizeSnapshot: ContextSizeSnapshot | undefined;
 
 	const rebuildState = (ctx: ExtensionContext) => {
 		const branchEntries = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
-		const rebuiltDecisions = rebuildDecisionStateFromEntries(branchEntries);
-		persistedDecisions = rebuiltDecisions.decisions;
-		knownIdempotencyKeys = rebuiltDecisions.idempotencyKeys;
+		const tombstoneState = resolvePruneTombstoneState(branchEntries);
+		persistedDecisions = tombstoneState.activeDecisions;
+		knownIdempotencyKeys = tombstoneState.activeIdempotencyKeys;
+		restoredIdempotencyKeys = tombstoneState.restoredKeys;
+		lastDecisionByKey = tombstoneState.lastDecisionByKey;
 		const rebuiltStats = rebuildStatsStateFromEntries(branchEntries);
 		cumulativeStats = rebuiltStats.stats;
 		knownStatsKeys = rebuiltStats.seenKeys;
@@ -1732,6 +2144,7 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			config,
 			persistedDecisions,
 			knownIdempotencyKeys,
+			restoredIdempotencyKeys,
 			// Real mid-loop/idle agent-state detection lands in a follow-up ticket;
 			// "idle" is the safe default until it's wired through ctx.
 			agentState: "idle",
@@ -1742,6 +2155,7 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			if (knownIdempotencyKeys.has(decision.idempotencyKey)) continue;
 			knownIdempotencyKeys.add(decision.idempotencyKey);
 			persistedDecisions.push(decision);
+			lastDecisionByKey.set(decision.idempotencyKey, decision);
 			try {
 				pi.appendEntry(DECISION_ENTRY_TYPE, decision);
 			} catch {
@@ -1761,14 +2175,154 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			}
 		}
 
+		lastContextSizeSnapshot = result.contextSizeSnapshot;
 		void ctx; // ctx currently unused beyond typing; kept for future protections/UI hooks.
 		return { messages: result.messages as never };
 	});
 
-	pi.registerCommand("context-pruning", {
-		description: "Dynamic context pruning (placeholder, no pruning logic yet)",
+	/** Persist + apply a manual prune decision immediately (accounting included), bypassing the net-benefit gate. */
+	const persistManualPrune = (messages: MinimalMessage[], toolCallId: string): { decision: PruneDecisionRecord; tokensRemoved: number } => {
+		const proposal = buildManualPruneProposal(toolCallId);
+		const decision = proposalToDecisionRecord(proposal);
+		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText);
+		const tokensRemoved = estimate?.tokensRemoved ?? 0;
+		const statRecord = buildStatsRecord(decision, tokensRemoved);
+
+		pi.appendEntry(DECISION_ENTRY_TYPE, decision);
+		pi.appendEntry(STATS_ENTRY_TYPE, statRecord);
+
+		persistedDecisions = [...persistedDecisions.filter((d) => d.idempotencyKey !== decision.idempotencyKey), decision];
+		knownIdempotencyKeys.add(decision.idempotencyKey);
+		restoredIdempotencyKeys.delete(decision.idempotencyKey);
+		lastDecisionByKey.set(decision.idempotencyKey, decision);
+		if (!knownStatsKeys.has(statRecord.idempotencyKey)) {
+			knownStatsKeys.add(statRecord.idempotencyKey);
+			cumulativeStats = foldStatsRecord(cumulativeStats, statRecord);
+		}
+
+		return { decision, tokensRemoved };
+	};
+
+	/** Persist a restore (tombstone) for a currently-active decision. Idempotent: safe to call more than once. */
+	const persistRestore = (idempotencyKey: string): void => {
+		const record = buildRestoreRecord(idempotencyKey);
+		pi.appendEntry(RESTORE_ENTRY_TYPE, record);
+		persistedDecisions = persistedDecisions.filter((d) => d.idempotencyKey !== idempotencyKey);
+		knownIdempotencyKeys.delete(idempotencyKey);
+		restoredIdempotencyKeys.add(idempotencyKey);
+	};
+
+	pi.registerCommand("prune", {
+		description: "Review, manually prune, and restore prunable tool results (interactive picker in TUI/RPC)",
 		handler: async (_args, ctx) => {
-			notify(ctx, "Dynamic context pruning is not implemented yet.", "info");
+			const branchEntries = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
+			const messages = sessionEntriesToMessages(branchEntries);
+			const activeByToolCallId = buildActiveResultDecisionMap(persistedDecisions);
+			const restoredToolCallIds = new Set(
+				Array.from(lastDecisionByKey.values())
+					.filter((d) => d.correlation.type === "toolCallId" && restoredIdempotencyKeys.has(d.idempotencyKey))
+					.map((d) => (d.correlation as { type: "toolCallId"; toolCallId: string }).toolCallId),
+			);
+			const items = buildPrunableItems(messages, activeByToolCallId, restoredToolCallIds);
+
+			if (!ctx.hasUI) {
+				notify(ctx, ["/prune: no interactive UI available. Prunable tool results in this session:", "", ...formatPrunableItemsReport(items)].join("\n"), "info");
+				return;
+			}
+
+			if (items.length === 0) {
+				notify(ctx, "No prunable tool results found in this session.", "info");
+				return;
+			}
+
+			const doneLabel = "Done";
+			while (true) {
+				const latestBranch = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
+				const latestMessages = sessionEntriesToMessages(latestBranch);
+				const latestActive = buildActiveResultDecisionMap(persistedDecisions);
+				const latestRestoredToolCallIds = new Set(
+					Array.from(lastDecisionByKey.values())
+						.filter((d) => d.correlation.type === "toolCallId" && restoredIdempotencyKeys.has(d.idempotencyKey))
+						.map((d) => (d.correlation as { type: "toolCallId"; toolCallId: string }).toolCallId),
+				);
+				const latestItems = buildPrunableItems(latestMessages, latestActive, latestRestoredToolCallIds);
+				if (latestItems.length === 0) {
+					notify(ctx, "No prunable tool results found in this session.", "info");
+					return;
+				}
+
+				const options = latestItems.map(formatPrunableItemOption);
+				const choice = await ctx.ui.select("/prune \u2014 select a tool result to prune or restore", [...options, doneLabel]);
+				if (!choice || choice === doneLabel) return;
+
+				const index = options.indexOf(choice);
+				const item = latestItems[index];
+				if (!item) continue;
+
+				if (item.status === "pruned" && item.activeDecision) {
+					const confirmed = await ctx.ui.confirm("Restore this tool result?", formatPrunableItemDetail(item));
+					if (confirmed) {
+						persistRestore(item.activeDecision.idempotencyKey);
+						notify(ctx, `Restored ${item.toolName} result; it will show its original content on the next call.`, "info");
+					}
+					continue;
+				}
+
+				// active or restored: offer a (re-)prune, with a predicted cache-bust cost preview.
+				const previewProposal = buildManualPruneProposal(item.toolCallId);
+				const previewDecision = proposalToDecisionRecord(previewProposal);
+				const estimate = estimateDecisionSavings(latestMessages, previewDecision, estimateTokensForText);
+				const cost = estimate
+					? computeCacheCostModel({
+							tailTokensAfterEarliestChange: estimateTailTokens(latestMessages, estimate.position, estimateTokensForText),
+							tokensRemoved: estimate.tokensRemoved,
+							cachedPriceRatio: config.gate.cachedPriceRatio,
+						})
+					: undefined;
+
+				const confirmed = await ctx.ui.confirm(`Prune ${item.toolName} result?`, formatPrunableItemDetail(item, cost));
+				if (confirmed) {
+					persistManualPrune(latestMessages, item.toolCallId);
+					notify(ctx, `Pruned ${item.toolName} result; it will apply on the next call.`, "info");
+				}
+			}
+		},
+	});
+
+	pi.registerCommand("context-pruning", {
+		description: "Inspect and control dynamic context pruning: status, stats, on/off, strategy, gate",
+		handler: async (args, ctx) => {
+			const subcommand = parseContextPruningArgs(args);
+
+			if (subcommand.kind === "help") {
+				notify(ctx, contextPruningUsage(), "info");
+				return;
+			}
+			if (subcommand.kind === "unknown") {
+				notify(ctx, `Unknown /context-pruning subcommand: "${subcommand.raw}".\n\n${contextPruningUsage()}`, "error");
+				return;
+			}
+			if (subcommand.kind === "status") {
+				const usage = ctx.getContextUsage();
+				notify(ctx, formatStatusReport({ config, contextUsage: usage, lastSnapshot: lastContextSizeSnapshot }).join("\n"), "info");
+				return;
+			}
+			if (subcommand.kind === "stats") {
+				notify(ctx, formatStatsReport(cumulativeStats).join("\n"), "info");
+				return;
+			}
+
+			const { config: nextConfig, message } = applyContextPruningConfigMutation(config, subcommand);
+			config = nextConfig;
+			try {
+				await writeConfig(config);
+			} catch {
+				// Config is still updated in-memory for this session even if the write fails
+				// (e.g. read-only filesystem); surface the change but note persistence failed.
+				notify(ctx, `${message} (warning: failed to persist config to disk)`, "warning");
+				return;
+			}
+			notify(ctx, message, "info");
 		},
 	});
 }
