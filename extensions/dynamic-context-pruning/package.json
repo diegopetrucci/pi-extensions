@@ -1,6 +1,7 @@
 {
   "name": "pi-dynamic-context-pruning",
   "version": "0.1.0",
+  "type": "module",
   "description": "A pi extension that dynamically prunes stale context to keep sessions lean.",
   "keywords": [
     "pi-package",

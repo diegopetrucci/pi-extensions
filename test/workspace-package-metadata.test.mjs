@@ -48,6 +48,15 @@ function isStandaloneOnlyWorkspacePackage(packageDef) {
   return standaloneOnlyWorkspacePackages.has(path.basename(packageDef.packageRoot));
 }
 
+// Deliberate exception: this extension intentionally claims the unscoped npm name
+// `pi-dynamic-context-pruning` rather than the usual `@diegopetrucci/pi-<dir>` scoped
+// name; see extensions/dynamic-context-pruning/README.md for the rationale.
+const unscopedWorkspacePackages = new Map([['dynamic-context-pruning', 'pi-dynamic-context-pruning']]);
+
+function getExpectedPackageName(packageDir) {
+  return unscopedWorkspacePackages.get(packageDir) ?? `@diegopetrucci/pi-${packageDir}`;
+}
+
 function getExpectedRootCollectionRuntimeDeclarations() {
   const declarations = [];
 
@@ -96,7 +105,7 @@ test('workspace package manifests keep directory, publish, and runtime metadata 
     const runtimeDeclarations = getRuntimeDeclarations(manifest);
     const runtimeKinds = new Set(runtimeDeclarations.map(({ kind }) => kind));
 
-    assert.equal(manifest.name, `@diegopetrucci/pi-${packageDir}`);
+    assert.equal(manifest.name, getExpectedPackageName(packageDir));
     assert.match(manifest.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
     assert.equal(manifest.repository?.directory, `extensions/${packageDir}`);
     assert.deepEqual(manifest.publishConfig, { access: 'public' });
