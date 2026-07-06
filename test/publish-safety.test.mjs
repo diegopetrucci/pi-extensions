@@ -276,6 +276,20 @@ test('standalone publishable extensions do not import files outside their packag
   }
 });
 
+test('root package pack output excludes repo-only extension scripts and docs directories', () => {
+  const rootPackageDef = publishablePackages.find((candidate) => candidate.label === 'root');
+  const packedFiles = getPublishedFiles(rootPackageDef);
+
+  const repoOnlyPathPattern = /^extensions\/[^/]+\/(scripts|docs)\//;
+  const offendingFiles = [...packedFiles].filter((file) => repoOnlyPathPattern.test(file));
+
+  assert.deepEqual(
+    offendingFiles,
+    [],
+    `root package must not publish repo-only extension scripts/ or docs/ files: ${offendingFiles.join(', ')}`,
+  );
+});
+
 test('publishable package files allowlists include declared runtime files', () => {
   for (const packageDef of publishablePackages) {
     const manifest = readManifest(packageDef);

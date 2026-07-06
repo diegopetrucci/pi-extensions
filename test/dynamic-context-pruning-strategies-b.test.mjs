@@ -291,6 +291,44 @@ test('supersededFileOpsStrategy: the newest operation for a path is never propos
 });
 
 // ---------------------------------------------------------------------------
+// Strategy: reverse-pass rewrite regression coverage (pe-e0zd) — exercises the
+// nearest-covering-read domination list and the write/read priority ordering
+// with more than two occurrences per path, where a naive single-tracked-value
+// rewrite could pick the wrong (non-nearest, or dominated) candidate.
+// ---------------------------------------------------------------------------
+
+test('supersededFileOpsStrategy: with 3+ reads, an earlier partial read is matched against the nearest ACTUALLY-covering later read, skipping a non-covering one in between', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt', offset: 1, limit: 5 }, 'x'.repeat(500)), // lines 1-5
+    ...toolCallTurn('r2', 'read', { path: 'a.txt', offset: 10, limit: 5 }, 'y'.repeat(500)), // lines 10-14, does NOT cover r1 or nothing yet
+    ...toolCallTurn('r3', 'read', { path: 'a.txt', offset: 1, limit: 20 }, 'z'.repeat(500)), // lines 1-20, covers both r1 and r2
+  ];
+  const proposals = propose(messages);
+  const byId = new Map(proposals.map((p) => [p.toolCallId, p]));
+
+  assert.equal(proposals.length, 2, 'r1 and r2 are both superseded by r3; r3 itself (newest) is never proposed');
+  assert.ok(byId.get('r1').placeholder.includes('r3'), 'r1 must cite r3 (the nearest read that actually covers it), not r2');
+  assert.ok(!byId.get('r1').placeholder.includes('r2'));
+  assert.ok(byId.get('r2').placeholder.includes('r3'));
+});
+
+test('supersededFileOpsStrategy: rule 3 (later successful write) takes priority over a later covering read for an earlier read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('w1', 'write', { path: 'a.txt', content: 'v2' }, 'Successfully wrote 2 bytes to a.txt'),
+    ...toolCallTurn('r2', 'read', { path: 'a.txt' }, 'y'.repeat(500)),
+  ];
+  const proposals = propose(messages);
+  const byId = new Map(proposals.map((p) => [p.toolCallId, p]));
+
+  // r1 must be attributed to the later write (rule 3), never to the later
+  // covering read r2, even though r2 (a full read) would otherwise cover r1.
+  assert.match(byId.get('r1').placeholder, /file has since changed/);
+  assert.ok(byId.get('r1').placeholder.includes('w1'));
+  assert.ok(!byId.get('r1').placeholder.includes('r2'));
+});
+
+// ---------------------------------------------------------------------------
 // Strategy: config toggle
 // ---------------------------------------------------------------------------
 

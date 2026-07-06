@@ -527,8 +527,59 @@ export interface ToolCallPairIndices {
 	resultIndex?: number;
 }
 
-/** Primary correlation: locate an assistant toolCall block and/or its toolResult by toolCallId. */
-export function findToolCallPairIndices(messages: MinimalMessage[], toolCallId: string): ToolCallPairIndices {
+/**
+ * Build a toolCallId -> pair-indices index for every tool call/result found
+ * in `messages`, in a single O(n) pass. Callers that need to resolve many
+ * toolCallIds against the same `messages` array (e.g. the pipeline's
+ * per-decision protection/savings/apply passes) should build this once and
+ * pass it to `findToolCallPairIndices` and friends to avoid an O(n) rescan
+ * per decision (pe-e0zd).
+ */
+export function buildToolCallPairIndex(messages: MinimalMessage[]): Map<string, ToolCallPairIndices> {
+	const index = new Map<string, ToolCallPairIndices>();
+	const getOrCreate = (toolCallId: string): ToolCallPairIndices => {
+		let pair = index.get(toolCallId);
+		if (!pair) {
+			pair = {};
+			index.set(toolCallId, pair);
+		}
+		return pair;
+	};
+	messages.forEach((message, messageIndex) => {
+		if (message.role === "assistant" && Array.isArray((message as MinimalAssistantMessage).content)) {
+			const content = (message as MinimalAssistantMessage).content;
+			const seenInThisMessage = new Set<string>();
+			content.forEach((block, blockIndex) => {
+				if (block.type !== "toolCall") return;
+				// Mirror findToolCallPairIndices' content.findIndex: within a single
+				// message, the FIRST matching block wins (duplicate ids in one
+				// message's content are pathological but must resolve identically).
+				if (seenInThisMessage.has(block.id)) return;
+				seenInThisMessage.add(block.id);
+				const pair = getOrCreate(block.id);
+				pair.assistantIndex = messageIndex;
+				pair.toolCallBlockIndex = blockIndex;
+			});
+		} else if (message.role === "toolResult") {
+			const pair = getOrCreate((message as MinimalToolResultMessage).toolCallId);
+			pair.resultIndex = messageIndex;
+		}
+	});
+	return index;
+}
+
+/**
+ * Primary correlation: locate an assistant toolCall block and/or its
+ * toolResult by toolCallId. Pass a precomputed `pairIndex` (see
+ * `buildToolCallPairIndex`) to resolve in O(1) instead of rescanning
+ * `messages`; omitting it preserves the original O(n) full-scan behavior.
+ */
+export function findToolCallPairIndices(
+	messages: MinimalMessage[],
+	toolCallId: string,
+	pairIndex?: Map<string, ToolCallPairIndices>,
+): ToolCallPairIndices {
+	if (pairIndex) return pairIndex.get(toolCallId) ?? {};
 	const pair: ToolCallPairIndices = {};
 	messages.forEach((message, index) => {
 		if (message.role === "assistant" && Array.isArray((message as MinimalAssistantMessage).content)) {
@@ -815,13 +866,17 @@ export interface ApplyResult {
  * or (for errored calls only) tool call input arguments with a placeholder.
  * Gracefully no-ops when the target is absent (e.g. after compaction).
  */
-export function applyPruneDecision(messages: MinimalMessage[], decision: PruneDecisionRecord): ApplyResult {
+export function applyPruneDecision(
+	messages: MinimalMessage[],
+	decision: PruneDecisionRecord,
+	pairIndex?: Map<string, ToolCallPairIndices>,
+): ApplyResult {
 	if (decision.correlation.type !== "toolCallId") {
 		// v1 only ever targets tool call/result pairs; entryId correlation is
 		// reserved for future strategies and intentionally not applied yet.
 		return { applied: false, charsRemoved: 0 };
 	}
-	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId);
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
 
 	if (decision.kind === "tool_result_content") {
 		if (pair.resultIndex === undefined) return { applied: false, charsRemoved: 0 };
@@ -883,9 +938,10 @@ export function isDecisionProtected(
 	messages: MinimalMessage[],
 	protections: PruneProtections,
 	recencyBoundaryIndex: number,
+	pairIndex?: Map<string, ToolCallPairIndices>,
 ): boolean {
 	if (decision.correlation.type !== "toolCallId") return true; // no safe way to check protections yet
-	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId);
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
 	if (pair.resultIndex !== undefined && isWithinRecencyWindow(pair.resultIndex, recencyBoundaryIndex)) return true;
 	if (pair.assistantIndex !== undefined && isWithinRecencyWindow(pair.assistantIndex, recencyBoundaryIndex)) return true;
 
@@ -919,14 +975,17 @@ export function estimateDecisionSavings(
 	messages: MinimalMessage[],
 	decision: PruneDecisionRecord,
 	estimateTokens: TokenEstimator = estimateTokensForText,
+	pairIndex?: Map<string, ToolCallPairIndices>,
 ): DecisionSavingsEstimate | undefined {
 	if (decision.correlation.type !== "toolCallId") return undefined;
-	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId);
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
 
 	// Apply against a shallow copy of the array (not the message objects) so
-	// the caller's messages/content are never mutated by this preview.
+	// the caller's messages/content are never mutated by this preview. Indices
+	// in `pairIndex` (built from `messages`) remain valid against `preview`
+	// since slice() preserves length/order.
 	const preview = messages.slice();
-	const result = applyPruneDecision(preview, decision);
+	const result = applyPruneDecision(preview, decision, pairIndex);
 	if (!result.applied) return undefined;
 
 	if (decision.kind === "tool_result_content") {
@@ -1552,63 +1611,98 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 		for (const group of byPath.values()) {
 			// `group` is already in message/chronological order because
 			// `collectCompletedToolCallOccurrences` iterates messages in order.
-			for (let i = 0; i < group.length; i++) {
-				// Never supersede the newest operation for this path (rule: "never
-				// supersede the newest op for a path").
-				if (i === group.length - 1) continue;
+			//
+			// Single reverse pass (pe-e0zd): instead of `group.slice(i + 1).find(...)`
+			// per index (O(k^2) allocations+scans for a group of size k), walk the
+			// group back-to-front and maintain:
+			//  - `nearestLaterSuccessfulWrite`: the nearest (chronologically first)
+			//    later successful write/edit, updated as we pass one going backward.
+			//    This is exactly equivalent to `later.find(non-read && !isError)`
+			//    because `later` preserves chronological order and `.find` returns
+			//    the first (nearest) match.
+			//  - `nearestCoveringReads`: later reads not yet known-redundant, nearest
+			//    first. A read R dominates (renders redundant) any later-tracked read
+			//    E once `readRangeCovers(R.range, E.range)` holds, because coverage is
+			//    transitive and R is nearer than E — so R already satisfies anything
+			//    E would have satisfied, and is checked first anyway. Dominated reads
+			//    are dropped on insert, which keeps this list small in the common case
+			//    (e.g. monotonically-widening re-reads of the same file) while still
+			//    producing byte-for-byte the same first-match result as the original
+			//    forward `.find`.
+			let nearestLaterSuccessfulWrite: FileOpOccurrence | undefined;
+			const nearestCoveringReads: FileOpOccurrence[] = [];
+
+			for (let i = group.length - 1; i >= 0; i--) {
 				const occurrence = group[i];
-				const later = group.slice(i + 1);
-
-				if (occurrence.kind === "read") {
-					// Rule 3 takes priority: any later successful write/edit makes
-					// this read stale outright, regardless of read-vs-read coverage.
-					const laterWrite = later.find((candidate) => candidate.kind !== "read" && !candidate.isError);
-					if (laterWrite) {
-						if (occurrence.resultTextLength <= 0) continue; // rule 4: skip zero-length proposals
-						proposals.push({
-							strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
-							toolCallId: occurrence.toolCallId,
-							kind: "tool_result_content",
-							reason: `${occurrence.normalizedPath} has since been modified (see ${laterWrite.kind} call ${laterWrite.toolCallId})`,
-							placeholder: buildFileChangedPlaceholder(occurrence.normalizedPath, laterWrite.kind, laterWrite.toolCallId),
-						});
-						continue;
+				// Never supersede the newest operation for this path (rule: "never
+				// supersede the newest op for a path") — but still fold it into the
+				// tracking state below so earlier occurrences can see it as "later".
+				if (i !== group.length - 1) {
+					if (occurrence.kind === "read") {
+						// Rule 3 takes priority: any later successful write/edit makes
+						// this read stale outright, regardless of read-vs-read coverage.
+						if (nearestLaterSuccessfulWrite) {
+							if (occurrence.resultTextLength > 0) {
+								proposals.push({
+									strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+									toolCallId: occurrence.toolCallId,
+									kind: "tool_result_content",
+									reason: `${occurrence.normalizedPath} has since been modified (see ${nearestLaterSuccessfulWrite.kind} call ${nearestLaterSuccessfulWrite.toolCallId})`,
+									placeholder: buildFileChangedPlaceholder(
+										occurrence.normalizedPath,
+										nearestLaterSuccessfulWrite.kind,
+										nearestLaterSuccessfulWrite.toolCallId,
+									),
+								});
+							}
+						} else if (occurrence.range !== undefined) {
+							// Rules 1+2: superseded by a later read whose range covers this one's.
+							const occurrenceRange = occurrence.range;
+							const laterCoveringRead = nearestCoveringReads.find(
+								(candidate) => candidate.range !== undefined && readRangeCovers(candidate.range, occurrenceRange),
+							);
+							if (laterCoveringRead && occurrence.resultTextLength > 0) {
+								proposals.push({
+									strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+									toolCallId: occurrence.toolCallId,
+									kind: "tool_result_content",
+									reason: `superseded by newer read of ${occurrence.normalizedPath} (call ${laterCoveringRead.toolCallId})`,
+									placeholder: buildSupersededReadPlaceholder(occurrence.normalizedPath, laterCoveringRead.toolCallId),
+								});
+							}
+						}
+					} else if (nearestLaterSuccessfulWrite) {
+						// occurrence.kind is "write" or "edit": rule 4 — superseded only by a
+						// LATER *successful* write/edit (an errored later write/edit never
+						// supersedes; reads never supersede writes/edits).
+						if (occurrence.resultTextLength > 0) {
+							proposals.push({
+								strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
+								toolCallId: occurrence.toolCallId,
+								kind: "tool_result_content",
+								reason: `superseded by newer ${nearestLaterSuccessfulWrite.kind} of ${occurrence.normalizedPath} (call ${nearestLaterSuccessfulWrite.toolCallId})`,
+								placeholder: buildSupersededWritePlaceholder(
+									occurrence.normalizedPath,
+									nearestLaterSuccessfulWrite.kind,
+									nearestLaterSuccessfulWrite.toolCallId,
+								),
+							});
+						}
 					}
-
-					// Rules 1+2: superseded by a later read whose range covers this one's.
-					const laterCoveringRead = later.find(
-						(candidate) =>
-							candidate.kind === "read" &&
-							candidate.range !== undefined &&
-							occurrence.range !== undefined &&
-							readRangeCovers(candidate.range, occurrence.range),
-					);
-					if (laterCoveringRead) {
-						if (occurrence.resultTextLength <= 0) continue;
-						proposals.push({
-							strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
-							toolCallId: occurrence.toolCallId,
-							kind: "tool_result_content",
-							reason: `superseded by newer read of ${occurrence.normalizedPath} (call ${laterCoveringRead.toolCallId})`,
-							placeholder: buildSupersededReadPlaceholder(occurrence.normalizedPath, laterCoveringRead.toolCallId),
-						});
-					}
-					continue;
 				}
 
-				// occurrence.kind is "write" or "edit": rule 4 — superseded only by a
-				// LATER *successful* write/edit (an errored later write/edit never
-				// supersedes; reads never supersede writes/edits).
-				const laterSuccessfulWrite = later.find((candidate) => candidate.kind !== "read" && !candidate.isError);
-				if (laterSuccessfulWrite) {
-					if (occurrence.resultTextLength <= 0) continue; // rule 4: skip zero-length proposals
-					proposals.push({
-						strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
-						toolCallId: occurrence.toolCallId,
-						kind: "tool_result_content",
-						reason: `superseded by newer ${laterSuccessfulWrite.kind} of ${occurrence.normalizedPath} (call ${laterSuccessfulWrite.toolCallId})`,
-						placeholder: buildSupersededWritePlaceholder(occurrence.normalizedPath, laterSuccessfulWrite.kind, laterSuccessfulWrite.toolCallId),
-					});
+				// Fold this occurrence into the tracking state for the next (earlier) iteration.
+				if (occurrence.kind !== "read") {
+					if (!occurrence.isError) nearestLaterSuccessfulWrite = occurrence;
+				} else if (occurrence.range !== undefined) {
+					const occurrenceRange = occurrence.range;
+					for (let j = nearestCoveringReads.length - 1; j >= 0; j--) {
+						const existing = nearestCoveringReads[j];
+						if (existing.range !== undefined && readRangeCovers(occurrenceRange, existing.range)) {
+							nearestCoveringReads.splice(j, 1);
+						}
+					}
+					nearestCoveringReads.unshift(occurrence);
 				}
 			}
 		}
@@ -1709,6 +1803,12 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const agentState = input.agentState ?? "idle";
 	const messages = input.messages.map((message) => ({ ...message }));
 	const recencyBoundaryIndex = computeRecencyBoundaryIndex(messages, input.config.protections.recentTurns);
+	// Built once and reused across all protection/savings/apply checks below so
+	// each per-decision lookup is O(1) instead of an O(n) rescan of `messages`
+	// (pe-e0zd). Positions are stable across the apply loop below (and against
+	// `input.messages`) because decisions only ever replace a message's
+	// content at its existing index, never insert/remove/reorder messages.
+	const pairIndex = buildToolCallPairIndex(messages);
 
 	const proposals = collectProposals({
 		messages,
@@ -1745,8 +1845,8 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const savingsByKey = new Map<string, number>();
 	const gateCandidates: GateCandidate[] = [];
 	for (const decision of freshAutomatic) {
-		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex)) continue;
-		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText);
+		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex, pairIndex)) continue;
+		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText, pairIndex);
 		if (!estimate || estimate.tokensRemoved <= 0) continue;
 		savingsByKey.set(decision.idempotencyKey, estimate.tokensRemoved);
 		gateCandidates.push({ decision, position: estimate.position, tokensRemoved: estimate.tokensRemoved });
@@ -1759,14 +1859,14 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const newlyAppliedStats: PruneStatsRecord[] = [];
 
 	for (const decision of allCandidates) {
-		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex)) continue;
-		const result = applyPruneDecision(messages, decision);
+		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex, pairIndex)) continue;
+		const result = applyPruneDecision(messages, decision, pairIndex);
 		if (!result.applied) continue; // graceful no-op: target absent/already safe
 		if (!input.knownIdempotencyKeys.has(decision.idempotencyKey)) {
 			newlyAppliedDecisions.push(decision);
 			const tokensRemoved =
 				savingsByKey.get(decision.idempotencyKey) ??
-				estimateDecisionSavings(input.messages, decision, estimateTokensForText)?.tokensRemoved ??
+				estimateDecisionSavings(input.messages, decision, estimateTokensForText, pairIndex)?.tokensRemoved ??
 				0;
 			newlyAppliedStats.push(buildStatsRecord(decision, tokensRemoved));
 		}

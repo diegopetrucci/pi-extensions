@@ -1,0 +1,9 @@
+# Repo-only tooling/docs for extensions must not ship in the root
+# @diegopetrucci/pi-extensions package tarball (each extension's own
+# workspace package.json "files" allowlist already excludes these, but
+# npm does not honor a workspace's package.json "files" field when the
+# workspace directory is packed as part of the ROOT package's "extensions"
+# directory entry -- see test/publish-safety.test.mjs for the regression
+# check). Add new repo-only extension subdirectories here as needed.
+dynamic-context-pruning/scripts/
+dynamic-context-pruning/docs/

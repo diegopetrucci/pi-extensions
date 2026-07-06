@@ -206,3 +206,68 @@ test('buildIdempotencyKey is stable for the same strategy/kind/toolCallId', () =
   const keyB = buildIdempotencyKey({ strategyId: 's', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'y' });
   assert.equal(keyA, keyB, 'idempotency key must not depend on the (possibly varying) reason text');
 });
+
+// ---------------------------------------------------------------------------
+// Perf sanity (pe-e0zd): the per-decision protection/savings/apply passes and
+// the superseded-file-ops strategy were rewritten to avoid O(n^2) rescans.
+// This is a coarse regression guard, not a benchmark: it just makes sure a
+// few-thousand-message synthetic session doesn't regress back to quadratic
+// behavior (which would blow well past this budget).
+// ---------------------------------------------------------------------------
+
+test('pipeline over a large synthetic session completes well under a second (coarse perf sanity)', () => {
+  const messages = [];
+  let counter = 0;
+  // Repeatedly read/write a small set of paths so the superseded-file-ops
+  // strategy's per-path groups grow large too (the specific hot path this
+  // ticket rewrote), alongside plain bash calls for the general pipeline.
+  const paths = ['a.txt', 'b.txt', 'c.txt'];
+  for (let i = 0; i < 1200; i++) {
+    counter += 1;
+    const toolCallId = `call_${counter}`;
+    messages.push({ role: 'user', content: `turn ${counter}`, timestamp: counter });
+    if (i % 3 === 0) {
+      const filePath = paths[i % paths.length];
+      messages.push({
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: toolCallId, name: 'read', arguments: { path: filePath }, }],
+        timestamp: counter,
+      });
+      messages.push({
+        role: 'toolResult',
+        toolCallId,
+        toolName: 'read',
+        content: [{ type: 'text', text: 'x'.repeat(400) }],
+        isError: false,
+        timestamp: counter,
+      });
+    } else {
+      messages.push({
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: toolCallId, name: 'bash', arguments: { command: `echo ${counter}` } }],
+        timestamp: counter,
+      });
+      messages.push({
+        role: 'toolResult',
+        toolCallId,
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'y'.repeat(300) }],
+        isError: false,
+        timestamp: counter,
+      });
+    }
+  }
+
+  const config = { ...defaultConfig(), protections: { ...defaultConfig().protections, recentTurns: 5 } };
+  const start = performance.now();
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config,
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+  });
+  const elapsedMs = performance.now() - start;
+
+  assert.ok(Array.isArray(result.messages));
+  assert.ok(elapsedMs < 1000, `expected the pipeline to complete in well under a second, took ${elapsedMs}ms`);
+});
