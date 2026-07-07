@@ -2,13 +2,15 @@
 
 ## Highlights
 
-This release adds `code-reviewer`, a standalone read-only pi extension that exposes a guarded `code_reviewer` subagent tool for focused code reviews without implementing fixes.
+This release adds `code-reviewer`, a standalone read-only pi extension that exposes a guarded `code_reviewer` subagent tool for focused code reviews without implementing fixes. The reviewer now mirrors the contrarian model-selection style by preferring opposite-provider/model-family review models when available and clamping requested thinking to the selected model's capabilities.
 
 ## code-reviewer
 
 - adapts the TLH code-reviewer review priorities into a standalone pi extension
 - reviews ticket fit, diff mismatches, correctness, security, simplicity, and validation gaps
 - runs the reviewer in an isolated in-memory child session with inherited extensions, skills, prompt templates, themes, context files, and agents files disabled
+- auto-selects a contrarian-style opposite-provider/model-family review model when available, with ordered fallback through available models
+- uses the active requested thinking level when available, defaults reasoning reviewers to `high` otherwise, and clamps the effective thinking level to the chosen model's capabilities
 - keeps the runtime read-only with built-in inspection tools plus heavily guarded `bash` access
 
 ## Runtime safety
@@ -29,11 +31,11 @@ This release adds `code-reviewer`, a standalone read-only pi extension that expo
 - verified target npm versions are unpublished before release prep
 - refreshed dependencies with `npm ci`
 - ran `npm run preflight:install-state` after dependency refresh
-- ran focused code-reviewer TypeScript and runtime guard tests
-- ran full `npm run ci` (`230` tests, `0` failures)
+- ran focused code-reviewer TypeScript, model-selection, thinking, fallback, and runtime guard tests
+- ran full `npm run ci` (`237` tests, `0` failures)
 - verified root and standalone package dry-runs
 - verified root and standalone publish dry-runs
 
 ## Suggested release blurb
 
-`v0.1.55 adds code-reviewer, a standalone read-only pi extension that runs isolated, guarded code review subagents for ticket fit, correctness, security, simplicity, and validation gaps.`
+`v0.1.55 adds code-reviewer, a standalone read-only pi extension that runs isolated, guarded code review subagents for ticket fit, correctness, security, simplicity, validation gaps, and contrarian-style model/thinking selection.`

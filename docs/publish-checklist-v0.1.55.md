@@ -5,6 +5,8 @@
 - [x] add `code-reviewer` to the root collection package
 - [x] add new standalone package `@diegopetrucci/pi-code-reviewer@0.1.0`
 - [x] expose read-only `code_reviewer` subagent tool adapted from TLH code-reviewer priorities
+- [x] add contrarian-style reviewer model selection with ordered fallback through available models
+- [x] report the final reviewer model and effective/clamped thinking level in run details
 - [x] add runtime guard coverage for path escapes, shell mutation, git helper/local-file bypasses, and gh side-effecting flags
 - [x] bump root collection package to `@diegopetrucci/pi-extensions@0.1.55`
 - [x] refresh `package-lock.json` for the new workspace and root version
@@ -42,7 +44,7 @@ Both target version checks returned npm `E404` before release prep.
 npm ci
 npm run preflight:install-state
 npx tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --skipLibCheck extensions/code-reviewer/index.ts
-node --test test/code-reviewer-runtime.test.mjs
+node --test test/code-reviewer-model-selection.test.mjs test/code-reviewer-runtime.test.mjs
 npm run ci
 git diff --check
 ```
@@ -52,8 +54,8 @@ git diff --check
 - `npm ci` — passed; added `272` packages and audited `298` packages.
 - `npm run preflight:install-state` — passed; `Package state matches package-lock.json (247 installed packages and 26 local package entries checked).`
 - focused `npx tsc ... extensions/code-reviewer/index.ts` — passed.
-- `node --test test/code-reviewer-runtime.test.mjs` — passed; `9` tests, `0` failures.
-- `npm run ci` — passed; `230` tests, `0` failures, duration `7324.631834ms`.
+- `node --test test/code-reviewer-model-selection.test.mjs test/code-reviewer-runtime.test.mjs` — passed; `16` tests, `0` failures.
+- `npm run ci` — passed; `237` tests, `0` failures, duration `7769.949208ms`.
 
 ## Package dry-runs
 
@@ -67,8 +69,8 @@ npm pack --dry-run --json --workspace @diegopetrucci/pi-code-reviewer
 
 ### Dry-run evidence
 
-- `npm pack --dry-run --json` — passed; `diegopetrucci-pi-extensions-0.1.55.tgz` (`152` files, `14654798` bytes unpacked).
-- `npm pack --dry-run --json --workspace @diegopetrucci/pi-code-reviewer` — passed; `diegopetrucci-pi-code-reviewer-0.1.0.tgz` (`4` files, `43039` bytes unpacked).
+- `npm pack --dry-run --json` — passed; `diegopetrucci-pi-extensions-0.1.55.tgz` (`152` files, `14668806` bytes unpacked).
+- `npm pack --dry-run --json --workspace @diegopetrucci/pi-code-reviewer` — passed; `diegopetrucci-pi-code-reviewer-0.1.0.tgz` (`4` files, `56902` bytes unpacked).
 
 ## Publish dry-runs
 
@@ -77,12 +79,12 @@ npm pack --dry-run --json --workspace @diegopetrucci/pi-code-reviewer
 
 ## Commit, pull request, tag, and GitHub release
 
-- [ ] commit release changes on non-main branch (current branch: `add-code-reviewer-extension`)
-- [ ] push branch `add-code-reviewer-extension`
+- [ ] commit release changes on non-main branch (current branch: `code-reviewer-contrarian-model-selection`)
+- [ ] push branch `code-reviewer-contrarian-model-selection`
 - [ ] open PR targeting `main`
-- [ ] after PR merge, tag `v0.1.55` on `main`
-- [ ] push tag `v0.1.55`
-- [ ] create GitHub release using `docs/github-release-v0.1.55.md`
+- [ ] after PR merge, move/update tag `v0.1.55` on `main` before npm publish
+- [ ] force-push updated tag `v0.1.55`
+- [ ] update the existing GitHub release using `docs/github-release-v0.1.55.md`
 
 ## Stop before npm publish
 
