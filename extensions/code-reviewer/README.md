@@ -43,7 +43,8 @@ The tool accepts:
 When called, it launches an isolated in-memory child agent with:
 
 - no inherited extensions, skills, prompt templates, themes, context files, or agents files;
-- the active session model and thinking level;
+- an auto-selected review model that prefers contrarian-style opposite-provider and opposite-family candidates before same-provider fallbacks;
+- requested thinking taken from the active session when available, otherwise defaulting to `high` for reasoning models and `off` for non-reasoning models, then clamped to the selected model's supported level;
 - read-only tools only: `read`, `grep`, `find`, `ls`, and guarded `bash`;
 - a local-checkout path guard for file inspection;
 - a bash guard that allows only direct read-only `git`, `gh`, or `pwd` invocations.
@@ -57,7 +58,7 @@ The review prompt prioritizes:
 5. simplicity and maintainability
 6. tests and validation gaps
 
-The final output is concise and includes a verdict, findings, validation notes, a scope check, and run details.
+The final output is concise and includes a verdict, findings, validation notes, a scope check, and run details that show the final selected model and effective thinking level.
 
 ## Read-only guarantees
 

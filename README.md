@@ -6,7 +6,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 ### Subagents
 
-- [`code-reviewer`](./extensions/code-reviewer): Adds a read-only `code_reviewer` subagent tool that reviews local changes for ticket fit, diff mismatches, correctness, security, simplicity, and validation gaps without implementing fixes.
+- [`code-reviewer`](./extensions/code-reviewer): Adds a read-only `code_reviewer` subagent tool that reviews local changes for ticket fit, diff mismatches, correctness, security, simplicity, and validation gaps without implementing fixes, auto-selects a contrarian-style opposite-provider review model when available, and clamps requested thinking to the chosen model's capabilities.
 - [`contrarian`](./extensions/contrarian): Adds a read-only contrarian tool that spins up an isolated subprocess to stress-test plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.
 - [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, and cached repos expiring after 7 days of non-use.
 - [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.

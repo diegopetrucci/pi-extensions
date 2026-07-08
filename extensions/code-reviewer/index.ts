@@ -15,6 +15,58 @@ const MAX_TOOL_CALLS_TO_KEEP = 80;
 const MAX_TURNS = 8;
 const MAX_RUN_MS = 8 * 60 * 1000;
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
+const DEFAULT_THINKING_LEVEL = "high";
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
+const CODE_REVIEWER_MODEL_PREFERENCES = [
+	"gpt-5.5",
+	"claude-opus-4-8",
+	"claude-opus-4.8",
+	"claude-sonnet-5-0",
+	"claude-sonnet-5.0",
+	"claude-sonnet-5",
+	"claude-sonnet-4-6",
+	"claude-sonnet-4.6",
+	"claude-sonnet-4-5",
+	"claude-sonnet-4.5",
+	"claude-sonnet-4-0",
+	"claude-sonnet-4",
+];
+const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
+	"amazon-bedrock": [
+		"claude-fable-5",
+		"claude-opus-4-8",
+		"claude-opus-4.8",
+		"claude-sonnet-5",
+		"claude-sonnet-4-6",
+		"claude-sonnet-4.6",
+		"claude-sonnet-4-5",
+		"claude-sonnet-4.5",
+		"claude-sonnet-4",
+	],
+	anthropic: [
+		"claude-fable-5",
+		"claude-opus-4-8",
+		"claude-opus-4.8",
+		"claude-sonnet-5",
+		"claude-sonnet-4-6",
+		"claude-sonnet-4.6",
+		"claude-sonnet-4-5",
+		"claude-sonnet-4.5",
+		"claude-sonnet-4",
+	],
+	openai: ["gpt-5.5", "gpt-5", "gpt-4.1", "o3", "o4-mini", "o4"],
+	"vercel-ai-gateway": [
+		"gpt-5.5",
+		"anthropic/claude-fable-5",
+		"anthropic/claude-opus-4.1",
+		"anthropic/claude-opus-4",
+		"anthropic/claude-sonnet-5",
+		"anthropic/claude-sonnet-4",
+	],
+};
 
 const READ_ONLY_TOOL_NAMES = new Set(["read", "grep", "find", "ls", "bash"]);
 const READ_ONLY_BASH_COMMANDS = new Set(["gh", "git", "pwd"]);
@@ -137,7 +189,265 @@ type ReviewDetails = {
 	startedAt: number;
 	endedAt?: number;
 	error?: string;
+	modelRef?: string;
+	modelName?: string;
+	requestedThinkingLevel?: ThinkingLevel;
+	effectiveThinkingLevel?: ThinkingLevel;
+	thinkingLevelClamped?: boolean;
+	thinkingLevelNote?: string;
 };
+
+type PiModel = {
+	provider: string;
+	id: string;
+	name?: string;
+	reasoning?: boolean;
+	contextWindow?: number;
+	maxTokens?: number;
+	thinkingLevelMap?: ThinkingLevelMap;
+};
+
+type ModelRegistryContext = {
+	model?: PiModel;
+	modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> };
+};
+
+type CreateAgentSessionModel = NonNullable<Parameters<typeof createAgentSession>[0]>["model"];
+
+const MODEL_AVAILABILITY_ERROR_PATTERN =
+	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|model[_ ]?not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
+
+function isModelAvailabilityError(message: string | undefined): boolean {
+	if (!message) return false;
+	return MODEL_AVAILABILITY_ERROR_PATTERN.test(message);
+}
+
+function parseVersionScore(text: string): number {
+	const matches = text.match(/\d+(?:[._-]\d+)*/g) ?? [];
+	let best = 0;
+	for (const rawMatch of matches) {
+		const match = rawMatch.replace(/[_-]/g, ".");
+		const [major = "0", minor = "0", patch = "0"] = match.split(".");
+		const score = Number(major) * 1_000_000 + Number(minor) * 1_000 + Number(patch);
+		if (score > best) best = score;
+	}
+	return best;
+}
+
+function rankModel(model: PiModel): number {
+	const text = `${model.id} ${model.name ?? ""}`.toLowerCase();
+	const has = (regex: RegExp): boolean => regex.test(text);
+	let score = 0;
+
+	if (model.reasoning) score += 10_000_000;
+	score += parseVersionScore(text) * 1_000;
+	score += Math.min(model.maxTokens ?? 0, 200_000);
+	score += Math.floor(Math.min(model.contextWindow ?? 0, 1_000_000) / 100);
+
+	if (has(/\bopus\b/)) score += 350_000;
+	if (has(/\bpro\b/)) score += 180_000;
+	if (has(/\bmax\b/)) score += 60_000;
+	if (has(/\bultra\b/)) score += 150_000;
+	if (has(/\bsonnet\b/)) score += 120_000;
+	if (has(/\bcodex\b|\bcoder\b|\bcode\b/)) score += 40_000;
+	if (has(/\breasoning\b|\bthink(?:ing)?\b/)) score += 60_000;
+
+	if (has(/\bhaiku\b/)) score -= 420_000;
+	if (has(/\bmini\b/)) score -= 520_000;
+	if (has(/\bnano\b/)) score -= 700_000;
+	if (has(/\bflash\b/)) score -= 520_000;
+	if (has(/\bspark\b/)) score -= 650_000;
+	if (has(/\blite\b|\bsmall\b|\bfast\b|\binstant\b/)) score -= 300_000;
+
+	return score;
+}
+
+function modelText(model: PiModel): string {
+	return `${model.provider} ${model.id} ${model.name ?? ""}`.toLowerCase();
+}
+
+function isAnthropicFamily(model: PiModel): boolean {
+	return /\b(anthropic|claude|opus|sonnet|haiku|fable)\b/.test(modelText(model));
+}
+
+function isOpenAiFamily(model: PiModel): boolean {
+	return /\b(openai|codex|chatgpt|gpt[-_. ]?\d|o[1345](?:\b|-|_))\b/.test(modelText(model));
+}
+
+function getProviderPreferenceList(provider: string | undefined): string[] | undefined {
+	if (!provider) return undefined;
+	return PROVIDER_MODEL_PREFERENCES[provider.toLowerCase()];
+}
+
+function selectPreferredModel(models: PiModel[], provider: string | undefined): PiModel | undefined {
+	const preferences = getProviderPreferenceList(provider);
+	if (!preferences || preferences.length === 0) return undefined;
+	const lowered = models.map((model) => ({ model, haystack: `${model.id} ${model.name ?? ""}`.toLowerCase() }));
+	for (const pattern of preferences) {
+		const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+		if (match) return match.model;
+	}
+	return undefined;
+}
+
+function selectPreferredAcrossProviders(models: PiModel[]): PiModel | undefined {
+	const lowered = models.map((model) => ({ model, haystack: `${model.id} ${model.name ?? ""}`.toLowerCase() }));
+	for (const pattern of CODE_REVIEWER_MODEL_PREFERENCES) {
+		const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+		if (match) return match.model;
+	}
+	for (const preferences of Object.values(PROVIDER_MODEL_PREFERENCES)) {
+		for (const pattern of preferences) {
+			const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+			if (match) return match.model;
+		}
+	}
+	return undefined;
+}
+
+function orderPreferredModels(candidates: PiModel[], providerForPreferences?: string): PiModel[] {
+	const sorted = [...candidates].sort((a, b) => rankModel(b) - rankModel(a));
+	const preferred = providerForPreferences
+		? selectPreferredModel(candidates, providerForPreferences)
+		: selectPreferredAcrossProviders(candidates);
+	return preferred ? [preferred, ...sorted.filter((model) => model !== preferred)] : sorted;
+}
+
+function getModelKey(model: PiModel): string {
+	return `${model.provider}::${model.id}`;
+}
+
+function appendOrderedCandidates(
+	ordered: PiModel[],
+	seen: Set<string>,
+	candidates: PiModel[],
+	providerForPreferences?: string,
+): void {
+	for (const model of orderPreferredModels(candidates, providerForPreferences)) {
+		const key = getModelKey(model);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		ordered.push(model);
+	}
+}
+
+async function selectCodeReviewerModel(
+	ctx: ModelRegistryContext,
+): Promise<{ ok: true; selection: PiModel; ordered: PiModel[] } | { ok: false; error: string }> {
+	const available = await ctx.modelRegistry.getAvailable();
+	if (available.length === 0) {
+		return {
+			ok: false,
+			error: "No authenticated models are available. Log in or configure an API key first.",
+		};
+	}
+
+	const currentModel = ctx.model;
+	const currentProvider = currentModel?.provider;
+	const sameProvider = currentProvider ? available.filter((model) => model.provider === currentProvider) : [];
+	const sameProviderReasoning = sameProvider.filter((model) => model.reasoning);
+	const allReasoning = available.filter((model) => model.reasoning);
+	const oppositeFamily = currentModel
+		? isAnthropicFamily(currentModel)
+			? available.filter(isOpenAiFamily)
+			: isOpenAiFamily(currentModel)
+				? available.filter(isAnthropicFamily)
+				: []
+		: [];
+	const oppositeProvider = currentProvider ? available.filter((model) => model.provider !== currentProvider) : [];
+	const oppositeProviderFamily = currentProvider
+		? oppositeFamily.filter((model) => model.provider !== currentProvider)
+		: oppositeFamily;
+	const sameProviderOppositeFamily = currentProvider
+		? oppositeFamily.filter((model) => model.provider === currentProvider)
+		: [];
+	const oppositeProviderFamilyReasoning = oppositeProviderFamily.filter((model) => model.reasoning);
+	const sameProviderOppositeFamilyReasoning = sameProviderOppositeFamily.filter((model) => model.reasoning);
+	const oppositeFamilyReasoning = oppositeFamily.filter((model) => model.reasoning);
+	const oppositeProviderReasoning = oppositeProvider.filter((model) => model.reasoning);
+
+	const ordered: PiModel[] = [];
+	const seen = new Set<string>();
+	appendOrderedCandidates(ordered, seen, oppositeProviderFamilyReasoning);
+	appendOrderedCandidates(ordered, seen, oppositeProviderFamily);
+	appendOrderedCandidates(ordered, seen, oppositeProviderReasoning);
+	appendOrderedCandidates(ordered, seen, oppositeProvider);
+	appendOrderedCandidates(ordered, seen, sameProviderOppositeFamilyReasoning);
+	appendOrderedCandidates(ordered, seen, sameProviderOppositeFamily);
+	appendOrderedCandidates(ordered, seen, oppositeFamilyReasoning);
+	appendOrderedCandidates(ordered, seen, sameProviderReasoning, currentProvider);
+	appendOrderedCandidates(ordered, seen, sameProvider, currentProvider);
+	appendOrderedCandidates(ordered, seen, allReasoning);
+	appendOrderedCandidates(ordered, seen, available);
+
+	return { ok: true, selection: ordered[0], ordered };
+}
+
+function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
+	return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel) ? (value as ThinkingLevel) : undefined;
+}
+
+// Keep these local so the extension stays compatible with older pi peer installs that do not export clamp helpers.
+function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean {
+	if (!model.reasoning) return level === "off";
+
+	const map = model.thinkingLevelMap;
+	if (level === "xhigh") {
+		return !!map && Object.prototype.hasOwnProperty.call(map, "xhigh") && map.xhigh != null;
+	}
+	return map?.[level] !== null;
+}
+
+function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingLevel {
+	if (isThinkingLevelSupported(model, requested)) return requested;
+
+	const requestedIndex = THINKING_LEVELS.indexOf(requested);
+	for (let index = requestedIndex + 1; index < THINKING_LEVELS.length; index += 1) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+	for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+
+	return "off";
+}
+
+function resolveThinkingLevel(
+	model: PiModel | undefined,
+	requestedThinkingLevel: ThinkingLevel | undefined,
+): { requested: ThinkingLevel; effective: ThinkingLevel; clamped: boolean; note: string } {
+	const requested = requestedThinkingLevel ?? (model?.reasoning ? DEFAULT_THINKING_LEVEL : "off");
+	const effective = model ? clampThinkingLevel(model, requested) : requested;
+	const clamped = effective !== requested;
+	if (clamped) {
+		return {
+			requested,
+			effective,
+			clamped,
+			note: `requested ${requested}; clamped to ${effective}`,
+		};
+	}
+	if (requestedThinkingLevel) {
+		return { requested, effective, clamped, note: `requested ${requested}` };
+	}
+	return {
+		requested,
+		effective,
+		clamped,
+		note: model?.reasoning ? `defaulted to ${effective}` : `defaulted to off for non-reasoning model`,
+	};
+}
+
+function applyModelAttemptDetails(details: ReviewDetails, model: PiModel, thinking: ReturnType<typeof resolveThinkingLevel>): void {
+	details.modelRef = `${model.provider}/${model.id}`;
+	details.modelName = model.name;
+	details.requestedThinkingLevel = thinking.requested;
+	details.effectiveThinkingLevel = thinking.effective;
+	details.thinkingLevelClamped = thinking.clamped || undefined;
+	details.thinkingLevelNote = thinking.note;
+}
 
 function extractLastAssistantText(messages: unknown[]): string {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -741,7 +1051,11 @@ function appendRunDetails(report: string, details: ReviewDetails): string {
 	const trimmed = report.trim();
 	const toolSummary = details.toolCalls.length > 0 ? details.toolCalls.map(formatToolCall).join("; ") : "none";
 	const duration = formatDuration((details.endedAt ?? Date.now()) - details.startedAt);
-	const suffix = `\n\n---\nRun details: ${details.turns} turn(s); ${details.toolCalls.length} tool call(s); duration ${duration}; cwd ${details.cwd}; tools ${toolSummary}.`;
+	const modelSummary = details.modelRef ? `model ${details.modelRef}` : "model unknown";
+	const thinkingSummary = details.effectiveThinkingLevel
+		? `thinking ${details.effectiveThinkingLevel}${details.thinkingLevelNote ? ` (${details.thinkingLevelNote})` : ""}`
+		: "thinking unknown";
+	const suffix = `\n\n---\nRun details: ${modelSummary}; ${thinkingSummary}; ${details.turns} turn(s); ${details.toolCalls.length} tool call(s); duration ${duration}; cwd ${details.cwd}; tools ${toolSummary}.`;
 	if (!trimmed) return `## Verdict\nNo review output was produced.\n\n## Findings\n- major — Missing review output. Evidence: the isolated code_reviewer session returned no assistant text. Why it matters: the review could not be completed.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.\n\n## Run details\n- ${suffix.trim()}`;
 	return `${trimmed}${suffix}`;
 }
@@ -754,6 +1068,9 @@ export const __test__ = {
 	buildSafeGitCommand,
 	formatToolCall,
 	getBlockedBashReason,
+	normalizeThinkingLevel,
+	resolveThinkingLevel,
+	selectCodeReviewerModel,
 };
 
 export default function codeReviewerExtension(pi: ExtensionAPI) {
@@ -771,7 +1088,6 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 		parameters: CodeReviewerParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!ctx.model) throw new Error("code_reviewer needs an active model, but ctx.model is unavailable.");
 			const task = typeof params.task === "string" ? params.task.trim() : "";
 			if (!task) throw new Error("Invalid parameters: expected task to be a non-empty string.");
 
@@ -840,66 +1156,103 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 
 				await resourceLoader.reload();
 
-				const created = await createAgentSession({
-					cwd,
-					modelRegistry: ctx.modelRegistry,
-					resourceLoader,
-					settingsManager: isolatedSettingsManager,
-					sessionManager: SessionManager.inMemory(cwd),
-					model: ctx.model,
-					thinkingLevel: pi.getThinkingLevel(),
-					tools: ["read", "grep", "find", "ls", "bash"],
-				});
+				const modelSelection = await selectCodeReviewerModel(ctx);
+				if (!modelSelection.ok) throw new Error(modelSelection.error);
 
-				session = created.session;
-				unsubscribe = session.subscribe((event) => {
-					switch (event.type) {
-						case "turn_end":
-							details.turns += 1;
-							emit();
-							break;
-						case "tool_execution_start":
-							details.toolCalls.push({
-								id: event.toolCallId,
-								name: event.toolName,
-								args: event.args,
-								startedAt: Date.now(),
+				let answer = "";
+				let lastAttemptError: string | undefined;
+				const activeThinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel());
+				for (let index = 0; index < modelSelection.ordered.length; index += 1) {
+					const candidate = modelSelection.ordered[index];
+					const thinking = resolveThinkingLevel(candidate, activeThinkingLevel);
+					applyModelAttemptDetails(details, candidate, thinking);
+					let attemptSession: AgentSession | undefined;
+					let attemptUnsubscribe: (() => void) | undefined;
+					let succeeded = false;
+					lastContent = "(reviewing change...)";
+					try {
+						const created = await createAgentSession({
+							cwd,
+							modelRegistry: ctx.modelRegistry,
+							resourceLoader,
+							settingsManager: isolatedSettingsManager,
+							sessionManager: SessionManager.inMemory(cwd),
+							model: candidate as CreateAgentSessionModel,
+							thinkingLevel: thinking.effective,
+							tools: ["read", "grep", "find", "ls", "bash"],
+						});
+						attemptSession = created.session;
+						session = attemptSession;
+						attemptUnsubscribe = attemptSession.subscribe((event) => {
+							switch (event.type) {
+								case "turn_end":
+									details.turns += 1;
+									emit();
+									break;
+								case "tool_execution_start":
+									details.toolCalls.push({
+										id: event.toolCallId,
+										name: event.toolName,
+										args: event.args,
+										startedAt: Date.now(),
+									});
+									if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
+										details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
+									}
+									emit();
+									break;
+								case "tool_execution_end": {
+									const call = details.toolCalls.find((item) => item.id === event.toolCallId);
+									if (call) {
+										call.endedAt = Date.now();
+										call.isError = event.isError;
+									}
+									emit();
+									break;
+								}
+								case "message_update":
+									if (event.assistantMessageEvent?.type === "text_delta") {
+										lastContent += event.assistantMessageEvent.delta ?? "";
+										emit();
+									}
+									break;
+							}
+						});
+						unsubscribe = attemptUnsubscribe;
+
+						if (!aborted) {
+							const promptPromise = attemptSession.prompt(buildUserPrompt(input, cwd), { expandPromptTemplates: false });
+							const timeoutPromise = new Promise<never>((_resolve, reject) => {
+								runTimeout = setTimeout(() => {
+									abort();
+									reject(new Error(`code_reviewer timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
+								}, MAX_RUN_MS);
 							});
-							if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
-								details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
-							}
-							emit();
-							break;
-						case "tool_execution_end": {
-							const call = details.toolCalls.find((item) => item.id === event.toolCallId);
-							if (call) {
-								call.endedAt = Date.now();
-								call.isError = event.isError;
-							}
-							emit();
-							break;
+							await Promise.race([promptPromise, timeoutPromise]);
 						}
-						case "message_update":
-							if (event.assistantMessageEvent?.type === "text_delta") {
-								lastContent += event.assistantMessageEvent.delta ?? "";
-								emit();
-							}
-							break;
+
+						answer = extractLastAssistantText(attemptSession.state.messages);
+						succeeded = true;
+						break;
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						lastAttemptError = message;
+						const canFallBack = index < modelSelection.ordered.length - 1 && isModelAvailabilityError(message);
+						if (!canFallBack) throw error;
+					} finally {
+						if (runTimeout) {
+							clearTimeout(runTimeout);
+							runTimeout = undefined;
+						}
+						if (attemptSession && !succeeded) {
+							attemptUnsubscribe?.();
+							if (unsubscribe === attemptUnsubscribe) unsubscribe = undefined;
+							attemptSession.dispose();
+							if (session === attemptSession) session = undefined;
+						}
 					}
-				});
-
-				if (!aborted) {
-					const promptPromise = session.prompt(buildUserPrompt(input, cwd), { expandPromptTemplates: false });
-					const timeoutPromise = new Promise<never>((_resolve, reject) => {
-						runTimeout = setTimeout(() => {
-							abort();
-							reject(new Error(`code_reviewer timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
-						}, MAX_RUN_MS);
-					});
-					await Promise.race([promptPromise, timeoutPromise]);
 				}
-
-				const answer = session ? extractLastAssistantText(session.state.messages) : "";
+				if (!answer && !session && lastAttemptError) throw new Error(lastAttemptError);
 				lastContent = answer || (aborted ? "Aborted" : "(no output)");
 				details.status = aborted ? "aborted" : "done";
 				details.endedAt = Date.now();
