@@ -234,10 +234,19 @@ Notes:
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
   different thresholds; both default to `gate.breakEvenThreshold`. Real
   mid-loop/idle detection isn't wired through yet, so this always evaluates as
-  `idle` in v1 — the field exists so the seam is ready once that lands.
-- `gate.breakEvenThreshold`'s default of `5` is **explicitly provisional**,
-  not a tuned value — see [Roadmap](#roadmap) for the benchmark evidence that
-  should ultimately replace it.
+  `idle` in v1 — the field exists so the seam is ready once that lands. The
+  representative-corpus benchmark (see [Roadmap](#roadmap)) shows `mid_loop`
+  candidates carry ~all realized net benefit and `idle` candidates carry ~none
+  at r=0.1, which argues for a stricter `idle` default — but since every live
+  evaluation runs as `idle` today, defaulting it stricter would silently
+  disable most automatic pruning. Both states are intentionally kept at
+  parity until real agent-state detection lands; that's a follow-up ticket.
+- `gate.breakEvenThreshold`'s default of `22` is calibrated from the
+  representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
+  prompt caching, the common case) — see [Roadmap](#roadmap) for the full
+  evidence and its ratio-sensitivity caveats. It is **provider/ratio-
+  dependent**: the optimal threshold rises as caching gets weaker (T=29 at
+  r=0.25, T=54 at r=0.5, T=58 at r=0.9 on the same corpus).
 
 ## Prompt-cache trade-off
 
@@ -272,6 +281,14 @@ Options:
 
 With no positional paths, it defaults to every `*.jsonl` file found
 recursively under `~/.pi/agent/sessions`.
+
+> **Corpus choice matters.** `~/.pi/agent/sessions` (the default) tends to be
+> dominated by short orchestrator/delegation sessions, which structurally
+> under-report candidates and skew the remaining-calls-after-position
+> distribution low. The representative-corpus numbers in [Roadmap](#roadmap)
+> instead come from `~/.the-last-harness/agent/sessions` — the harness's own
+> longer, tool-heavy agent sessions — which is the corpus to point the
+> harness at when re-deriving or sanity-checking the gate default.
 
 For every point in a session where an LLM call would have happened
 (approximated as immediately before each assistant message), the harness
@@ -323,25 +340,45 @@ net benefit, at sufficient candidate volume, with enough remaining-calls
 runway per session to plausibly amortize a compression summary's own token
 cost — see `docs/v2-design.md` §4 for the exact go/no-go bar.
 
-The first real-corpus run of the benchmark harness (`docs/v2-design.md`
-§4.1) produced:
+The representative-corpus run of the benchmark harness (`pe-c5n9`, over
+`~/.the-last-harness/agent/sessions`: 1,390+ session files, 556 gate-eligible
+candidates — see the corpus-choice note above) produced:
 
-- **19 gate-eligible candidates across 32 sessions** — most sessions produced
-  zero prunable candidates at all.
-- **All 19 candidates were gate-rejected** at the (provisional) default
-  break-even threshold.
-- **Remaining-calls-after-position distribution: p50 = 1, p90 = 5** — thin
-  runway to amortize any compression overhead over.
-- **Recommended threshold from the sweep: `T = 1`** — the most conservative
-  possible bound, driven directly by the thin remaining-calls distribution.
+- **Candidates and tokens removed by strategy**: `dedupe` 111 candidates /
+  93,330 tokens removed; `error-purge` 187 / 28,191; `superseded-file-ops`
+  258 / 247,474.
+- **Remaining-calls-after-position distribution: p50 = 47, p90 = 156** — far
+  more amortization runway than the earlier small-corpus run showed, because
+  this corpus is dominated by long, tool-heavy agent sessions rather than
+  short orchestrator sessions.
+- **Hindsight-optimal break-even threshold `T`** (maximizes total *realized*
+  net benefit), by cached-price ratio `r`, split overall / mid_loop / idle:
 
-Frankly: this is evidence *against* rushing v2, not a final no-go verdict —
-the corpus skews toward short sessions and subagent-delegated workflows, both
-of which structurally reduce a single session's candidate volume and
-remaining-call runway. Before treating "no realized benefit yet" as
-conclusive, `pe-e9pv`'s benchmark should be re-run against a broader and/or
-longer-session corpus. Until that evidence exists, v1's mechanical strategies
-plus a better-tuned gate threshold are the right stopping point.
+  | ratio `r` | overall `T` (benefit) | mid_loop `T` (benefit) | idle `T` (benefit) |
+  | --- | --- | --- | --- |
+  | 0.1  | T=22 (~20.6k)  | T=22 (~20.6k)  | T=1 (0 — zero benefit) |
+  | 0.25 | T=29 (~1.54M)  | T=29 (~1.54M)  | T=12 (~4.0k) |
+  | 0.5  | T=54 (~8.06M)  | T=54 (~8.06M)  | T=27 (~37.2k) |
+  | 0.9  | T=58 (~24.7M)  | T=58 (~24.2M)  | T=21 (~459k) |
+
+**Reading**: `mid_loop` candidates carry essentially all of the realized
+benefit; `idle` candidates carry essentially none (literally zero at r=0.1).
+At r=0.1 (aggressive prompt caching, the common Anthropic case) the total
+realized benefit across the whole 1,390-session corpus is only ~20.6k
+token-units — economically marginal, on the order of pennies. Savings only
+become material at weaker caching, r>=0.25.
+
+**This reframes, rather than weakens, the case for v2.** Small deterministic
+removals (dedupe/error-purge/superseded-file-ops) structurally cannot beat
+the cache-bust penalty at r=0.1 — there just isn't enough single-message
+token volume in them. If pruning is going to matter economically under
+aggressive caching, it has to come from *large* removals: agentic range
+compression and nested summaries (the v2 `compress` tool), which remove
+orders of magnitude more tokens per operation than these deterministic
+strategies do. So this evidence argues *for* prototyping v2 (contingent on
+summary quality/hardening work), not against it — v1's mechanical strategies
+remain useful as a free, always-on baseline, but they were never going to be
+where the real savings live.
 
 ## Install
 

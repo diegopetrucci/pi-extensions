@@ -486,11 +486,12 @@ benefit at a viable recommended threshold. Concrete go/no-go bar:
    session.
 2. **Sufficient candidate volume**: enough gate-eligible candidates across
    enough distinct sessions that the sign of (1) isn't noise from a small
-   sample. As a floor, this needs materially more than the ~19
-   candidates/32 sessions observed in the first real-corpus run below —
-   that run was gate-rejecting *everything*, which by construction contributes
-   zero evidence either way about realized benefit at threshold-crossing
-   candidates.
+   sample. The representative-corpus run in §4.1 clears this bar (556
+   candidates across 1,390+ session files) but shows the *composition* of
+   that volume matters more than its size: at r=0.1 the realized benefit is
+   real but economically marginal, because the candidates are all small
+   deterministic removals, not the large agentic-compression removals v2
+   targets.
 3. **p90 remaining-calls is high enough to amortize a compression summary's
    own token cost.** A compression only pays off if there are enough
    subsequent LLM calls left in the session to recoup the summary's fixed
@@ -510,38 +511,65 @@ stay too low across a broader corpus to plausibly amortize summary overhead —
 in that world, v1's mechanical strategies plus a better-tuned gate threshold
 (`pe-s2ho`) are the right stopping point, and v2 should not be built.
 
-### 4.1 Current baseline (first real-corpus run, recorded here for continuity)
+### 4.1 Current baseline (representative-corpus run, pe-c5n9)
 
-The first `pe-e9pv` run against real local session files produced:
+The superseded first real-corpus run (19 candidates/32 sessions, all
+gate-rejected, p50=1/p90=5 remaining calls, recommended T=1) was recorded
+here for continuity but is now stale: it was affected by a sweep-cap bug
+(`pe-7oej`, fixed) and, more importantly, used a corpus dominated by short
+orchestrator/subagent-delegated sessions rather than the long, tool-heavy
+agent sessions DCP is designed for. See the corpus-choice note in the
+extension README's benchmark-harness section: `~/.pi/agent/sessions` (the
+default) structurally under-reports candidates and skews remaining-calls low
+compared to a representative corpus of long agent sessions.
 
-- **19 gate-eligible candidates across 32 sessions** — i.e. most sessions in
-  this corpus produced zero prunable candidates at all under v1's strategies.
-- **All 19 candidates were gate-rejected** at the (still-provisional) default
-  break-even threshold in place at the time.
-- **Remaining-calls-after-position distribution: p50 = 1, p90 = 5** — i.e. for
-  half of candidates there was only one more LLM call left in the session
-  after the candidate prune point, and even at the 90th percentile there were
-  only five more calls to amortize savings over.
-- **Recommended threshold from the sweep: T = 1** — the most conservative
-  possible break-even bound, driven directly by the thin remaining-calls
-  runway above.
+The `pe-c5n9` run against the representative corpus
+(`~/.the-last-harness/agent/sessions`: 1,390+ session files) produced:
 
-Explicit caveats on this baseline (do not treat it as a final no-go signal by
-itself):
-- **Short-session skew**: this corpus skews toward short sessions relative to
-  the long-running-agent-loop scenario DCP is designed for; p50=1/p90=5
-  remaining calls is a symptom of session *length*, not necessarily of
-  pruning's intrinsic value in longer sessions.
-- **Subagent-heavy workflow offloads tool calls**: a meaningful share of the
-  underlying work in this corpus is delegated to sub-agent sessions (separate
-  session files, each individually short), which structurally reduces the
-  main session's own candidate volume and remaining-call runway — the
-  corpus is not necessarily representative of a single long-lived
-  non-delegating session, which is the scenario where DCP-style compression is
-  most likely to pay off.
+- **556 gate-eligible candidates** across strategies:
 
-**Action implied by this baseline alone:** re-run `pe-e9pv` against a broader
-and/or longer-session corpus (ideally including non-subagent-heavy, long
-single-thread sessions) before treating "no realized benefit yet" as a
-verdict on v2. The baseline above is evidence *against* rushing v2, not
-evidence that v2 is definitively not worth building.
+  | strategy | candidates | tokensRemoved |
+  | --- | --- | --- |
+  | dedupe | 111 | 93,330 |
+  | error-purge | 187 | 28,191 |
+  | superseded-file-ops | 258 | 247,474 |
+
+- **Remaining-calls-after-position distribution: p50 = 47, p90 = 156** — a
+  large improvement in amortization runway over the earlier corpus, confirming
+  that corpus/session-length was the dominant factor in the old baseline's
+  thin p50/p90.
+- **Hindsight-optimal break-even threshold `T`** (maximizes total realized net
+  benefit), by cached-price ratio `r`, split overall / mid_loop / idle:
+
+  | ratio `r` | overall `T` (realized benefit) | mid_loop `T` (benefit) | idle `T` (benefit) |
+  | --- | --- | --- | --- |
+  | 0.1  | T=22 (~20,594)     | T=22 (~20,594)     | T=1 (0 — zero) |
+  | 0.25 | T=29 (~1,539,366)  | T=29 (~1,536,773)  | T=12 (~4,046) |
+  | 0.5  | T=54 (~8,063,298)  | T=54 (~8,060,451)  | T=27 (~37,184) |
+  | 0.9  | T=58 (~24,688,036) | T=58 (~24,191,264) | T=21 (~459,223) |
+
+**Reading**: `mid_loop` candidates account for essentially all realized
+benefit at every ratio; `idle` candidates account for essentially none
+(literally zero at r=0.1). At r=0.1 — aggressive prompt caching, the common
+Anthropic case — total realized benefit across the whole 1,390-session corpus
+is only ~20.6k token-units: economically marginal, on the order of pennies.
+Savings only become material at weaker caching, r>=0.25.
+
+**Reframed go/no-go implication**: this is evidence *for*, not against,
+prototyping v2 — but for a specific reason. Condition (1) above ("a
+meaningfully positive aggregate") is technically satisfied even at r=0.1, but
+the magnitude shows small deterministic removals (dedupe/error-purge/
+superseded-file-ops) structurally cannot beat the cache-bust penalty under
+aggressive caching; there just isn't enough single-message token volume in
+them. If pruning is going to matter economically at r=0.1, it has to come
+from the *large* removals v2 targets — agentic range compression and nested
+summaries — which remove orders of magnitude more tokens per operation. This
+strengthens rather than weakens the case to prototype v2, **contingent on**
+the §3 hardening prerequisites (summary quality, provider-serialization
+safety, prompt-injection audit surface) actually landing first; the benchmark
+evidence alone does not waive those correctness requirements.
+
+**Action**: treat `pe-c5n9`'s numbers as the current baseline for any future
+re-run; re-derive via `scripts/benchmark.mjs ~/.the-last-harness/agent/sessions
+--ratio 0.1,0.25,0.5,0.9` if the representative corpus changes meaningfully
+(e.g. materially different session-length mix).

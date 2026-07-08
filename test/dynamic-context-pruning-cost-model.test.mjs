@@ -244,6 +244,21 @@ test('resolveBreakEvenThreshold falls back to breakEvenThreshold by default (bot
   assert.equal(resolveBreakEvenThreshold(gateConfig, 'mid_loop'), gateConfig.breakEvenThreshold);
 });
 
+test('default gate config uses the pe-c5n9 recalibrated threshold (T=22 at r=0.1) with idle/mid_loop kept at parity', () => {
+  // The representative-corpus benchmark shows mid_loop candidates carry ~all
+  // realized net benefit and idle candidates carry ~none at r=0.1. Defaulting
+  // idle stricter than mid_loop was intentionally deferred (pe-c5n9): the only
+  // live runtime caller does not yet perform real mid-loop/idle detection and
+  // always evaluates as "idle", so an idle-specific default would silently
+  // disable most automatic pruning today. This test locks the current,
+  // deliberate parity so a future change to it is a visible, reviewed diff.
+  const gateConfig = defaultConfig().gate;
+  assert.equal(gateConfig.breakEvenThreshold, 22);
+  assert.equal(gateConfig.breakEvenThresholdByState.idle, 22);
+  assert.equal(gateConfig.breakEvenThresholdByState.mid_loop, 22);
+  assert.equal(resolveBreakEvenThreshold(gateConfig, 'idle'), resolveBreakEvenThreshold(gateConfig, 'mid_loop'));
+});
+
 // ---------------------------------------------------------------------------
 // Pipeline wiring: gate on/off/always-apply, manual bypass, persisted immunity
 // ---------------------------------------------------------------------------

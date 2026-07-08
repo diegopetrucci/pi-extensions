@@ -98,11 +98,21 @@ const DEFAULT_RECENT_TURNS = 4;
 const DEFAULT_CACHED_PRICE_RATIO = 0.1;
 
 /**
- * Default net-benefit gate threshold (max amortization calls). Explicitly
- * PROVISIONAL per pe-s2ho ticket notes: pe-e9pv's realized-benefit benchmark
- * will supply the final, data-backed default(s). Do not treat "5" as tuned.
+ * Default net-benefit gate threshold (max amortization calls). Recalibrated
+ * (pe-c5n9) from the representative-corpus benchmark (~/.the-last-harness/
+ * agent/sessions, 1,390+ session files, 556 candidates): this is the
+ * hindsight-optimal break-even T at cachedPriceRatio r=0.1 (aggressive
+ * prompt caching, the common Anthropic case). IMPORTANT caveats:
+ *  - Provider/ratio-dependent: this optimum shifts higher as caching gets
+ *    weaker (T=29 at r=0.25, T=54 at r=0.5, T=58 at r=0.9 on the same
+ *    corpus) — see docs/v2-design.md section 4 and the extension README.
+ *  - At r=0.1 the realized deterministic savings this threshold buys are
+ *    economically marginal (~20.6k token-units total across the whole
+ *    corpus, i.e. pennies); savings only become material at r>=0.25.
+ *  - Re-derive via `scripts/benchmark.mjs <sessions-dir> --ratio 0.1` if
+ *    the representative corpus changes meaningfully.
  */
-const DEFAULT_BREAK_EVEN_THRESHOLD = 5;
+const DEFAULT_BREAK_EVEN_THRESHOLD = 22;
 
 /** Tool names never pruned by default: orchestration/subagent-style tools and todo-like state. */
 const DEFAULT_PROTECTED_TOOL_NAMES = [
@@ -182,8 +192,21 @@ export type GateMode = "on" | "off" | "always-apply";
  * State-conditioning hook (pe-s2ho notes): lets the gate use a different
  * break-even threshold depending on whether the agent is mid-loop (actively
  * making tool calls) vs idle (waiting on the user). Both states default to
- * the same threshold today; a future ticket can widen/narrow either once
- * real usage data (pe-e9pv) exists.
+ * the same threshold today.
+ *
+ * pe-c5n9 evidence update: the representative-corpus benchmark shows
+ * mid_loop candidates carry ~all realized net benefit while idle candidates
+ * carry ~none (literally 0 at r=0.1). That would argue for a stricter idle
+ * default. However, the only live runtime caller (the `context` event
+ * handler below) does not yet perform real mid-loop/idle detection — it
+ * always passes agentState:"idle". Defaulting idle to a much stricter
+ * threshold today would therefore silently disable most automatic pruning
+ * for everyone (100% of live evaluations run as "idle"), which is a far
+ * bigger behavior change than a threshold recalibration. So the per-state
+ * split is intentionally left at parity for now; a follow-up ticket should
+ * wire real agent-state detection through `ctx` and then apply the
+ * idle-vs-mid_loop split (idle stricter, mid_loop at DEFAULT_BREAK_EVEN_THRESHOLD)
+ * once mid_loop is actually reachable.
  */
 export type AgentState = "idle" | "mid_loop";
 
@@ -196,8 +219,9 @@ export interface PruneGateConfig {
 	cachedPriceRatio: number;
 	/**
 	 * Default break-even threshold (max future calls to amortize a cache
-	 * bust) used when no state-specific override applies. PROVISIONAL default;
-	 * see DEFAULT_BREAK_EVEN_THRESHOLD.
+	 * bust) used when no state-specific override applies. Recalibrated from
+	 * the representative-corpus benchmark; see DEFAULT_BREAK_EVEN_THRESHOLD
+	 * for the full rationale and ratio-sensitivity caveats.
 	 */
 	breakEvenThreshold: number;
 	/** Per-agent-state threshold overrides; both default to `breakEvenThreshold`. */
