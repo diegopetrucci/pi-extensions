@@ -198,19 +198,42 @@ export type GateMode = "on" | "off" | "always-apply";
  * making tool calls) vs idle (waiting on the user). Both states default to
  * the same threshold today.
  *
- * pe-c5n9 evidence update: the representative-corpus benchmark shows
- * mid_loop candidates carry ~all realized net benefit while idle candidates
- * carry ~none (literally 0 at r=0.1). That would argue for a stricter idle
- * default. However, the only live runtime caller (the `context` event
- * handler below) does not yet perform real mid-loop/idle detection — it
- * always passes agentState:"idle". Defaulting idle to a much stricter
- * threshold today would therefore silently disable most automatic pruning
- * for everyone (100% of live evaluations run as "idle"), which is a far
- * bigger behavior change than a threshold recalibration. So the per-state
- * split is intentionally left at parity for now; a follow-up ticket should
- * wire real agent-state detection through `ctx` and then apply the
- * idle-vs-mid_loop split (idle stricter, mid_loop at DEFAULT_BREAK_EVEN_THRESHOLD)
- * once mid_loop is actually reachable.
+ * pe-c5n9 evidence (turn-END definition, since superseded -- see below):
+ * the representative-corpus benchmark showed mid_loop candidates carrying
+ * ~all realized net benefit while idle candidates carried ~none. That would
+ * have argued for a stricter idle default. However, the only live runtime
+ * caller (the `context` event handler below) did not yet perform real
+ * mid-loop/idle detection at the time, so no default change was made.
+ *
+ * pe-zy4s update (2026-07-08): real runtime mid_loop/idle detection is now
+ * wired through the `context` event handler (`classifyAgentStateFromMessages`),
+ * using a turn-START definition (idle = this is the first LLM call of a turn;
+ * mid_loop = the agent already made a call or received a tool result this
+ * turn) -- see that function's doc comment for the exact runtime-observable
+ * semantics. The benchmark's candidate labeling was aligned to this SAME
+ * definition (retiring the old turn-END definition above, which was never
+ * runtime-observable), and the state-split was re-derived on the
+ * representative corpus (~/.the-last-harness/agent/sessions, 460 candidates)
+ * under it.
+ *
+ * The result REVERSES the earlier (turn-END) finding: at r=0.1 the
+ * turn-START "idle" population (calls made at the start of a turn) carries
+ * essentially ALL the realized net benefit (idle-optimal T=22, total realized
+ * net benefit ~20,594 token-units), while "mid_loop" carries essentially NONE
+ * (mid_loop-optimal T=1, total realized net benefit ~0.0 -- i.e. no mid_loop
+ * candidate is ever worth accepting at r=0.1 under this definition). This is
+ * the OPPOSITE of what the pe-c5n9 evidence (measured under the old,
+ * non-runtime-observable turn-END definition) suggested.
+ *
+ * Per the pe-zy4s decision rule (stricter idle default only if idle itself is
+ * shown to be ~worthless): idle is NOT worthless here -- it is the ONLY state
+ * carrying value at r=0.1 -- so no state-conditioned strictness is justified
+ * in either direction. The per-state split is therefore kept at PARITY
+ * (`breakEvenThresholdByState: { idle: DEFAULT_BREAK_EVEN_THRESHOLD, mid_loop:
+ * DEFAULT_BREAK_EVEN_THRESHOLD }`), both config-overridable. A future ticket
+ * could consider a stricter mid_loop default given this evidence, but that is
+ * a new, unreviewed direction outside this ticket's authorized decision rule
+ * and is left for a follow-up.
  */
 export type AgentState = "idle" | "mid_loop";
 
@@ -400,6 +423,41 @@ export function estimateTokensForContent(content: string | (MinimalTextContent |
 }
 
 export type TokenEstimator = (text: string) => number;
+
+/**
+ * Classify the agent's current state from the message payload alone (pe-zy4s):
+ * this is the runtime-observable definition used both by the live `context`
+ * event handler and (via re-export) by the offline benchmark, so the two can
+ * never drift apart.
+ *
+ * Walk backwards from the end of `messages`, skipping any message that is
+ * neither `user`, `assistant`, nor `toolResult` (e.g. system-role bookkeeping
+ * entries). The first such message found determines the state:
+ *  - `user` (a plain user turn message) => "idle": this call is the FIRST LLM
+ *    call of a turn, i.e. the decision is being made from a turn-start state.
+ *  - `assistant` or `toolResult` (mid-chain) => "mid_loop": the agent is
+ *    iterating (already made at least one call this turn, or is reacting to a
+ *    tool result).
+ *  - No such message found (empty history, or system-only) => "idle" (safe
+ *    default: nothing suggests an in-progress loop).
+ *
+ * The benchmark (scripts/benchmark.mjs) reclassifies its candidate labels to
+ * this SAME definition (pe-zy4s), reusing this function directly, so the
+ * defaults below rest on evidence measured with the exact definition the
+ * runtime observes. (An earlier turn-end-based benchmark definition -- "idle"
+ * meant "this IS the turn's last assistant message", only knowable in
+ * hindsight -- has been retired: the runtime cannot know in advance whether a
+ * call is a turn's last one, so that definition was never runtime-observable.)
+ */
+export function classifyAgentStateFromMessages(messages: MinimalMessage[]): AgentState {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const role = messages[i].role;
+		if (role === "user") return "idle";
+		if (role === "assistant" || role === "toolResult") return "mid_loop";
+		// Any other role (e.g. "system") is skipped: keep walking further back.
+	}
+	return "idle";
+}
 
 /** Resolve which break-even threshold applies for a given agent state (pe-s2ho state-conditioning hook). */
 export function resolveBreakEvenThreshold(gateConfig: PruneGateConfig, agentState: AgentState): number {
@@ -2431,9 +2489,10 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			persistedDecisions,
 			knownIdempotencyKeys,
 			restoredIdempotencyKeys,
-			// Real mid-loop/idle agent-state detection lands in a follow-up ticket;
-			// "idle" is the safe default until it's wired through ctx.
-			agentState: "idle",
+			// Real mid-loop/idle agent-state detection (pe-zy4s): derived straight from
+			// the message payload via classifyAgentStateFromMessages -- see its doc
+			// comment for the exact runtime-observable definition.
+			agentState: classifyAgentStateFromMessages(event.messages as unknown as MinimalMessage[]),
 			cwd: ctx.sessionManager.getCwd(),
 		});
 

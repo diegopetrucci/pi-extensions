@@ -241,14 +241,18 @@ Notes:
   survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
   different thresholds; both default to `gate.breakEvenThreshold`. Real
-  mid-loop/idle detection isn't wired through yet, so this always evaluates as
-  `idle` in v1 — the field exists so the seam is ready once that lands. The
-  representative-corpus benchmark (see [Roadmap](#roadmap)) shows `mid_loop`
-  candidates carry ~all realized net benefit and `idle` candidates carry ~none
-  at r=0.1, which argues for a stricter `idle` default — but since every live
-  evaluation runs as `idle` today, defaulting it stricter would silently
-  disable most automatic pruning. Both states are intentionally kept at
-  parity until real agent-state detection lands; that's a follow-up ticket.
+  mid-loop/idle detection is wired through the `context` event handler
+  (pe-zy4s): the state is classified straight from the message payload —
+  `idle` if the most recent relevant message is a user message (this is the
+  first LLM call of the turn), `mid_loop` if it's an assistant message or a
+  tool result (the agent is iterating mid-turn). The representative-corpus
+  benchmark (see [Roadmap](#roadmap)) was re-derived against this same
+  runtime-observable definition and found the state-split REVERSED from an
+  earlier turn-end-based analysis: at r=0.1, `idle` candidates now carry
+  essentially all the realized net benefit and `mid_loop` candidates carry
+  essentially none. Since `idle` is not the worthless state under this
+  definition, both states are kept at parity (`22`/`22`) rather than forcing
+  a stricter default in either direction.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case) — see [Roadmap](#roadmap) for the full
@@ -430,6 +434,22 @@ At r=0.1 (aggressive prompt caching, the common Anthropic case) the total
 realized benefit across the whole 1,390-session corpus is only ~20.6k
 token-units — economically marginal, on the order of pennies. Savings only
 become material at weaker caching, r>=0.25.
+
+**pe-zy4s update (2026-07-08): this idle/mid_loop split used a turn-END
+definition** ("idle" = this call IS the turn's final assistant message, only
+knowable in hindsight via replay) **that was never runtime-observable.** Once
+real runtime agent-state detection landed (turn-START definition: "idle" =
+this is the FIRST LLM call of a turn; see the config-notes bullet above), the
+benchmark's candidate labeling was aligned to that same definition and
+re-derived on the representative corpus (460 gate-eligible candidates on the
+current `~/.the-last-harness/agent/sessions` corpus). The split **reverses**:
+at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now carries essentially
+all the value, and `mid_loop` (T=1, ~0 realized net benefit) carries
+essentially none. Per the decision rule (stricter idle default only if idle
+is shown ~worthless), this evidence does **not** support a stricter idle
+default — parity (`22`/`22`) is kept. The table above is retained as the
+historical turn-END-definition record; it no longer reflects how the runtime
+classifies agent state.
 
 **This reframes, rather than weakens, the case for v2.** Small deterministic
 removals (dedupe/error-purge/superseded-file-ops) structurally cannot beat
