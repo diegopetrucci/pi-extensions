@@ -119,17 +119,17 @@ test('resolveActiveBranch returns entries as-is for v1 (linear, no id/parentId) 
 // Turn-state classification
 // ---------------------------------------------------------------------------
 
-test('classifyTurnState distinguishes mid-loop (more assistant calls before next user msg) from idle (turn end)', () => {
+test('classifyTurnState uses the runtime-observable turn-START definition (pe-zy4s): idle iff the preceding relevant message is a user message', () => {
   const messages = [
     { role: 'user', content: 'go' },
-    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] }, // index 1: mid-loop
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] }, // index 1: preceded by user -> idle (first call of turn)
     { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false },
-    { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, // index 3: idle (turn end)
+    { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, // index 3: preceded by toolResult -> mid_loop
     { role: 'user', content: 'next' },
-    { role: 'assistant', content: [{ type: 'text', text: 'ack' }] }, // index 5: idle (only assistant call this turn)
+    { role: 'assistant', content: [{ type: 'text', text: 'ack' }] }, // index 5: preceded by user -> idle (first call of turn)
   ];
-  assert.equal(classifyTurnState(messages, 1), 'mid_loop');
-  assert.equal(classifyTurnState(messages, 3), 'idle');
+  assert.equal(classifyTurnState(messages, 1), 'idle');
+  assert.equal(classifyTurnState(messages, 3), 'mid_loop');
   assert.equal(classifyTurnState(messages, 5), 'idle');
 });
 

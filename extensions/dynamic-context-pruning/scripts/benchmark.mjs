@@ -65,6 +65,7 @@ const {
 	estimateTailTokens,
 	computeCacheCostModel,
 	resolveBreakEvenThreshold,
+	classifyAgentStateFromMessages,
 	sessionEntriesToMessages,
 	buildToolCallPairIndex,
 	computeRecencyBoundaryIndex,
@@ -353,30 +354,22 @@ export function resolveActiveBranch(entries) {
 
 /**
  * Classify the agent state at the call boundary immediately before
- * `assistantIndex` (per pe-e9pv NOTES: "mid-loop" = between a user message
- * and the turn's final assistant message; "idle" = at turn end, i.e. this
- * IS the turn's final assistant message).
+ * `assistantIndex` (pe-zy4s: aligned to the SAME runtime-observable
+ * definition the live `context` event handler uses -- see
+ * `classifyAgentStateFromMessages`'s doc comment in index.ts for the exact
+ * semantics). This is a re-export/thin wrapper so the benchmark and the
+ * runtime can never drift apart: it classifies from `messages.slice(0,
+ * assistantIndex)`, i.e. exactly the prefix the runtime would have seen right
+ * before making this call.
+ *
+ * NOTE (definition change): earlier revisions of this benchmark used a
+ * turn-END definition ("idle" = this IS the turn's last assistant message,
+ * only knowable in hindsight via replay). That definition was never
+ * runtime-observable, so it has been retired in favor of the turn-START
+ * definition below, which the live extension can actually compute.
  */
 export function classifyTurnState(messages, assistantIndex) {
-	let turnStart = 0;
-	for (let i = assistantIndex; i >= 0; i--) {
-		if (messages[i].role === "user") {
-			turnStart = i;
-			break;
-		}
-	}
-	let turnEnd = messages.length;
-	for (let i = assistantIndex + 1; i < messages.length; i++) {
-		if (messages[i].role === "user") {
-			turnEnd = i;
-			break;
-		}
-	}
-	let lastAssistantInTurn = assistantIndex;
-	for (let i = turnStart; i < turnEnd; i++) {
-		if (messages[i].role === "assistant") lastAssistantInTurn = i;
-	}
-	return assistantIndex === lastAssistantInTurn ? "idle" : "mid_loop";
+	return classifyAgentStateFromMessages(messages.slice(0, assistantIndex));
 }
 
 // ============================================================================
