@@ -165,10 +165,14 @@ export interface PruneProtections {
 
 export interface PruneThresholds {
 	/**
-	 * Minimum characters a prune must remove to be worth persisting. Reserved
-	 * for a future minimum-size filter; NOT used by the net-benefit gate
-	 * (see `PruneGateConfig`/`gate`), which uses break-even token math instead.
-	 * Not enforced by this pipeline yet.
+	 * Minimum characters a fresh AUTOMATIC prune proposal must remove (original
+	 * content chars minus placeholder chars) to be considered at all (pe-qdzb).
+	 * Enforced by `runDynamicContextPruningPipeline` BEFORE the net-benefit
+	 * gate (see `PruneGateConfig`/`gate`, which uses break-even token math and
+	 * is a separate, later check): candidates below this floor are dropped
+	 * up front and never reach gate/batch consideration. Manual prunes and
+	 * already-persisted/replayed decisions always bypass this floor, same as
+	 * the gate. A value of 0 disables the floor (no filtering).
 	 */
 	minCharsSaved: number;
 }
@@ -1051,6 +1055,55 @@ export function estimateDecisionSavings(
 }
 
 /**
+ * Estimate the character savings of a single decision (pe-qdzb), i.e. the
+ * same before/after delta basis as `estimateDecisionSavings` but measured in
+ * raw characters rather than estimated tokens. Used by the pipeline to
+ * enforce `thresholds.minCharsSaved` against fresh automatic proposals
+ * *before* they reach the net-benefit gate. Returns undefined under the same
+ * conditions as `estimateDecisionSavings` (target absent / would not apply).
+ * Mirrors `estimateDecisionSavings`'s `Math.max(0, ...)` clamp, so a
+ * decision whose placeholder text would be LONGER than the original content
+ * (negative savings) is reported as 0 chars saved, not a negative number.
+ */
+export function estimateDecisionCharsSaved(
+	messages: MinimalMessage[],
+	decision: PruneDecisionRecord,
+	pairIndex?: Map<string, ToolCallPairIndices>,
+): number | undefined {
+	if (decision.correlation.type !== "toolCallId") return undefined;
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
+
+	// Same non-mutating preview approach as `estimateDecisionSavings`.
+	const preview = messages.slice();
+	const result = applyPruneDecision(preview, decision, pairIndex);
+	if (!result.applied) return undefined;
+
+	if (decision.kind === "tool_result_content") {
+		if (pair.resultIndex === undefined) return undefined;
+		const before = messages[pair.resultIndex] as MinimalToolResultMessage;
+		const after = preview[pair.resultIndex] as MinimalToolResultMessage;
+		const charsBefore = contentTextLength(before.content);
+		const charsAfter = contentTextLength(after.content);
+		return Math.max(0, charsBefore - charsAfter);
+	}
+
+	if (decision.kind === "tool_call_input") {
+		if (pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined) return undefined;
+		const beforeBlock = (messages[pair.assistantIndex] as MinimalAssistantMessage).content[
+			pair.toolCallBlockIndex
+		] as MinimalToolCallContent;
+		const afterBlock = (preview[pair.assistantIndex] as MinimalAssistantMessage).content[
+			pair.toolCallBlockIndex
+		] as MinimalToolCallContent;
+		const charsBefore = JSON.stringify(beforeBlock.arguments ?? {}).length;
+		const charsAfter = JSON.stringify(afterBlock.arguments ?? {}).length;
+		return Math.max(0, charsBefore - charsAfter);
+	}
+
+	return undefined;
+}
+
+/**
  * Cache-aware cost model (pe-s2ho ticket NOTES, binding over the looser prose
  * in the ticket body): prompt caches are prefix-based, so pruning at message
  * position p invalidates ('busts') the cached tail from p onward exactly
@@ -1877,7 +1930,25 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	// against the pre-mutation `messages` clone, before the apply loop below
 	// mutates anything.
 	const freshManual = dedupedFresh.filter((decision) => decision.source === "manual");
-	const freshAutomatic = dedupedFresh.filter((decision) => decision.source !== "manual");
+	const freshAutomaticUnfiltered = dedupedFresh.filter((decision) => decision.source !== "manual");
+
+	// Minimum-size floor (pe-qdzb): drop fresh automatic proposals whose
+	// character savings (original content chars minus placeholder chars) fall
+	// below `thresholds.minCharsSaved`, BEFORE gate evaluation so dropped
+	// candidates never consume batch/earliest-position gate consideration.
+	// Applies to automatic proposals only; manual (`freshManual` above) and
+	// already-persisted decisions (`input.persistedDecisions`, applied later)
+	// bypass this floor entirely, same as the net-benefit gate. A floor of 0
+	// (the config default before pe-c5n9's DEFAULT_MIN_CHARS_SAVED constant was
+	// introduced) is a no-op: every non-negative delta clears it.
+	const minCharsSaved = input.config.thresholds.minCharsSaved;
+	const freshAutomatic =
+		minCharsSaved <= 0
+			? freshAutomaticUnfiltered
+			: freshAutomaticUnfiltered.filter((decision) => {
+					const charsSaved = estimateDecisionCharsSaved(messages, decision, pairIndex);
+					return charsSaved !== undefined && charsSaved >= minCharsSaved;
+				});
 
 	// Collapse fresh AUTOMATIC candidates that target the same (kind,
 	// correlation) down to a single decision (pe-j7sb). Two strategies (e.g.

@@ -160,7 +160,12 @@ test('replaySession finds the dedupe candidate on duplicate-reads.jsonl with cor
 
 test('replaySession finds the error-purge candidate on errored-call.jsonl', async () => {
   const messages = await loadFixtureMessages('errored-call.jsonl');
-  const result = replaySession('errored-call.jsonl', messages, { ratios: [0.1] });
+  // Explicit zero floor (pe-qdzb): this fixture's redacted-args saving is
+  // small (well under the real default minCharsSaved=200), and this test is
+  // about the error-purge strategy/pipeline wiring, not about the default
+  // floor value, so isolate it from that floor here.
+  const config = { ...dcp.normalizeConfig(undefined), thresholds: { minCharsSaved: 0 } };
+  const result = replaySession('errored-call.jsonl', messages, { ratios: [0.1], config });
   const candidates = result.candidates.filter((c) => c.strategyId === 'error-purge');
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].toolCallId, 'call_err1');
