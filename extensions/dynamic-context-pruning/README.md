@@ -302,7 +302,45 @@ Options:
 - `--ratio R`: cached-price ratio(s) to model; repeatable and/or
   comma-separated (e.g. `--ratio 0.1,0.2`). Default: `0.1`.
 - `--json`: emit a full machine-readable JSON dump instead of aligned text.
+- `--simulate-compression`: additionally SIMULATE v2-style range compression
+  (docs/v2-design.md §1/§4 go/no-go evidence) alongside — never mixed into —
+  the deterministic results. See below.
+- `--sim-summary-fraction F`: summary size as a fraction of range tokens;
+  repeatable/comma-separated (e.g. `--sim-summary-fraction 0.1,0.15,0.3`).
+  Default: `0.15`.
+- `--sim-summary-min-tokens N`: floor on summary tokens regardless of
+  fraction. Default: `200`.
+- `--sim-summarizer-cost-mult M`: relative per-token price of the summarizer
+  call vs. the main model. Default: `1.0` (same per-token price; a
+  deliberate simplification that ignores summarizer latency/availability).
+- `--sim-min-range-tokens N`: minimum contiguous range size to be
+  considered. Default: `2000`.
 - `--help`: print usage.
+
+### Compression-simulation mode (`--simulate-compression`)
+
+This is a v2 go/no-go evidence generator that does **not** require building
+v2: it identifies plausible v2-style `compress` (range mode) opportunities —
+contiguous spans of complete, non-recent, non-protected messages, never
+splitting a toolCall/toolResult pair — during the same replay pass, and
+models the outcome:
+
+```text
+summaryTokens      = max(fraction * rangeTokens, summaryMinTokens)
+oneTimeCost        = cacheBustPenalty(earliest range position)
+                       + summarizerCostMult * (rangeTokens + summaryTokens)
+recurringSaving     = r * (rangeTokens - summaryTokens)
+realizedNetBenefit  = actualRemainingCalls * recurringSaving - oneTimeCost
+```
+
+Each distinct range is recorded once, at the earliest call boundary where it
+first exists and meets `--sim-min-range-tokens`; ranges never overlap. The
+same auto-expanding break-even threshold sweep as the deterministic
+strategies runs against this separate SIMULATED population, reported
+side-by-side with (but never combined with) the deterministic results — the
+two populations are computed **independently**; a simulated range may fully
+contain deterministic candidates, and no overlap/interaction between the two
+is modeled or netted out.
 
 With no positional paths, it defaults to every `*.jsonl` file found
 recursively under `~/.pi/agent/sessions`.
