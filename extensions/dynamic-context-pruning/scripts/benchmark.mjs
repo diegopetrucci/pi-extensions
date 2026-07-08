@@ -310,8 +310,15 @@ function percentile(sortedValues, p) {
  * actually followed, and the realized net benefit that pruning would truly
  * have produced.
  */
-export function replaySession(sessionFile, messages, { ratios = DEFAULT_RATIOS } = {}) {
-	const config = normalizeConfig(undefined);
+export function replaySession(sessionFile, messages, { ratios = DEFAULT_RATIOS, config: configOverride } = {}) {
+	// `configOverride` (pe-qdzb) lets callers (e.g. tests isolating a specific
+	// strategy/gate behavior on a small fixture) replay against a
+	// non-default config, most commonly to zero out `thresholds.minCharsSaved`
+	// so a tiny fixture's proposal isn't filtered by the real-world default
+	// floor before it can be observed. Real corpus benchmark runs (the CLI
+	// entrypoint below) intentionally omit this and use full defaults, so the
+	// minCharsSaved floor applies there exactly as it would in production.
+	const config = configOverride ?? normalizeConfig(undefined);
 	const offConfig = { ...config, gate: { ...config.gate, mode: "off" } };
 
 	const assistantIndices = [];

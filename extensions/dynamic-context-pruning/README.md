@@ -230,9 +230,15 @@ never required to exist. Full shape, with defaults:
 
 Notes:
 
-- `thresholds.minCharsSaved` is reserved for a future minimum-size filter and
-  is **not** currently enforced by the pipeline; the net-benefit gate's
-  break-even math is what actually decides whether a prune applies.
+- `thresholds.minCharsSaved` is a minimum-size floor enforced against fresh
+  **automatic** strategy proposals only, before the net-benefit gate runs: a
+  candidate whose character savings (original content chars minus placeholder
+  chars) fall below this value is dropped up front and never reaches gate or
+  batch consideration. Manual prunes (`/prune`) and already-persisted/replayed
+  decisions always bypass this floor, same as the gate. Set to `0` to disable
+  filtering entirely. This is independent of the net-benefit gate's
+  break-even math (`gate.*`), which is a separate, later check on whatever
+  survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
   different thresholds; both default to `gate.breakEvenThreshold`. Real
   mid-loop/idle detection isn't wired through yet, so this always evaluates as
