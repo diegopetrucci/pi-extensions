@@ -131,7 +131,9 @@ for cached tokens (default `0.1`, i.e. cached tokens cost ~10% of fresh
 tokens). `breakEvenCalls` is how many subsequent LLM calls are needed to
 recoup the one-time cache-bust cost via the recurring saving. The gate accepts
 a batch of candidates only if `breakEvenCalls <= gate.breakEvenThreshold`
-(default `5`, **explicitly provisional** — see [Roadmap](#roadmap)).
+(default `22`, calibrated from the representative-corpus benchmark — see the
+calibration note under [Configuration](#configuration) and the
+[Roadmap](#roadmap) evidence).
 
 All candidates proposed in the same `context` call share one cache bust (since
 a prompt cache is a single linear prefix), so they're evaluated and
@@ -220,8 +222,8 @@ never required to exist. Full shape, with defaults:
   "gate": {
     "mode": "on",
     "cachedPriceRatio": 0.1,
-    "breakEvenThreshold": 5,
-    "breakEvenThresholdByState": { "idle": 5, "mid_loop": 5 }
+    "breakEvenThreshold": 22,
+    "breakEvenThresholdByState": { "idle": 22, "mid_loop": 22 }
   }
 }
 ```
@@ -259,6 +261,23 @@ calls left to amortize the one-time cost over) or removes too few tokens
 relative to the tail it invalidates can cost *more* than it saves. The gate's
 break-even math (above) is the mechanism that keeps pruning net-positive on
 average rather than accepting the cache trade-off unconditionally.
+
+`gate.cachedPriceRatio` (`r`) should track your provider's real prompt-cache
+pricing:
+
+- **Anthropic** prompt caching: cached reads ~0.1x base input price, plus a
+  ~1.25x one-time cache-write premium → `r ≈ 0.1`.
+- **Google Gemini** context caching: ~0.25x base input price, plus a
+  separate storage/time fee → `r ≈ 0.25`.
+- **OpenAI** automatic prompt caching: ~0.5x base input price → `r ≈ 0.5`.
+- **No caching** available or enabled → `r → 1`: the cache-bust penalty
+  vanishes, so pruning is a pure win regardless of threshold.
+
+Provider pricing drifts — check current price sheets before trusting these
+ratios. The penalty math also assumes the cache would still be warm at the
+next call; if the provider's cache TTL (e.g. ~5 min default on Anthropic)
+elapses between calls, the bust costs nothing and pruning is again a pure
+win.
 
 ## Benchmark harness
 
