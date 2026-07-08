@@ -22,6 +22,8 @@
  *   --limit N       Only process the first N session files found (default: no limit).
  *   --ratio R       Cached-price ratio(s) to model. Repeatable and/or comma-separated
  *                   (e.g. --ratio 0.1,0.2 or --ratio 0.1 --ratio 0.2). Default: 0.1.
+ *   --sweep-max N   Explicit ceiling for the auto-expanding break-even threshold sweep
+ *                   (overrides the corpus-derived ceiling). Default: auto-expand from 30.
  *   --json          Emit a full machine-readable JSON dump instead of aligned text.
  *   --help          Print this usage text.
  *
@@ -57,7 +59,14 @@ const {
 
 const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
 const DEFAULT_RATIOS = [0.1];
+// Back-compat starting bound: without --sweep-max and without needing expansion, a
+// corpus that doesn't push the argmax to the boundary reports identical numbers to
+// before this ticket (pe-7oej).
 const THRESHOLD_SWEEP_MAX = 30;
+// Hard runaway guard for auto-expansion when no --sweep-max is given: even a
+// corpus-derived ceiling is clamped to this so a pathological candidate set can't
+// make the sweep loop grow unbounded.
+const HARD_SWEEP_CEILING = 500;
 
 // ============================================================================
 // CLI argument parsing
@@ -71,6 +80,8 @@ function printUsage() {
 			"Options:",
 			"  --limit N     Only process the first N session files found.",
 			"  --ratio R     Cached-price ratio(s) to model (repeatable/comma-separated). Default: 0.1.",
+			"  --sweep-max N Explicit ceiling for the auto-expanding threshold sweep (overrides the",
+			"                corpus-derived ceiling). Default: auto-expand from 30 as needed.",
 			"  --json        Emit a full machine-readable JSON dump instead of aligned text.",
 			"  --help        Print this usage text.",
 			"",
@@ -85,6 +96,7 @@ export function parseArgs(argv) {
 	const ratios = [];
 	let json = false;
 	let help = false;
+	let sweepMax;
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -102,6 +114,16 @@ export function parseArgs(argv) {
 			const parsed = Number(value);
 			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--limit expects a positive number, got: ${value}`);
 			limit = Math.floor(parsed);
+		} else if (arg === "--sweep-max") {
+			const value = argv[++i];
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--sweep-max expects a positive number, got: ${value}`);
+			sweepMax = Math.floor(parsed);
+		} else if (arg.startsWith("--sweep-max=")) {
+			const value = arg.slice("--sweep-max=".length);
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--sweep-max expects a positive number, got: ${value}`);
+			sweepMax = Math.floor(parsed);
 		} else if (arg === "--ratio") {
 			ratios.push(...String(argv[++i]).split(","));
 		} else if (arg.startsWith("--ratio=")) {
@@ -121,7 +143,7 @@ export function parseArgs(argv) {
 		if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) throw new Error(`--ratio expects a number in [0,1], got: ${ratio}`);
 	}
 
-	return { paths, limit, ratios: parsedRatios.length > 0 ? parsedRatios : [...DEFAULT_RATIOS], json, help };
+	return { paths, limit, ratios: parsedRatios.length > 0 ? parsedRatios : [...DEFAULT_RATIOS], json, help, sweepMax };
 }
 
 // ============================================================================
@@ -404,7 +426,56 @@ export function sweepThreshold(candidates, ratio, max = THRESHOLD_SWEEP_MAX) {
 	return { recommended: best.threshold, totalAtRecommended: best.total, curve };
 }
 
-export function computeAggregate(sessionResults, ratios) {
+/**
+ * Derive a sane, corpus-based ceiling for auto-expanding the threshold sweep (pe-7oej).
+ *
+ * Once the tested max T reaches the largest finite breakEvenCalls seen across the
+ * candidate set, every larger T accepts exactly the same set of candidates -- the
+ * total-realized-net-benefit curve is provably flat beyond that point, so the true
+ * global argmax (over all T from 1..Infinity) is guaranteed to already be visible in
+ * the tested range. This is a tighter and more principled ceiling than sweeping an
+ * arbitrary large fixed bound, while still being derived straight from the corpus.
+ *
+ * The result is clamped to HARD_SWEEP_CEILING as a runaway guard, and floored at
+ * THRESHOLD_SWEEP_MAX so a corpus with no accepted candidates doesn't shrink the
+ * sweep below the historical default.
+ */
+export function deriveSweepCeiling(candidates, ratio) {
+	let maxBreakEven = 0;
+	for (const candidate of candidates) {
+		const r = candidate.byRatio?.[ratio];
+		if (r && Number.isFinite(r.breakEvenCalls) && r.breakEvenCalls > maxBreakEven) maxBreakEven = r.breakEvenCalls;
+	}
+	if (maxBreakEven <= THRESHOLD_SWEEP_MAX) return THRESHOLD_SWEEP_MAX;
+	return Math.min(HARD_SWEEP_CEILING, Math.ceil(maxBreakEven));
+}
+
+/**
+ * Auto-expanding threshold sweep (pe-7oej): starts at `initialMax` (default 30, the
+ * historical hardcoded cap) and, while the recommended T is still pinned to the max
+ * tested T, doubles the max tested T and re-sweeps -- until the argmax is strictly
+ * interior (recommended < maxTested) or a ceiling is hit.
+ *
+ * The ceiling is `sweepMax` when explicitly provided (an explicit --sweep-max always
+ * overrides the corpus-derived ceiling, even if smaller than 30), otherwise it is
+ * derived from the corpus via deriveSweepCeiling (itself capped at HARD_SWEEP_CEILING).
+ *
+ * On a corpus that never pins to the boundary, this returns byte-identical numbers to
+ * the pre-pe-7oej sweepThreshold(candidates, ratio, 30) call (back-compat).
+ */
+export function sweepThresholdWithAutoExpand(candidates, ratio, { initialMax = THRESHOLD_SWEEP_MAX, sweepMax } = {}) {
+	const ceiling = sweepMax !== undefined ? sweepMax : deriveSweepCeiling(candidates, ratio);
+	let maxTested = Math.max(1, Math.min(initialMax, ceiling));
+	let sweep = sweepThreshold(candidates, ratio, maxTested);
+	while (sweep.recommended >= maxTested && maxTested < ceiling) {
+		maxTested = Math.min(ceiling, maxTested * 2);
+		sweep = sweepThreshold(candidates, ratio, maxTested);
+	}
+	const boundaryPinned = sweep.recommended >= maxTested;
+	return { ...sweep, maxTested, boundaryPinned };
+}
+
+export function computeAggregate(sessionResults, ratios, { sweepMax } = {}) {
 	const allCandidates = sessionResults.flatMap((session) => session.candidates);
 	const primaryRatio = ratios[0];
 
@@ -427,9 +498,9 @@ export function computeAggregate(sessionResults, ratios) {
 	const thresholdSweepByRatio = {};
 	for (const ratio of ratios) {
 		thresholdSweepByRatio[ratio] = {
-			overall: sweepThreshold(allCandidates, ratio),
-			mid_loop: sweepThreshold(midLoopCandidates, ratio),
-			idle: sweepThreshold(idleCandidates, ratio),
+			overall: sweepThresholdWithAutoExpand(allCandidates, ratio, { sweepMax }),
+			mid_loop: sweepThresholdWithAutoExpand(midLoopCandidates, ratio, { sweepMax }),
+			idle: sweepThresholdWithAutoExpand(idleCandidates, ratio, { sweepMax }),
 		};
 	}
 
@@ -509,22 +580,23 @@ function renderAggregateSummary(aggregate, ratios) {
 		} p90=${aggregate.distribution.p90 ?? "-"}`,
 	);
 	lines.push("");
-	lines.push("RECOMMENDED break-even threshold (sweep T=1..30, maximizes total REALIZED net benefit; ties -> smallest T):");
+	lines.push(
+		"RECOMMENDED break-even threshold (sweep auto-expands past T=30 until the argmax is interior or a ceiling is hit;",
+	);
+	lines.push("maximizes total REALIZED net benefit; ties -> smallest T):");
 	for (const ratio of ratios) {
 		const sweep = aggregate.thresholdSweepByRatio[ratio];
 		lines.push(`  ratio r=${ratio}:`);
-		lines.push(
-			`    overall:  T=${sweep.overall.recommended}  totalRealizedNetBenefit=${formatNumber(sweep.overall.totalAtRecommended, 1)}`,
-		);
-		lines.push(
-			`    mid_loop: T=${sweep.mid_loop.recommended}  totalRealizedNetBenefit=${formatNumber(
-				sweep.mid_loop.totalAtRecommended,
-				1,
-			)}`,
-		);
-		lines.push(
-			`    idle:     T=${sweep.idle.recommended}  totalRealizedNetBenefit=${formatNumber(sweep.idle.totalAtRecommended, 1)}`,
-		);
+		for (const [label, entry] of [
+			["overall ", sweep.overall],
+			["mid_loop", sweep.mid_loop],
+			["idle    ", sweep.idle],
+		]) {
+			const marker = entry.boundaryPinned ? "  [boundary-pinned (optimum may be higher)]" : "";
+			lines.push(
+				`    ${label}: T=${entry.recommended}  totalRealizedNetBenefit=${formatNumber(entry.totalAtRecommended, 1)}  maxTested=${entry.maxTested}${marker}`,
+			);
+		}
 	}
 	return lines.join("\n");
 }
@@ -540,7 +612,7 @@ async function loadSessionMessages(sessionFile) {
 	return sessionEntriesToMessages(activeBranch);
 }
 
-export async function runBenchmark({ paths, limit, ratios }) {
+export async function runBenchmark({ paths, limit, ratios, sweepMax }) {
 	let sessionFiles = await resolveSessionFiles(paths);
 	if (limit !== undefined) sessionFiles = sessionFiles.slice(0, limit);
 
@@ -560,7 +632,7 @@ export async function runBenchmark({ paths, limit, ratios }) {
 		sessionResults.push(replaySession(sessionFile, messages, { ratios }));
 	}
 
-	const aggregate = computeAggregate(sessionResults, ratios);
+	const aggregate = computeAggregate(sessionResults, ratios, { sweepMax });
 	return { sessionFiles, sessionResults, aggregate, ratios };
 }
 

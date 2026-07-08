@@ -16,6 +16,8 @@ const {
   replaySession,
   aggregateBySessionAndStrategy,
   sweepThreshold,
+  deriveSweepCeiling,
+  sweepThresholdWithAutoExpand,
   computeAggregate,
   runBenchmark,
 } = bench;
@@ -50,6 +52,14 @@ test('parseArgs rejects invalid --limit/--ratio and unknown options', () => {
   assert.throws(() => parseArgs(['--ratio', '1.5']));
   assert.throws(() => parseArgs(['--ratio', '-1']));
   assert.throws(() => parseArgs(['--bogus']));
+});
+
+test('parseArgs parses --sweep-max (both forms) and defaults it to undefined', () => {
+  assert.equal(parseArgs([]).sweepMax, undefined);
+  assert.equal(parseArgs(['--sweep-max', '50']).sweepMax, 50);
+  assert.equal(parseArgs(['--sweep-max=75']).sweepMax, 75);
+  assert.throws(() => parseArgs(['--sweep-max', '0']));
+  assert.throws(() => parseArgs(['--sweep-max', 'nope']));
 });
 
 // ---------------------------------------------------------------------------
@@ -219,6 +229,78 @@ test('sweepThreshold treats Infinity breakEvenCalls as never accepted', () => {
   assert.equal(sweep.totalAtRecommended, 0);
 });
 
+// ---------------------------------------------------------------------------
+// Auto-expanding threshold sweep (pe-7oej)
+// ---------------------------------------------------------------------------
+
+/** One candidate per integer breakEvenCalls in [from, to], each contributing +1 net benefit at its threshold. */
+function stepCandidates(ratio, values) {
+  return values.map((breakEvenCalls) => ({ byRatio: { [ratio]: { breakEvenCalls, realizedNetBenefit: 1 } } }));
+}
+
+test('sweepThreshold on a corpus that never pins to 30 matches sweepThresholdWithAutoExpand (back-compat)', () => {
+  const candidates = [
+    { byRatio: { 0.1: { breakEvenCalls: 2, realizedNetBenefit: 5 } } },
+    { byRatio: { 0.1: { breakEvenCalls: 10, realizedNetBenefit: -3 } } },
+  ];
+  const base = sweepThreshold(candidates, 0.1, 30);
+  const expanded = sweepThresholdWithAutoExpand(candidates, 0.1);
+  assert.equal(expanded.recommended, base.recommended);
+  assert.equal(expanded.totalAtRecommended, base.totalAtRecommended);
+  assert.deepEqual(expanded.curve, base.curve);
+  assert.equal(expanded.maxTested, 30);
+  assert.equal(expanded.boundaryPinned, false);
+});
+
+test('deriveSweepCeiling derives from the max finite breakEvenCalls, floors at 30, caps at 500', () => {
+  assert.equal(deriveSweepCeiling(stepCandidates(0.1, [1, 5, 10]), 0.1), 30, 'small corpus floors at the historical default');
+  assert.equal(deriveSweepCeiling(stepCandidates(0.1, [1, 45]), 0.1), 45);
+  assert.equal(
+    deriveSweepCeiling(stepCandidates(0.1, [1, 10000]), 0.1),
+    500,
+    'runaway corpus is clamped at the HARD_SWEEP_CEILING',
+  );
+});
+
+test('sweepThresholdWithAutoExpand auto-expands past 30 to find a strictly-interior argmax beyond the historical cap', () => {
+  // Candidates at breakEvenCalls=1..30 (boundary-pinned within the first window) plus one more
+  // at 35 that pushes the true optimum past 30, plus a zero-benefit candidate at 50 that only
+  // stretches the corpus-derived ceiling so the true (35) optimum has headroom to land strictly
+  // interior to the expanded window, rather than exactly on the derived ceiling itself.
+  const candidates = stepCandidates(0.1, [...Array(30).keys()].map((i) => i + 1))
+    .concat(stepCandidates(0.1, [35]))
+    .concat([{ byRatio: { 0.1: { breakEvenCalls: 50, realizedNetBenefit: 0 } } }]);
+
+  // Sanity check: the fixed-max sweep at 30 is boundary-pinned (this is the bug pe-7oej fixes).
+  const fixed = sweepThreshold(candidates, 0.1, 30);
+  assert.equal(fixed.recommended, 30);
+
+  const expanded = sweepThresholdWithAutoExpand(candidates, 0.1);
+  assert.equal(expanded.recommended, 35, 'auto-expand finds the true argmax beyond the historical cap');
+  assert.equal(expanded.totalAtRecommended, 31);
+  assert.ok(expanded.recommended > 30);
+  assert.ok(expanded.recommended < expanded.maxTested, 'argmax must be strictly interior');
+  assert.equal(expanded.boundaryPinned, false);
+});
+
+test('sweepThresholdWithAutoExpand flags boundary-pinned when the ceiling truncates the true optimum', () => {
+  // True optimum is at breakEvenCalls=100, but this corpus is deliberately capped by an
+  // explicit low --sweep-max, which must override the (higher) corpus-derived ceiling.
+  const candidates = stepCandidates(0.1, [...Array(100).keys()].map((i) => i + 1));
+  const expanded = sweepThresholdWithAutoExpand(candidates, 0.1, { sweepMax: 50 });
+  assert.equal(expanded.maxTested, 50, '--sweep-max is respected as an explicit ceiling');
+  assert.equal(expanded.recommended, 50, 'recommendation is pinned to the ceiling, not the true (higher) optimum');
+  assert.equal(expanded.boundaryPinned, true, 'boundary-pinned marker must be set when truncated by the ceiling');
+});
+
+test('sweepThresholdWithAutoExpand respects an explicit --sweep-max even when lower than the historical default of 30', () => {
+  const candidates = stepCandidates(0.1, [1, 5, 10, 20]);
+  const expanded = sweepThresholdWithAutoExpand(candidates, 0.1, { sweepMax: 10 });
+  assert.equal(expanded.maxTested, 10);
+  assert.equal(expanded.recommended, 10);
+  assert.equal(expanded.boundaryPinned, true);
+});
+
 test('computeAggregate reports overall/mid_loop/idle threshold sweeps and a remaining-calls distribution', async () => {
   const messages = await loadFixtureMessages('multi-turn.jsonl');
   const result = replaySession('multi-turn.jsonl', messages, { ratios: [0.1] });
@@ -232,6 +314,33 @@ test('computeAggregate reports overall/mid_loop/idle threshold sweeps and a rema
     assert.ok(typeof aggregate.distribution.p50 === 'number');
     assert.ok(typeof aggregate.distribution.p90 === 'number');
   }
+});
+
+test('computeAggregate extends each threshold-sweep entry with maxTested/boundaryPinned while keeping existing keys stable', async () => {
+  const messages = await loadFixtureMessages('multi-turn.jsonl');
+  const result = replaySession('multi-turn.jsonl', messages, { ratios: [0.1] });
+  const aggregate = computeAggregate([result], [0.1]);
+  for (const key of ['overall', 'mid_loop', 'idle']) {
+    const entry = aggregate.thresholdSweepByRatio[0.1][key];
+    assert.equal(typeof entry.recommended, 'number', `${key}.recommended (existing key) must stay present`);
+    assert.equal(typeof entry.totalAtRecommended, 'number', `${key}.totalAtRecommended (existing key) must stay present`);
+    assert.ok(Array.isArray(entry.curve), `${key}.curve (existing key) must stay present`);
+    assert.equal(typeof entry.maxTested, 'number', `${key}.maxTested (new key) must be exposed`);
+    assert.equal(typeof entry.boundaryPinned, 'boolean', `${key}.boundaryPinned (new key) must be exposed`);
+  }
+});
+
+test('computeAggregate threads an explicit sweepMax down into every ratio/turn-state sweep', () => {
+  const candidates = [
+    // Chosen so it is only accepted exactly at the --sweep-max ceiling (5), forcing a real
+    // boundary-pinned result rather than a trivial tie at threshold=1.
+    { turnState: 'idle', byRatio: { 0.1: { breakEvenCalls: 5, realizedNetBenefit: 1 } } },
+  ];
+  const sessionResult = { sessionFile: 'synthetic', assistantCallCount: 1, candidates };
+  const aggregate = computeAggregate([sessionResult], [0.1], { sweepMax: 5 });
+  assert.equal(aggregate.thresholdSweepByRatio[0.1].overall.maxTested, 5);
+  assert.equal(aggregate.thresholdSweepByRatio[0.1].overall.boundaryPinned, true);
+  assert.equal(aggregate.thresholdSweepByRatio[0.1].idle.maxTested, 5);
 });
 
 // ---------------------------------------------------------------------------
@@ -268,6 +377,11 @@ test('runBenchmark processes all fixture sessions and produces the documented JS
 test('runBenchmark respects --limit', async () => {
   const { sessionFiles } = await runBenchmark({ paths: [fixturesDir], limit: 2, ratios: [0.1] });
   assert.equal(sessionFiles.length, 2);
+});
+
+test('runBenchmark threads sweepMax through to the aggregate threshold sweep', async () => {
+  const { aggregate } = await runBenchmark({ paths: [fixturesDir], ratios: [0.1], sweepMax: 3 });
+  assert.equal(aggregate.thresholdSweepByRatio[0.1].overall.maxTested, 3);
 });
 
 test('runBenchmark is read-only: fixture files are byte-for-byte unchanged after a run', async () => {
