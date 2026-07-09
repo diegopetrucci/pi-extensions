@@ -197,6 +197,150 @@ test('propose/apply split: a strategy proposes, the pipeline applies and reports
   assert.ok(secondCall.messages[2].content[0].text.includes('pruned by'));
 });
 
+// ---------------------------------------------------------------------------
+// Overlapping-target collapse (pe-j7sb): two strategies proposing a decision
+// for the SAME (kind, toolCallId) must collapse to exactly one gate
+// candidate / applied decision, chosen deterministically by STRATEGIES array
+// order (earlier wins), and must never double-count savings/stats.
+// ---------------------------------------------------------------------------
+
+function offGateNoRecencyConfig() {
+  return {
+    ...defaultConfig(),
+    protections: { ...defaultConfig().protections, recentTurns: 0 },
+    gate: { ...defaultConfig().gate, mode: 'off' },
+  };
+}
+
+test('two fresh strategies proposing the same toolCallId collapse to one gate candidate / one applied decision, winner by STRATEGIES order', (t) => {
+  const stratA = {
+    id: 'fake-overlap-a',
+    propose: () => [
+      { strategyId: 'fake-overlap-a', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-a', placeholder: 'PLACEHOLDER_A' },
+    ],
+  };
+  const stratB = {
+    id: 'fake-overlap-b',
+    propose: () => [
+      { strategyId: 'fake-overlap-b', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-b', placeholder: 'PLACEHOLDER_B' },
+    ],
+  };
+  // Pushed in this order -> stratA is earlier in STRATEGIES and must win.
+  dcp.STRATEGIES.push(stratA, stratB);
+  t.after(() => {
+    for (const s of [stratA, stratB]) {
+      const idx = dcp.STRATEGIES.indexOf(s);
+      if (idx >= 0) dcp.STRATEGIES.splice(idx, 1);
+    }
+  });
+
+  const messages = toolCallMessages();
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config: offGateNoRecencyConfig(),
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+  });
+
+  assert.equal(result.gate.accepted.length, 1, 'exactly one gate candidate should survive the collapse');
+  assert.equal(result.gate.rejected.length, 0);
+  assert.equal(result.newlyAppliedDecisions.length, 1, 'exactly one decision should be applied/persisted');
+  assert.equal(result.newlyAppliedStats.length, 1, 'savings must be counted exactly once');
+
+  // Deterministic winner: earlier STRATEGIES entry (stratA) wins.
+  assert.equal(result.newlyAppliedDecisions[0].strategyId, 'fake-overlap-a');
+  assert.equal(result.gate.accepted[0].strategyId, 'fake-overlap-a');
+  assert.ok(result.messages[2].content[0].text.includes('PLACEHOLDER_A'));
+  assert.ok(!result.messages[2].content[0].text.includes('PLACEHOLDER_B'));
+});
+
+test('overlap collapse does not affect non-overlapping targets (regression)', (t) => {
+  const stratA = {
+    id: 'fake-nonoverlap-a',
+    propose: () => [
+      { strategyId: 'fake-nonoverlap-a', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-a', placeholder: 'PLACEHOLDER_A' },
+    ],
+  };
+  const stratB = {
+    id: 'fake-nonoverlap-b',
+    propose: () => [
+      { strategyId: 'fake-nonoverlap-b', toolCallId: 'call_2', kind: 'tool_result_content', reason: 'reason-b', placeholder: 'PLACEHOLDER_B' },
+    ],
+  };
+  dcp.STRATEGIES.push(stratA, stratB);
+  t.after(() => {
+    for (const s of [stratA, stratB]) {
+      const idx = dcp.STRATEGIES.indexOf(s);
+      if (idx >= 0) dcp.STRATEGIES.splice(idx, 1);
+    }
+  });
+
+  // Distinct tool names/args so the built-in `dedupe` strategy never fires
+  // here — this test is isolated to the two fake strategies' non-overlapping
+  // targets.
+  const messages = [
+    ...toolCallMessages({ toolCallId: 'call_1', toolName: 'bash', resultText: 'a'.repeat(500) }).slice(0, 3),
+    ...toolCallMessages({ toolCallId: 'call_2', toolName: 'read', resultText: 'b'.repeat(500) }),
+  ];
+
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config: offGateNoRecencyConfig(),
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+  });
+
+  assert.equal(result.gate.accepted.length, 2, 'both non-overlapping targets should still be gate candidates');
+  assert.equal(result.newlyAppliedDecisions.length, 2, 'both non-overlapping targets should still be applied');
+  const strategyIds = result.newlyAppliedDecisions.map((d) => d.strategyId).sort();
+  assert.deepEqual(strategyIds, ['fake-nonoverlap-a', 'fake-nonoverlap-b']);
+});
+
+test('a persisted decision and a fresh decision targeting the same toolCallId do not double-count stats (pe-j7sb)', (t) => {
+  const persistedDecision = proposalToDecisionRecord({
+    strategyId: 'old-strategy',
+    toolCallId: 'call_1',
+    kind: 'tool_result_content',
+    reason: 'persisted reason',
+    placeholder: 'PERSISTED_PLACEHOLDER',
+  });
+
+  const freshOverlap = {
+    id: 'fake-fresh-overlap',
+    propose: () => [
+      {
+        strategyId: 'fake-fresh-overlap',
+        toolCallId: 'call_1',
+        kind: 'tool_result_content',
+        reason: 'fresh reason',
+        placeholder: 'FRESH_PLACEHOLDER',
+      },
+    ],
+  };
+  dcp.STRATEGIES.push(freshOverlap);
+  t.after(() => {
+    const idx = dcp.STRATEGIES.indexOf(freshOverlap);
+    if (idx >= 0) dcp.STRATEGIES.splice(idx, 1);
+  });
+
+  const messages = toolCallMessages();
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config: offGateNoRecencyConfig(),
+    persistedDecisions: [persistedDecision],
+    knownIdempotencyKeys: new Set([persistedDecision.idempotencyKey]),
+  });
+
+  // The persisted decision is not newly-reported (already known), and the
+  // overlapping fresh decision must be skipped entirely (already-pruned
+  // guard) rather than silently re-applied and credited stats.
+  assert.equal(result.newlyAppliedDecisions.length, 0, 'no new decision should be reported for this call');
+  assert.equal(result.newlyAppliedStats.length, 0, 'no stats should be double-counted for the same target');
+  // The persisted decision's placeholder wins (applied first in allCandidates order).
+  assert.ok(result.messages[2].content[0].text.includes('PERSISTED_PLACEHOLDER'));
+  assert.ok(!result.messages[2].content[0].text.includes('FRESH_PLACEHOLDER'));
+});
+
 test('buildIdempotencyKey is stable for the same strategy/kind/toolCallId', () => {
   const pair = findToolCallPairIndices(toolCallMessages(), 'call_1');
   assert.equal(pair.assistantIndex, 1);

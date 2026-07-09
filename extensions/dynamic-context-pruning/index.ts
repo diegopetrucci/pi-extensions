@@ -722,6 +722,19 @@ export function buildIdempotencyKey(proposal: ProposedPrune): string {
 	return `${proposal.strategyId}:${proposal.kind}:${proposal.toolCallId}`;
 }
 
+/**
+ * Key identifying WHAT a decision targets (kind + correlation), deliberately
+ * omitting `strategyId` (unlike `idempotencyKey`). Two decisions from
+ * different strategies that both replace the same tool result's content
+ * share this key even though their idempotencyKeys differ — that's exactly
+ * the overlap pe-j7sb collapses before gating/apply (see
+ * `runDynamicContextPruningPipeline`).
+ */
+function buildDecisionTargetKey(decision: PruneDecisionRecord): string {
+	const correlationId = decision.correlation.type === "toolCallId" ? decision.correlation.toolCallId : decision.correlation.entryId;
+	return `${decision.kind}:${decision.correlation.type}:${correlationId}`;
+}
+
 export function proposalToDecisionRecord(proposal: ProposedPrune, createdAt: string = new Date().toISOString()): PruneDecisionRecord {
 	return {
 		idempotencyKey: buildIdempotencyKey(proposal),
@@ -1866,9 +1879,37 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const freshManual = dedupedFresh.filter((decision) => decision.source === "manual");
 	const freshAutomatic = dedupedFresh.filter((decision) => decision.source !== "manual");
 
+	// Collapse fresh AUTOMATIC candidates that target the same (kind,
+	// correlation) down to a single decision (pe-j7sb). Two strategies (e.g.
+	// `dedupe` and `superseded-file-ops`) can independently propose a decision
+	// for the exact same tool result; their idempotencyKeys differ (each
+	// embeds its own strategyId) so the self-dedup above does not catch this,
+	// and letting both through would double-count the same tokensRemoved in
+	// the net-benefit gate and double-apply/double-credit in the apply loop
+	// below. The winner is chosen by a DETERMINISTIC strategy priority derived
+	// from `STRATEGIES` array order: earlier entries in `STRATEGIES` win. Only
+	// the winning decision's placeholder/reason is what ends up gated/applied/
+	// persisted. Manual decisions (already filtered out above) and persisted
+	// decisions are never collapsed here — only fresh automatic overlap causes
+	// the double-count this call.
+	const strategyPriority = new Map(STRATEGIES.map((strategy, index) => [strategy.id, index]));
+	const collapsedByTarget = new Map<string, PruneDecisionRecord>();
+	for (const decision of freshAutomatic) {
+		const targetKey = buildDecisionTargetKey(decision);
+		const existing = collapsedByTarget.get(targetKey);
+		if (!existing) {
+			collapsedByTarget.set(targetKey, decision);
+			continue;
+		}
+		const existingPriority = strategyPriority.get(existing.strategyId) ?? Number.POSITIVE_INFINITY;
+		const candidatePriority = strategyPriority.get(decision.strategyId) ?? Number.POSITIVE_INFINITY;
+		if (candidatePriority < existingPriority) collapsedByTarget.set(targetKey, decision);
+	}
+	const collapsedFreshAutomatic = Array.from(collapsedByTarget.values());
+
 	const savingsByKey = new Map<string, number>();
 	const gateCandidates: GateCandidate[] = [];
-	for (const decision of freshAutomatic) {
+	for (const decision of collapsedFreshAutomatic) {
 		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex, pairIndex)) continue;
 		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText, pairIndex);
 		if (!estimate || estimate.tokensRemoved <= 0) continue;
@@ -1882,10 +1923,26 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const newlyAppliedDecisions: PruneDecisionRecord[] = [];
 	const newlyAppliedStats: PruneStatsRecord[] = [];
 
+	// Guards against double-apply/double-count when more than one candidate in
+	// `allCandidates` targets the same (kind, correlation) — e.g. a persisted
+	// decision from a different strategy and a fresh automatic decision (from
+	// a strategy that started proposing overlap only after the persisted one
+	// was written) both targeting the same toolCallId+kind in this SAME call.
+	// `applyPruneDecision` unconditionally re-applies its placeholder even when
+	// the target is already a placeholder and reports `applied: true`, so
+	// without this guard the second candidate would silently overwrite the
+	// first's placeholder AND still be credited full stats/newlyAppliedDecisions
+	// (pe-j7sb). The pre-gate collapse above already prevents this among fresh
+	// automatic candidates; this guard additionally covers persisted-vs-fresh
+	// (and any other) overlap within a single call.
+	const appliedTargetKeys = new Set<string>();
 	for (const decision of allCandidates) {
 		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex, pairIndex)) continue;
+		const targetKey = buildDecisionTargetKey(decision);
+		if (appliedTargetKeys.has(targetKey)) continue; // already pruned by an earlier candidate this call
 		const result = applyPruneDecision(messages, decision, pairIndex);
 		if (!result.applied) continue; // graceful no-op: target absent/already safe
+		appliedTargetKeys.add(targetKey);
 		if (!input.knownIdempotencyKeys.has(decision.idempotencyKey)) {
 			newlyAppliedDecisions.push(decision);
 			const tokensRemoved =
