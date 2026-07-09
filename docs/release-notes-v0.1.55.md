@@ -2,7 +2,7 @@
 
 ## Highlights
 
-This release adds `code-reviewer`, a standalone read-only pi extension that exposes a guarded `code_reviewer` subagent tool for focused code reviews without implementing fixes. The reviewer now mirrors the contrarian model-selection style by preferring opposite-provider/model-family review models when available and clamping requested thinking to the selected model's capabilities.
+This release scope adds two standalone pi extensions to the repo's v0.1.55 publishing set: `code-reviewer`, a guarded read-only `code_reviewer` subagent tool for focused code reviews, and `dynamic-context-pruning`, a cache-aware context-pruning extension for long sessions.
 
 ## code-reviewer
 
@@ -20,22 +20,30 @@ This release adds `code-reviewer`, a standalone read-only pi extension that expo
 - blocks local-file git option bypasses such as `--contents`, `--pathspec-from-file`, `--ignore-revs-file`, `git blame -S`, and `git ls-files -X/--exclude-from`
 - constrains `gh` to known read-only commands and blocks mutating commands, `gh api` write methods/body fields/cache writes, and browser-launching `--web` forms
 
+## dynamic-context-pruning
+
+- ships as standalone package `pi-dynamic-context-pruning@0.1.0`
+- automatically prunes duplicate tool results, stale errored tool inputs, and superseded file-operation outputs
+- gates automatic pruning on cache-aware break-even math so pruning only applies when predicted to be net beneficial
+- adds `/prune` for manual picker-driven pruning and `/context-pruning` for status, stats, strategy toggles, and gate control
+
 ## Packaging
 
 - `@diegopetrucci/pi-extensions@0.1.55`
 - `@diegopetrucci/pi-code-reviewer@0.1.0`
+- `pi-dynamic-context-pruning@0.1.0`
 
 ## Validation
 
-- verified `v0.1.55` tag and GitHub release do not already exist
-- verified target npm versions are unpublished before release prep
+- verified local `v0.1.55` tag already exists on the earlier code-reviewer commit and must be moved to current `main` before npm publish
+- verified target npm versions are unpublished before release prep for the root package, `@diegopetrucci/pi-code-reviewer@0.1.0`, and `pi-dynamic-context-pruning@0.1.0`
 - refreshed dependencies with `npm ci`
 - ran `npm run preflight:install-state` after dependency refresh
-- ran focused code-reviewer TypeScript, model-selection, thinking, fallback, and runtime guard tests
-- ran full `npm run ci` (`237` tests, `0` failures)
-- verified root and standalone package dry-runs
-- verified root and standalone publish dry-runs
+- ran full `npm run ci` (`431` tests, `0` failures)
+- verified `git diff --check` passes with no whitespace errors
+- verified root plus both standalone package dry-runs
+- verified root plus both standalone publish dry-runs
 
 ## Suggested release blurb
 
-`v0.1.55 adds code-reviewer, a standalone read-only pi extension that runs isolated, guarded code review subagents for ticket fit, correctness, security, simplicity, validation gaps, and contrarian-style model/thinking selection.`
+`v0.1.55 adds code-reviewer for isolated guarded code reviews and dynamic-context-pruning for cache-aware cleanup of stale, duplicate, and superseded session context.`
