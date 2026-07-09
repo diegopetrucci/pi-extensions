@@ -400,6 +400,10 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
   const config = {
     ...defaultConfig(),
     protections: { ...defaultConfig().protections, recentTurns: 0 },
+    // Disabled here (pe-qdzb's minCharsSaved floor is irrelevant to what this
+    // test isolates: the gate's double-count exclusion, not the floor).
+    // call_2's small candidate would otherwise be dropped before the gate.
+    thresholds: { ...defaultConfig().thresholds, minCharsSaved: 0 },
     gate: {
       ...defaultConfig().gate,
       mode: 'on',
