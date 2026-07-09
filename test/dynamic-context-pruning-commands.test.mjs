@@ -20,6 +20,7 @@ const {
   buildPrunableItems,
   buildActiveResultDecisionMap,
   formatPrunableItemOption,
+  buildPrunableItemPickerOptions,
   formatPrunableItemDetail,
   formatPrunableItemsReport,
   sessionEntriesToMessages,
@@ -342,6 +343,49 @@ test('formatPrunableItemOption/Detail render tool name, args digest, tokens, and
 
 test('formatPrunableItemsReport degrades to an informative message when nothing is prunable', () => {
   assert.deepEqual(formatPrunableItemsReport([]), ['No prunable tool results found in this session.']);
+});
+
+test('buildPrunableItemPickerOptions disambiguates duplicate items so each row maps back to its own toolCallId', () => {
+  // Two identical tool calls (same tool, same args, same estimated tokens, same status) produce
+  // byte-identical formatPrunableItemOption labels; the picker must still be able to distinguish them.
+  const messages = [
+    { role: 'user', content: 'do the thing', timestamp: 1 },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'dup-1', name: 'read', arguments: { path: 'a.txt' } }], timestamp: 2 },
+    { role: 'toolResult', toolCallId: 'dup-1', toolName: 'read', content: [{ type: 'text', text: 'hello world' }], isError: false, timestamp: 3 },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'dup-2', name: 'read', arguments: { path: 'a.txt' } }], timestamp: 4 },
+    { role: 'toolResult', toolCallId: 'dup-2', toolName: 'read', content: [{ type: 'text', text: 'hello world' }], isError: false, timestamp: 5 },
+  ];
+  const items = buildPrunableItems(messages, new Map(), new Set());
+  assert.equal(items.length, 2);
+
+  const baseLabels = items.map((item) => formatPrunableItemOption(item));
+  assert.equal(baseLabels[0], baseLabels[1], 'precondition: base labels collide for identical tool calls');
+
+  const pickerOptions = buildPrunableItemPickerOptions(items);
+  const labels = pickerOptions.map((option) => option.label);
+  assert.equal(new Set(labels).size, labels.length, 'picker option labels must be unique even when base labels collide');
+
+  // Selecting the SECOND duplicate's label must resolve to the SECOND item's own toolCallId, not the first.
+  const secondChoice = labels[1];
+  const resolved = pickerOptions.find((option) => option.label === secondChoice)?.item;
+  assert.equal(resolved?.toolCallId, 'dup-2');
+
+  const firstChoice = labels[0];
+  const resolvedFirst = pickerOptions.find((option) => option.label === firstChoice)?.item;
+  assert.equal(resolvedFirst?.toolCallId, 'dup-1');
+});
+
+test('buildPrunableItemPickerOptions is a no-op passthrough (single label) for a single item', () => {
+  const messages = toolCallMessages({ toolCallId: 'c1', toolName: 'bash' });
+  const items = buildPrunableItems(messages, new Map(), new Set());
+  const pickerOptions = buildPrunableItemPickerOptions(items);
+  assert.equal(pickerOptions.length, 1);
+  assert.equal(pickerOptions[0].item.toolCallId, 'c1');
+  assert.match(pickerOptions[0].label, /^1\) /);
+});
+
+test('buildPrunableItemPickerOptions returns an empty list for no items', () => {
+  assert.deepEqual(buildPrunableItemPickerOptions([]), []);
 });
 
 // ---------------------------------------------------------------------------

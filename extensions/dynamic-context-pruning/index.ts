@@ -2073,6 +2073,18 @@ export function formatPrunableItemOption(item: PrunableItem): string {
 	return `${item.toolName} ${item.argsDigest} \u2014 ~${item.estimatedTokens} tok \u2014 ${statusLabel}`;
 }
 
+/**
+ * Picker option rows for the /prune interactive selector: a stable, guaranteed-unique label
+ * (a 1-based row-number prefix) paired with its source item, so the caller can recover the
+ * exact selected row even when two items would otherwise render byte-identical labels
+ * (e.g. duplicate tool calls with the same args digest, estimated tokens, and status).
+ * Do NOT recover a selection via `formatPrunableItemOption(item) === choice` or
+ * `options.indexOf(choice)` on re-derived labels — always match against these rows' `label`.
+ */
+export function buildPrunableItemPickerOptions(items: PrunableItem[]): Array<{ label: string; item: PrunableItem }> {
+	return items.map((item, index) => ({ label: `${index + 1}) ${formatPrunableItemOption(item)}`, item }));
+}
+
 /** Multi-line detail text for a /prune confirm dialog, describing the item and (when pruning) the predicted cache-bust cost. */
 export function formatPrunableItemDetail(item: PrunableItem, cost?: CacheCostModelResult): string {
 	const lines = [`Tool: ${item.toolName}`, `Args: ${item.argsDigest}`, `Estimated tokens: ${item.estimatedTokens}`];
@@ -2432,12 +2444,15 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				const options = latestItems.map(formatPrunableItemOption);
+				// Labels may collide (e.g. duplicate tool calls with identical args/tokens/status), so each
+				// option is disambiguated with a stable row-number prefix and the selection is recovered by
+				// matching that unique label back to its own row — never by indexOf on re-derived base labels.
+				const pickerOptions = buildPrunableItemPickerOptions(latestItems);
+				const options = pickerOptions.map((option) => option.label);
 				const choice = await ctx.ui.select("/prune \u2014 select a tool result to prune or restore", [...options, doneLabel]);
 				if (!choice || choice === doneLabel) return;
 
-				const index = options.indexOf(choice);
-				const item = latestItems[index];
+				const item = pickerOptions.find((option) => option.label === choice)?.item;
 				if (!item) continue;
 
 				if (item.status === "pruned" && item.activeDecision) {
