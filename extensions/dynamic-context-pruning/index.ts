@@ -1907,9 +1907,31 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	}
 	const collapsedFreshAutomatic = Array.from(collapsedByTarget.values());
 
+	// Fresh automatic candidates must also be excluded from gating (not just
+	// from the apply loop) when their target is already claimed by a decision
+	// that will apply earlier in `allCandidates` — i.e. a persisted decision or
+	// a fresh manual decision. Persisted decisions come from a DIFFERENT prior
+	// call, so a fresh proposal from a different strategy on the same
+	// toolCallId+kind has a distinct idempotencyKey and slips past `seenKeys`
+	// above; likewise a fresh manual decision has `source: "manual"` and is
+	// filtered out of `freshAutomatic` but still claims its target. Without
+	// this exclusion, `evaluateNetBenefitGate` below would double-count that
+	// target's tokensRemoved even though the apply-loop guard further down
+	// correctly skips applying the fresh candidate — corrupting the gate's
+	// net-benefit math (and potentially flipping ACCEPT/REJECT) even though no
+	// double-apply occurs. Only decisions with `correlation.type ===
+	// "toolCallId"` are applyable targets worth tracking here; anything else is
+	// ignored safely (it cannot collide with a toolCallId-keyed target).
+	const claimedTargetKeys = new Set<string>();
+	for (const decision of [...input.persistedDecisions, ...freshManual]) {
+		if (decision.correlation.type !== "toolCallId") continue;
+		claimedTargetKeys.add(buildDecisionTargetKey(decision));
+	}
+
 	const savingsByKey = new Map<string, number>();
 	const gateCandidates: GateCandidate[] = [];
 	for (const decision of collapsedFreshAutomatic) {
+		if (claimedTargetKeys.has(buildDecisionTargetKey(decision))) continue; // already claimed by a persisted/manual decision applying earlier
 		if (isDecisionProtected(decision, messages, input.config.protections, recencyBoundaryIndex, pairIndex)) continue;
 		const estimate = estimateDecisionSavings(messages, decision, estimateTokensForText, pairIndex);
 		if (!estimate || estimate.tokensRemoved <= 0) continue;

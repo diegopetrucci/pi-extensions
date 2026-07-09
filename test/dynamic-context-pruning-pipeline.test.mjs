@@ -341,6 +341,98 @@ test('a persisted decision and a fresh decision targeting the same toolCallId do
   assert.ok(!result.messages[2].content[0].text.includes('FRESH_PLACEHOLDER'));
 });
 
+test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s totalTokensRemoved (pe-j7sb follow-up)', (t) => {
+  // call_2 is a genuinely NEW fresh candidate: its savings alone are small
+  // enough that the gate (threshold 20) rejects it. call_1 is already
+  // claimed by a persisted decision from a different strategy; a fresh
+  // strategy also proposes for call_1 (idempotencyKey differs because
+  // strategyId differs, so it survives the `seenKeys` self-dedup and is not
+  // collapsed by the fresh-vs-fresh collapse either, since it has no fresh
+  // sibling on the same target). Without the fix, that fresh decision's
+  // estimated savings (computed against the still-unpruned original
+  // content) are added to `gateCandidates` and double the batch's
+  // `totalTokensRemoved`, which is enough to flip the gate from REJECT to
+  // ACCEPT for the whole batch -- even though the apply loop's
+  // `appliedTargetKeys` guard would correctly skip applying the fresh
+  // decision. With the fix, the fresh decision is excluded from
+  // `gateCandidates` before the gate ever runs, so only call_2's genuine
+  // savings are counted and the batch stays rejected.
+  const persistedDecision = proposalToDecisionRecord({
+    strategyId: 'old-strategy',
+    toolCallId: 'call_1',
+    kind: 'tool_result_content',
+    reason: 'persisted reason',
+    placeholder: 'PERSISTED_PLACEHOLDER',
+  });
+
+  const freshReal = {
+    id: 'fake-real',
+    propose: () => [
+      { strategyId: 'fake-real', toolCallId: 'call_2', kind: 'tool_result_content', reason: 'real reason' },
+    ],
+  };
+  const freshOverlap = {
+    id: 'fake-overlap',
+    propose: () => [
+      { strategyId: 'fake-overlap', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'overlap reason' },
+    ],
+  };
+  dcp.STRATEGIES.push(freshReal, freshOverlap);
+  t.after(() => {
+    for (const s of [freshReal, freshOverlap]) {
+      const idx = dcp.STRATEGIES.indexOf(s);
+      if (idx >= 0) dcp.STRATEGIES.splice(idx, 1);
+    }
+  });
+
+  // call_2 (small, genuinely-new savings) comes BEFORE call_1 (already
+  // claimed by the persisted decision) so `earliestPosition` -- and thus
+  // `tailTokensAfterEarliestChange` -- is identical whether or not the
+  // overlap candidate is (incorrectly) included; only `totalTokensRemoved`
+  // differs between the buggy and fixed behavior, isolating exactly the gap
+  // this fix closes.
+  const messages = [
+    ...toolCallMessages({ toolCallId: 'call_2', toolName: 'read', resultText: 'b'.repeat(200) }),
+    ...toolCallMessages({ toolCallId: 'call_1', toolName: 'bash', resultText: 'a'.repeat(500) }),
+  ];
+
+  const config = {
+    ...defaultConfig(),
+    protections: { ...defaultConfig().protections, recentTurns: 0 },
+    gate: {
+      ...defaultConfig().gate,
+      mode: 'on',
+      cachedPriceRatio: 0.1,
+      breakEvenThreshold: 20,
+      breakEvenThresholdByState: { idle: 20, mid_loop: 20 },
+    },
+  };
+
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config,
+    persistedDecisions: [persistedDecision],
+    knownIdempotencyKeys: new Set([persistedDecision.idempotencyKey]),
+  });
+
+  // Without the fix: totalTokensRemoved would be 33 (call_2) + 107
+  // (call_1's erroneous re-estimate) = 140, well past the threshold ->
+  // ACCEPTED. With the fix: only call_2's 33 tokens are ever gate
+  // candidates, so the batch stays REJECTED (33 tokens removed isn't
+  // enough to amortize the cache-bust penalty at threshold 20).
+  assert.equal(result.gate.totalTokensRemoved, 33, 'gate must only ever see call_2\'s genuine savings, never call_1\'s claimed-target overlap');
+  assert.equal(result.gate.accepted.length, 0, 'the batch must be rejected once the double-count is removed');
+  assert.equal(result.gate.rejected.length, 1, 'only the genuinely-new call_2 candidate should reach the gate at all');
+  assert.equal(result.gate.rejected[0].strategyId, 'fake-real');
+
+  // Nothing new applied this call: call_2 was rejected by the gate, and
+  // call_1's fresh proposal was excluded before gating (its target is
+  // already claimed by the persisted decision).
+  assert.equal(result.newlyAppliedDecisions.length, 0);
+  assert.equal(result.newlyAppliedStats.length, 0);
+  assert.ok(result.messages[6].content[0].text.includes('PERSISTED_PLACEHOLDER'));
+});
+
 test('buildIdempotencyKey is stable for the same strategy/kind/toolCallId', () => {
   const pair = findToolCallPairIndices(toolCallMessages(), 'call_1');
   assert.equal(pair.assistantIndex, 1);
