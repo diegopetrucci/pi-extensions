@@ -34,6 +34,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 - [`context-cap`](./extensions/context-cap): Caps effective model context windows at 200k tokens by default so pi avoids the `dumb zone`; toggle temporarily with `/context-cap`.
 - [`context-inspector`](./extensions/context-inspector): Adds `/context`, a local self-contained HTML dashboard that breaks down where the current session context is going, with category overview, top offenders, and drilldown search.
+- [`dynamic-context-pruning`](./extensions/dynamic-context-pruning): Automatically prunes duplicate tool results, stale errored inputs, and superseded file-op outputs from long sessions behind a cache-aware net-benefit gate, with a `/prune` picker and `/context-pruning` status/control commands.
 
 ### Safety
 

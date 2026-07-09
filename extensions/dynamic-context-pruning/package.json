@@ -1,0 +1,34 @@
+{
+  "name": "pi-dynamic-context-pruning",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A pi extension that dynamically prunes stale context to keep sessions lean.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "context",
+    "pruning"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/dynamic-context-pruning"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

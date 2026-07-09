@@ -51,6 +51,7 @@
       "./extensions/context-inspector/index.ts",
       "./extensions/contrarian/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
+      "./extensions/dynamic-context-pruning/index.ts",
       "./extensions/gnosis/index.ts",
       "./extensions/inline-bash/index.ts",
       "./extensions/librarian/index.ts",
