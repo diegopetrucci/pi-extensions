@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-context-cap",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A pi extension that caps effective model context windows at 200k tokens for earlier auto-compaction.",
   "keywords": [
     "pi-package",

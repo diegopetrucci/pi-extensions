@@ -257,7 +257,7 @@ async function playSound(config: NotifyConfig, backend: Exclude<SoundBackend, "a
 }
 
 export default function notifyExtension(pi: ExtensionAPI) {
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_settled", async (_event, ctx) => {
 		const config = loadConfig(ctx);
 		if (!config.enabled) return;
 		if (config.onlyWhenInteractive && !ctx.hasUI) return;

@@ -48,6 +48,10 @@ test('contrarian model preference parsing keeps the model ref and extracts the t
     model: 'anthropic/claude-opus-4.8',
     thinkingLevel: 'medium',
   });
+  assert.deepEqual(parseModelPreference('anthropic/claude-opus-4.8:max'), {
+    model: 'anthropic/claude-opus-4.8',
+    thinkingLevel: 'max',
+  });
   assert.deepEqual(parseModelPreference('anthropic/claude-opus-4.8'), {
     model: 'anthropic/claude-opus-4.8',
   });
@@ -100,6 +104,34 @@ test('contrarian auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 acr
   assert.match(result.selection.selectionReason, /hardcoded preference lists while preferring an opposite provider\/model family/i);
 });
 
+test('contrarian auto-selection prefers gpt-5.6-sol first within openai and openai-codex fallback paths', async () => {
+  const { selectContrarianModel } = await loadContrarianTestUtils();
+  const result = await selectContrarianModel(
+    createContext({
+      model: { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+      available: [
+        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true },
+        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-sol', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.6-sol');
+  assert.deepEqual(
+    result.ordered.map((candidate) => candidate.modelRef),
+    [
+      'openai-codex/gpt-5.6-sol',
+      'openai/gpt-5.5-pro',
+      'openai-codex/gpt-5.5',
+    ],
+  );
+  assert.match(result.selection.selectionReason, /hardcoded preference lists while preferring an opposite provider\/model family/i);
+});
+
 test('contrarian auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
   const { selectContrarianModel } = await loadContrarianTestUtils();
   const result = await selectContrarianModel(
@@ -146,6 +178,21 @@ test('contrarian thinking-level resolution clamps unsupported levels for matched
   assert.deepEqual(resolveThinkingLevel(matched, 'high'), {
     requested: 'high',
     effective: 'low',
+    clamped: true,
+  });
+
+  const maxModel = {
+    ...matchedModel,
+    thinkingLevelMap: { ...matchedModel.thinkingLevelMap, xhigh: {}, max: {} },
+  };
+  assert.deepEqual(resolveThinkingLevel(maxModel, 'max'), {
+    requested: 'max',
+    effective: 'max',
+    clamped: false,
+  });
+  assert.deepEqual(resolveThinkingLevel({ ...maxModel, thinkingLevelMap: { ...maxModel.thinkingLevelMap, max: null } }, 'max'), {
+    requested: 'max',
+    effective: 'xhigh',
     clamped: true,
   });
 });

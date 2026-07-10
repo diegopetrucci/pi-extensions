@@ -16,11 +16,12 @@ const MAX_TURNS = 8;
 const MAX_RUN_MS = 8 * 60 * 1000;
 const DEFAULT_BASH_TIMEOUT_SECONDS = 30;
 const DEFAULT_THINKING_LEVEL = "high";
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
 const CODE_REVIEWER_MODEL_PREFERENCES = [
+	"gpt-5.6-sol",
 	"gpt-5.5",
 	"claude-opus-4-8",
 	"claude-opus-4.8",
@@ -57,7 +58,18 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-sonnet-4.5",
 		"claude-sonnet-4",
 	],
-	openai: ["gpt-5.5", "gpt-5", "gpt-4.1", "o3", "o4-mini", "o4"],
+	openai: ["gpt-5.6-sol", "gpt-5.5", "gpt-5", "gpt-4.1", "o3", "o4-mini", "o4"],
+	"openai-codex": [
+		"gpt-5.6-sol",
+		"gpt-5.5",
+		"gpt-5.4",
+		"gpt-5.3-codex",
+		"gpt-5.2",
+		"gpt-5.1-codex-max",
+		"gpt-5.4-mini",
+		"gpt-5.1-codex-mini",
+		"big-pickle",
+	],
 	"vercel-ai-gateway": [
 		"gpt-5.5",
 		"anthropic/claude-fable-5",
@@ -392,8 +404,8 @@ function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean
 	if (!model.reasoning) return level === "off";
 
 	const map = model.thinkingLevelMap;
-	if (level === "xhigh") {
-		return !!map && Object.prototype.hasOwnProperty.call(map, "xhigh") && map.xhigh != null;
+	if (level === "xhigh" || level === "max") {
+		return !!map && Object.prototype.hasOwnProperty.call(map, level) && map[level] != null;
 	}
 	return map?.[level] !== null;
 }

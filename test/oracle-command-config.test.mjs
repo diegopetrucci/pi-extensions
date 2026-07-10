@@ -123,7 +123,8 @@ test('oracle commands report status, offer completions, persist preferences in a
 
   assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('')), ['status', 'model', 'thinking', 'clear']);
   assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('thi')), ['thinking']);
-  assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('thinking m')), ['minimal', 'medium']);
+  assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('thinking m')), ['minimal', 'medium', 'max']);
+  assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('thinking max')), ['max']);
   assert.deepEqual(completionValues(oracleCommand.getArgumentCompletions('clear t')), ['thinking']);
 
   await oracleCommand.handler('status', ctx);

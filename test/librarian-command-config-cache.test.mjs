@@ -91,7 +91,8 @@ test('librarian-config reports status, mutates defaults, offers completions, and
 
   assert.deepEqual(completionValues(command.getArgumentCompletions('')), ['status', 'model', 'thinking', 'clear']);
   assert.deepEqual(completionValues(command.getArgumentCompletions('thi')), ['thinking']);
-  assert.deepEqual(completionValues(command.getArgumentCompletions('thinking m')), ['minimal', 'medium']);
+  assert.deepEqual(completionValues(command.getArgumentCompletions('thinking m')), ['minimal', 'medium', 'max']);
+  assert.deepEqual(completionValues(command.getArgumentCompletions('thinking max')), ['max']);
 
   await command.handler('status', ctx);
   assert.match(notifications.at(-1).message, /Librarian defaults: cache=off, model=auto, thinkingLevel=low\./);

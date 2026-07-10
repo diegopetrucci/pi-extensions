@@ -30,20 +30,25 @@ test('oracle model preference parsing keeps the model ref and extracts the think
     model: 'openai/gpt-5.5-pro',
     thinkingLevel: 'xhigh',
   });
+  assert.deepEqual(parseModelPreference('openai/gpt-5.5-pro:max'), {
+    model: 'openai/gpt-5.5-pro',
+    thinkingLevel: 'max',
+  });
   assert.deepEqual(parseModelPreference('openai/gpt-5.5-pro'), {
     model: 'openai/gpt-5.5-pro',
   });
 });
 
-test('oracle auto-selection prefers the current provider hardcoded top reasoning model', async () => {
+test('oracle auto-selection prefers gpt-5.6-sol first on openai and defaults it to high thinking', async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
     createContext({
       model: { provider: 'openai', id: 'gpt-5.4', reasoning: true },
       available: [
-        { provider: 'openai', id: 'gpt-5.5', reasoning: true },
-        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-        { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+        { provider: 'openai', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
       ],
     }),
   );
@@ -51,13 +56,39 @@ test('oracle auto-selection prefers the current provider hardcoded top reasoning
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'openai/gpt-5.5-pro');
+  assert.equal(result.selection.modelRef, 'openai/gpt-5.6-sol');
+  assert.equal(result.selection.thinkingLevel, 'high');
+  assert.equal(result.selection.requestedThinkingLevel, undefined);
+  assert.equal(result.selection.thinkingLevelClamped, undefined);
   assert.equal(result.selection.autoSelected, true);
   assert.deepEqual(
     result.ordered.map((candidate) => candidate.modelRef),
-    ['openai/gpt-5.5-pro', 'openai/gpt-5.5'],
+    ['openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
   );
   assert.match(result.selection.selectionReason, /hardcoded preference list for openai/i);
+});
+
+test('oracle auto-selection falls back to the next openai preference when gpt-5.6-sol is unavailable', async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  const result = await selectOracleModel(
+    createContext({
+      model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+      available: [
+        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.5');
+  assert.equal(result.selection.thinkingLevel, 'xhigh');
+  assert.deepEqual(
+    result.ordered.map((candidate) => candidate.modelRef),
+    ['openai-codex/gpt-5.5', 'openai-codex/gpt-5.4'],
+  );
 });
 
 test('oracle auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 when Fable and Opus are unavailable', async () => {
@@ -105,6 +136,27 @@ test('oracle auto-selection stays on the current provider when it has no reasoni
   );
 });
 
+test('oracle thinking-level resolution uses high for gpt-5.6-sol defaults and xhigh for other reasoning defaults', async () => {
+  const { resolveThinkingLevel } = await loadOracleTestUtils();
+
+  assert.deepEqual(
+    resolveThinkingLevel({ provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined),
+    {
+      requested: 'high',
+      effective: 'high',
+      clamped: false,
+    },
+  );
+  assert.deepEqual(
+    resolveThinkingLevel({ provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined),
+    {
+      requested: 'xhigh',
+      effective: 'xhigh',
+      clamped: false,
+    },
+  );
+});
+
 test('oracle thinking-level resolution clamps unsupported levels for matched models', async () => {
   const { findAvailableModel, resolveThinkingLevel } = await loadOracleTestUtils();
   const matchedModel = {
@@ -129,6 +181,21 @@ test('oracle thinking-level resolution clamps unsupported levels for matched mod
   assert.deepEqual(resolveThinkingLevel(matched, 'xhigh'), {
     requested: 'xhigh',
     effective: 'low',
+    clamped: true,
+  });
+
+  const maxModel = {
+    ...matchedModel,
+    thinkingLevelMap: { ...matchedModel.thinkingLevelMap, xhigh: {}, max: {} },
+  };
+  assert.deepEqual(resolveThinkingLevel(maxModel, 'max'), {
+    requested: 'max',
+    effective: 'max',
+    clamped: false,
+  });
+  assert.deepEqual(resolveThinkingLevel({ ...maxModel, thinkingLevelMap: { ...maxModel.thinkingLevelMap, max: null } }, 'max'), {
+    requested: 'max',
+    effective: 'xhigh',
     clamped: true,
   });
 });
