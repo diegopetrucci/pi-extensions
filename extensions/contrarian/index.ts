@@ -7,7 +7,7 @@ import { getAgentDir, getMarkdownTheme, type ExtensionAPI, type ExtensionContext
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
 
 type PiModel = {
@@ -67,12 +67,13 @@ interface ContrarianPreferences {
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 const READ_ONLY_PLUS_BASH_TOOLS = [...READ_ONLY_TOOLS, "bash"];
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const COLLAPSED_LINE_LIMIT = 8;
 const CONTRARIAN_STATUS_ID = "contrarian";
 const CONTRARIAN_WIDGET_ID = "contrarian";
 const CONTRARIAN_CONFIG_FILE = "contrarian.json";
 const CONTRARIAN_MODEL_PREFERENCES = [
+	"gpt-5.6-sol",
 	"gpt-5.5",
 	"claude-opus-4-8",
 	"claude-opus-4.8",
@@ -261,6 +262,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"devstral-2512",
 	],
 	openai: [
+		"gpt-5.6-sol",
 		"gpt-5.5-pro",
 		"gpt-5.5",
 		"gpt-5.4-pro",
@@ -279,6 +281,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5-mini",
 	],
 	"openai-codex": [
+		"gpt-5.6-sol",
 		"gpt-5.5",
 		"gpt-5.4",
 		"gpt-5.3-codex",
@@ -544,7 +547,7 @@ function normalizeModelPreference(value: unknown): string | undefined {
 function parseModelPreference(value: unknown): { model?: string; thinkingLevel?: ThinkingLevel } {
 	const model = normalizeModelPreference(value);
 	if (!model) return {};
-	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh)$/i);
+	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh|max)$/i);
 	if (!match?.[1]) return { model };
 	return { model: match[1], thinkingLevel: parseThinkingLevel(match[2]) };
 }
@@ -768,7 +771,7 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 }
 
 function withThinking(modelRef: string, thinkingLevel: ThinkingLevel): string {
-	if (/(?:^|\/)[^:]+:(off|minimal|low|medium|high|xhigh)$/i.test(modelRef)) return modelRef;
+	if (/(?:^|\/)[^:]+:(off|minimal|low|medium|high|xhigh|max)$/i.test(modelRef)) return modelRef;
 	return `${modelRef}:${thinkingLevel}`;
 }
 
@@ -777,8 +780,8 @@ function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean
 	if (!model.reasoning) return level === "off";
 
 	const map = model.thinkingLevelMap;
-	if (level === "xhigh") {
-		return !!map && Object.prototype.hasOwnProperty.call(map, "xhigh") && map.xhigh != null;
+	if (level === "xhigh" || level === "max") {
+		return !!map && Object.prototype.hasOwnProperty.call(map, level) && map[level] != null;
 	}
 	return map?.[level] !== null;
 }
@@ -1328,7 +1331,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			notifyCommand(ctx, "Usage: /contrarian status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
+			notifyCommand(ctx, "Usage: /contrarian status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|max|auto> | clear [all|model|thinking]", "warning");
 		},
 	});
 

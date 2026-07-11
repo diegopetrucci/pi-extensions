@@ -39,7 +39,7 @@ Then reload pi:
 - Uses `gh` for GitHub search/API access
 - Uses cached local checkouts only when enabled
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`
-- Configure internal subagent defaults with `/librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]`
+- Configure internal subagent defaults with `/librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|max|auto> | clear [all|model|thinking]`
 - Cached repos are removed lazily after 7 days without use
 
 ## Commands

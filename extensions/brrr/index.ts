@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 
 const execFileAsync = promisify(execFile);
 const CONFIG_DIR_NAME = ".pi";
@@ -180,6 +180,25 @@ function lastAssistantMessage(messages: readonly unknown[]): string | undefined 
 	return undefined;
 }
 
+type SessionMessageSource = {
+	buildContextEntries(): SessionEntry[];
+};
+
+function sessionMessages(sessionManager: SessionMessageSource | undefined): readonly unknown[] {
+	if (!sessionManager) return [];
+
+	return sessionManager
+		.buildContextEntries()
+		.flatMap((entry: SessionEntry) => (entry.type === "message" ? [entry.message] : []));
+}
+
+function resolveAssistantMessage(
+	sessionManager: SessionMessageSource | undefined,
+	fallbackMessages: readonly unknown[],
+): string | undefined {
+	return lastAssistantMessage(sessionMessages(sessionManager)) ?? lastAssistantMessage(fallbackMessages);
+}
+
 function truncateMessage(value: string): string {
 	const trimmed = value.trim();
 	if (trimmed.length <= 800) return trimmed;
@@ -237,7 +256,7 @@ export default function brrrExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("agent_end", async (event, ctx) => {
+	pi.on("agent_settled", async (event, ctx) => {
 		const config = loadConfig(ctx);
 		if (!config.enabled) return;
 		if (config.onlyWhenInteractive && !ctx.hasUI) return;
@@ -246,7 +265,9 @@ export default function brrrExtension(pi: ExtensionAPI) {
 		if (!webhook || !isBrrrWebhookUrl(webhook)) return;
 		if (await shouldSkipForIdleThreshold(config.idleSeconds)) return;
 
-		const assistantMessage = config.includeLastAssistantMessage ? lastAssistantMessage(event.messages as readonly unknown[]) : undefined;
+		const assistantMessage = config.includeLastAssistantMessage
+			? resolveAssistantMessage(ctx.sessionManager, (event as { messages?: readonly unknown[] }).messages ?? [])
+			: undefined;
 		const message = truncateMessage(assistantMessage || formatTemplate(config.message, ctx.cwd));
 		const result = await sendBrrr(webhook, {
 			title: formatTemplate(config.title, ctx.cwd),

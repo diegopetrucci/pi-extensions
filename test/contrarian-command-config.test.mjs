@@ -123,7 +123,8 @@ test('contrarian commands report status, offer completions, persist preferences 
 
   assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('')), ['status', 'model', 'thinking', 'clear']);
   assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('thi')), ['thinking']);
-  assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('thinking m')), ['minimal', 'medium']);
+  assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('thinking m')), ['minimal', 'medium', 'max']);
+  assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('thinking max')), ['max']);
   assert.deepEqual(completionValues(contrarianCommand.getArgumentCompletions('clear t')), ['thinking']);
 
   await contrarianCommand.handler('status', ctx);

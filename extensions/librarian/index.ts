@@ -30,11 +30,18 @@ const CACHE_CONFIG_FILE = "librarian.json";
 type LibrarianStatus = "running" | "done" | "error" | "aborted";
 
 type CacheMode = "disabled" | "enabled";
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
+type PiModel = {
+	provider: string;
+	id: string;
+	reasoning?: boolean;
+	thinkingLevelMap?: ThinkingLevelMap;
+};
 
 const DEFAULT_CACHE_MODE: CacheMode = "disabled";
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "low";
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 const PREFERRED_FAST_MODEL_PATTERNS = [
 	/\bgpt[-_. ]?5\.5(?:[-_. ].*)?\b(?:mini|nano|fast|lite)\b/,
@@ -316,6 +323,29 @@ function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
 	return (THINKING_LEVELS as readonly string[]).includes(normalized) ? (normalized as ThinkingLevel) : undefined;
 }
 
+function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean {
+	if (!model.reasoning) return level === "off";
+	const map = model.thinkingLevelMap;
+	if (level === "xhigh" || level === "max") {
+		return !!map && Object.prototype.hasOwnProperty.call(map, level) && map[level] != null;
+	}
+	return map?.[level] !== null;
+}
+
+function resolveThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingLevel {
+	if (isThinkingLevelSupported(model, requested)) return requested;
+	const requestedIndex = THINKING_LEVELS.indexOf(requested);
+	for (let index = requestedIndex + 1; index < THINKING_LEVELS.length; index += 1) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+	for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+		const level = THINKING_LEVELS[index];
+		if (isThinkingLevelSupported(model, level)) return level;
+	}
+	return "off";
+}
+
 function normalizeModelPreference(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
@@ -327,7 +357,7 @@ function normalizeModelPreference(value: unknown): string | undefined {
 function parseModelPreference(value: unknown): { model?: string; thinkingLevel?: ThinkingLevel } {
 	const model = normalizeModelPreference(value);
 	if (!model) return {};
-	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh)$/i);
+	const match = model.match(/^(.*):(off|minimal|low|medium|high|xhigh|max)$/i);
 	if (!match?.[1]) return { model };
 	const baseModel = match[1].trim();
 	if (!baseModel || baseModel.toLowerCase() === "auto" || baseModel.toLowerCase() === "current") {
@@ -529,7 +559,7 @@ async function buildLibrarianCandidates(
 				modelRef: modelRef(configuredMatched),
 				provider: configuredMatched.provider,
 				modelId: configuredMatched.id,
-				thinkingLevel,
+				thinkingLevel: resolveThinkingLevel(configuredMatched, thinkingLevel),
 				autoSelected: false,
 				selectionReason: "Using the configured librarian model.",
 			});
@@ -552,7 +582,7 @@ async function buildLibrarianCandidates(
 			modelRef: modelRef(model),
 			provider: model.provider,
 			modelId: model.id,
-			thinkingLevel,
+			thinkingLevel: resolveThinkingLevel(model, thinkingLevel),
 			autoSelected: true,
 			selectionReason: index === 0 ? topReason : `Auto-selected ${modelRef(model)} as a lower-ranked fallback.`,
 		});
@@ -564,7 +594,7 @@ async function buildLibrarianCandidates(
 			modelRef: modelRef(ctx.model),
 			provider: ctx.model.provider,
 			modelId: ctx.model.id,
-			thinkingLevel,
+			thinkingLevel: resolveThinkingLevel(ctx.model, thinkingLevel),
 			autoSelected: true,
 			selectionReason: `Used the current session model ${modelRef(ctx.model)} as a final fallback.`,
 		});
@@ -782,6 +812,7 @@ export const __test__ = {
 	findAvailableModel,
 	isModelAvailabilityError,
 	parseModelPreference,
+	resolveThinkingLevel,
 };
 
 export default function librarianExtension(pi: ExtensionAPI) {
@@ -897,7 +928,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			notifyCommand(ctx, "Usage: /librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|auto> | clear [all|model|thinking]", "warning");
+			notifyCommand(ctx, "Usage: /librarian-config status | model <provider/model|auto> | thinking <off|minimal|low|medium|high|xhigh|max|auto> | clear [all|model|thinking]", "warning");
 		},
 	});
 
@@ -1118,7 +1149,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 						resourceLoader,
 						sessionManager: SessionManager.inMemory(workspace),
 						model: candidate.model,
-						thinkingLevel,
+						thinkingLevel: candidate.details.thinkingLevel,
 						tools: ["read", "bash"],
 					});
 

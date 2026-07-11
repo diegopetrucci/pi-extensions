@@ -47,7 +47,7 @@ function createBranchEntries() {
   ];
 }
 
-function createCommandContext(t, { cwd, branchEntries = createBranchEntries() } = {}) {
+function createCommandContext(t, { cwd, branchEntries = createBranchEntries(), currentEntries = branchEntries } = {}) {
   const notifications = [];
   let waitForIdleCalls = 0;
   const rootDir = cwd ?? mkdtempSync(path.join(os.tmpdir(), 'context-inspector-command-test-'));
@@ -84,6 +84,9 @@ function createCommandContext(t, { cwd, branchEntries = createBranchEntries() } 
       sessionManager: {
         getBranch() {
           return branchEntries;
+        },
+        buildContextEntries() {
+          return currentEntries;
         },
         getSessionId() {
           return 'session-123';

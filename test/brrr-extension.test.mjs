@@ -108,11 +108,70 @@ function createCommandContext({ cwd, hasUI = true, isProjectTrusted = () => true
   return { ctx, notifications };
 }
 
+function createSettledContext({ cwd, hasUI = true, isProjectTrusted = () => true, messages = [] } = {}) {
+  return {
+    cwd,
+    hasUI,
+    isProjectTrusted,
+    sessionManager: {
+      buildContextEntries() {
+        return messages.map((message, index) => ({
+          type: 'message',
+          id: `entry-${index}`,
+          parentId: index === 0 ? null : `entry-${index - 1}`,
+          timestamp: new Date(0).toISOString(),
+          message,
+        }));
+      },
+    },
+  };
+}
+
 function getBrrrCommand(commands) {
   const command = commands.get('brrr');
   assert.ok(command, 'expected brrr command to be registered');
   return command;
 }
+
+test('brrr subscribes to settled runs and reads the final assistant message from session state', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeBrrrConfig(path.join(agentDir, 'extensions', 'brrr.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    webhook: 'https://api.brrr.now/v1/br_settled',
+    idleSeconds: null,
+    includeLastAssistantMessage: true,
+    message: 'Fallback {project}',
+  });
+
+  const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+  const brrrExtension = await loadFreshExtension('extensions/brrr/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  brrrExtension(pi);
+
+  assert.equal(typeof handlers.get('agent_settled'), 'function');
+  assert.equal(handlers.has('agent_end'), false);
+
+  await handlers.get('agent_settled')(
+    {
+      messages: [{ role: 'assistant', content: 'stale agent_end reply' }],
+    },
+    createSettledContext({
+      cwd: projectDir,
+      messages: [
+        { role: 'assistant', content: 'final settled reply' },
+      ],
+    }),
+  );
+
+  const [{ options }] = fetchCalls;
+  assert.deepEqual(JSON.parse(options.body), {
+    title: 'Pi finished',
+    message: 'final settled reply',
+  });
+});
 
 test('brrr status command reports webhook resolution and skips UI notifications when unavailable', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
@@ -201,7 +260,7 @@ test('brrr uses trusted project config over global config and formats webhook pa
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   const event = {
@@ -260,7 +319,7 @@ test('brrr resolves $ENV and ${ENV} webhook references when sending notification
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   writeBrrrConfig(configPath, {
@@ -324,7 +383,7 @@ test('brrr skips disabled, non-interactive, and invalid webhook configurations',
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   writeBrrrConfig(configPath, {
@@ -404,7 +463,7 @@ test('brrr falls back to the valid config and warns when project config JSON is 
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await handler({ messages: [] }, {
@@ -447,7 +506,7 @@ test('brrr extracts only text parts from the latest structured assistant message
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await handler(
@@ -497,7 +556,7 @@ test('brrr skips empty latest assistant content and falls back to the configured
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await handler(
@@ -551,7 +610,7 @@ test('brrr uses the last assistant message, truncates payloads, and logs webhook
   const { pi, handlers } = createExtensionHarness();
   brrrExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   const assistantMessage = `${'x'.repeat(805)}\n`;

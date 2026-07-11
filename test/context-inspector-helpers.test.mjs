@@ -22,7 +22,7 @@ function createPi({ tools = [], thinkingLevel = 'high' } = {}) {
   };
 }
 
-function createContext({ branchEntries, usage, cwd = '/repo', redactSessionGetters = false } = {}) {
+function createContext({ branchEntries, currentEntries = branchEntries, usage, cwd = '/repo', redactSessionGetters = false } = {}) {
   return {
     cwd,
     model: {
@@ -39,6 +39,9 @@ function createContext({ branchEntries, usage, cwd = '/repo', redactSessionGette
     sessionManager: {
       getBranch() {
         return branchEntries;
+      },
+      buildContextEntries() {
+        return currentEntries;
       },
       getSessionId() {
         if (redactSessionGetters) throw new Error('should not read session id while redacted');
@@ -200,6 +203,113 @@ test('context-inspector redacts segment text and metadata consistently', () => {
   const bashSegment = segments.find((segment) => segment.category === 'bash');
   assert.equal(bashSegment.command, '[redacted command]');
   assert.equal(bashSegment.note, '[redacted note]');
+});
+
+test('context-inspector report data uses buildContextEntries for uncompacted current context', () => {
+  const branchEntries = [
+    {
+      type: 'message',
+      id: 'user-branch',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      message: {
+        role: 'user',
+        timestamp: Date.parse('2024-01-01T00:00:00.000Z'),
+        content: [{ type: 'text', text: 'branch-only text that should stay out of current context' }],
+      },
+    },
+  ];
+  const currentEntries = [
+    {
+      type: 'message',
+      id: 'user-current',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      message: {
+        role: 'user',
+        timestamp: Date.parse('2024-01-01T00:00:01.000Z'),
+        content: [{ type: 'text', text: 'current-context text' }],
+      },
+    },
+  ];
+
+  const report = buildReportData(
+    createPi(),
+    createContext({ branchEntries, currentEntries, usage: { tokens: 10, contextWindow: 100 } }),
+    { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+  );
+
+  assert.equal(report.datasets.current.stats.messageCount, 1);
+  assert.equal(report.datasets.full.stats.messageCount, 1);
+  assert.ok(report.datasets.current.stats.topSegments.some((segment) => segment.preview.includes('current-context text')));
+  assert.ok(report.datasets.full.stats.topSegments.some((segment) => segment.preview.includes('branch-only text')));
+  assert.ok(report.datasets.full.stats.topSegments.every((segment) => !segment.preview.includes('current-context text')));
+});
+
+test('context-inspector report data uses buildContextEntries for compacted current context while full history stays on the branch', () => {
+  const branchEntries = [
+    {
+      type: 'message',
+      id: 'user-early',
+      timestamp: '2024-01-01T00:00:00.000Z',
+      message: {
+        role: 'user',
+        timestamp: Date.parse('2024-01-01T00:00:00.000Z'),
+        content: [{ type: 'text', text: 'early user message' }],
+      },
+    },
+    {
+      type: 'message',
+      id: 'assistant-early',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      message: {
+        role: 'assistant',
+        timestamp: Date.parse('2024-01-01T00:00:01.000Z'),
+        content: [{ type: 'text', text: 'early assistant response' }],
+      },
+    },
+    {
+      type: 'message',
+      id: 'kept-user',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      message: {
+        role: 'user',
+        timestamp: Date.parse('2024-01-01T00:00:02.000Z'),
+        content: [{ type: 'text', text: 'kept user message' }],
+      },
+    },
+    {
+      type: 'compaction',
+      id: 'compaction-1',
+      firstKeptEntryId: 'kept-user',
+      timestamp: '2024-01-01T00:00:03.000Z',
+      summary: 'compacted branch summary',
+      tokensBefore: 200,
+    },
+    {
+      type: 'message',
+      id: 'assistant-late',
+      timestamp: '2024-01-01T00:00:04.000Z',
+      message: {
+        role: 'assistant',
+        timestamp: Date.parse('2024-01-01T00:00:04.000Z'),
+        content: [{ type: 'text', text: 'latest assistant response' }],
+      },
+    },
+  ];
+  const currentEntries = [branchEntries[3], branchEntries[2], branchEntries[4]];
+
+  const report = buildReportData(
+    createPi(),
+    createContext({ branchEntries, currentEntries, usage: { tokens: 20, contextWindow: 100 } }),
+    { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+  );
+
+  assert.equal(report.datasets.current.stats.messageCount, 3);
+  assert.equal(report.datasets.full.stats.messageCount, 5);
+  assert.ok(report.datasets.current.stats.topSegments.some((segment) => segment.label === 'Compaction summary'));
+  assert.ok(report.datasets.current.stats.topSegments.some((segment) => segment.preview.includes('kept user message')));
+  assert.ok(report.datasets.current.stats.topSegments.every((segment) => !segment.preview.includes('early user message')));
+  assert.ok(report.datasets.full.stats.topSegments.some((segment) => segment.preview.includes('early user message')));
+  assert.ok(report.datasets.full.stats.topSegments.some((segment) => segment.preview.includes('early assistant response')));
 });
 
 test('context-inspector report data handles unknown usage, estimator overage, provider delta, and redacted session info', () => {

@@ -757,6 +757,12 @@ function collectCurrentContextEntries(branchEntries: MinimalEntry[]): MinimalEnt
 	return result;
 }
 
+function resolveCurrentContextEntries(ctx: ExtensionCommandContext, branchEntries: MinimalEntry[]): MinimalEntry[] {
+	const currentEntries = safeCall(() => ctx.sessionManager.buildContextEntries()) as MinimalEntry[] | undefined;
+	if (Array.isArray(currentEntries)) return currentEntries;
+	return collectCurrentContextEntries(branchEntries);
+}
+
 function analyzeEntries(entries: MinimalEntry[], redact: boolean): { segments: Segment[]; messageCount: number } {
 	const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
 	let messageCount = 0;
@@ -921,7 +927,7 @@ function getSessionName(ctx: ExtensionCommandContext): string | undefined {
 
 function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: CommandOptions): ReportData {
 	const branchEntries = ctx.sessionManager.getBranch() as MinimalEntry[];
-	const currentEntries = collectCurrentContextEntries(branchEntries);
+	const currentEntries = resolveCurrentContextEntries(ctx, branchEntries);
 	const overhead = buildOverheadSegments(pi, ctx, options.redact);
 	const currentAnalysis = analyzeEntries(currentEntries, options.redact);
 	const fullAnalysis = analyzeEntries(branchEntries, options.redact);

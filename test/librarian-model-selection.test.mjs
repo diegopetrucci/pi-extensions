@@ -30,10 +30,24 @@ test('librarian model preference parsing treats auto/current as auto while keepi
   assert.deepEqual(parseModelPreference(' current '), {});
   assert.deepEqual(parseModelPreference(' auto:medium '), { thinkingLevel: 'medium' });
   assert.deepEqual(parseModelPreference(' current:high '), { thinkingLevel: 'high' });
+  assert.deepEqual(parseModelPreference(' auto:max '), { thinkingLevel: 'max' });
   assert.deepEqual(parseModelPreference(' anthropic/claude-haiku-4-5:low '), {
     model: 'anthropic/claude-haiku-4-5',
     thinkingLevel: 'low',
   });
+});
+
+test('librarian max thinking is preserved when supported and clamps to xhigh when unsupported', async () => {
+  const { resolveThinkingLevel } = await loadLibrarianTestUtils();
+  const model = {
+    provider: 'custom',
+    id: 'researcher',
+    reasoning: true,
+    thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: {} },
+  };
+
+  assert.equal(resolveThinkingLevel(model, 'max'), 'max');
+  assert.equal(resolveThinkingLevel({ ...model, thinkingLevelMap: { ...model.thinkingLevelMap, max: null } }, 'max'), 'xhigh');
 });
 
 test('librarian explicit model matching prefers exact provider-qualified matches', async () => {

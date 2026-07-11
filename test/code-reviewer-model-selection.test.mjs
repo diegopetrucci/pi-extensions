@@ -196,6 +196,58 @@ test('code_reviewer auto-selection falls back to the current provider when no op
 });
 
 
+test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallback paths', async () => {
+  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
+  const result = await selectCodeReviewerModel(
+    createContext({
+      model: { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+      available: [
+        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
+        { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai/gpt-5.6-sol');
+  assert.deepEqual(
+    result.ordered.map((model) => `${model.provider}/${model.id}`),
+    ['openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
+  );
+});
+
+test('code_reviewer same-provider openai-codex fallback prefers gpt-5.6-sol with high thinking', async () => {
+  const { resolveThinkingLevel, selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
+  const result = await selectCodeReviewerModel(
+    createContext({
+      model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+      available: [
+        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-5.6-sol');
+  assert.deepEqual(
+    result.ordered.map((model) => `${model.provider}/${model.id}`),
+    ['openai-codex/gpt-5.6-sol', 'openai-codex/gpt-5.5', 'openai-codex/gpt-5.4'],
+  );
+  assert.deepEqual(resolveThinkingLevel(result.selection, undefined), {
+    requested: 'high',
+    effective: 'high',
+    clamped: false,
+    note: 'defaulted to high',
+  });
+});
+
 test('code_reviewer auto-selection preserves fallback tiers after contrarian candidates', async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
@@ -319,6 +371,30 @@ test('code_reviewer thinking resolution defaults to high for reasoning models an
     effective: 'off',
     clamped: false,
     note: 'defaulted to off for non-reasoning model',
+  });
+});
+
+test('code_reviewer max thinking is preserved when supported and clamps to xhigh when unsupported', async () => {
+  const { normalizeThinkingLevel, resolveThinkingLevel } = await loadCodeReviewerTestUtils();
+  const model = {
+    provider: 'custom',
+    id: 'solver-max',
+    reasoning: true,
+    thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: {} },
+  };
+
+  assert.equal(normalizeThinkingLevel('max'), 'max');
+  assert.deepEqual(resolveThinkingLevel(model, 'max'), {
+    requested: 'max',
+    effective: 'max',
+    clamped: false,
+    note: 'requested max',
+  });
+  assert.deepEqual(resolveThinkingLevel({ ...model, thinkingLevelMap: { ...model.thinkingLevelMap, max: null } }, 'max'), {
+    requested: 'max',
+    effective: 'xhigh',
+    clamped: true,
+    note: 'requested max; clamped to xhigh',
   });
 });
 

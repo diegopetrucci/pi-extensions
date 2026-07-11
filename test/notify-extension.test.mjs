@@ -150,6 +150,16 @@ function setProcessPlatform(t, value) {
   });
 }
 
+test('notify subscribes to settled runs instead of agent_end', async () => {
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+
+  notifyExtension(pi);
+
+  assert.equal(typeof handlers.get('agent_settled'), 'function');
+  assert.equal(handlers.has('agent_end'), false);
+});
+
 test('notify uses trusted project config over global config and ignores untrusted project config', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
@@ -190,7 +200,7 @@ test('notify uses trusted project config over global config and ignores untruste
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await handler({}, {
@@ -231,7 +241,7 @@ test('notify respects enabled and onlyWhenInteractive gating', async (t) => {
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   writeNotifyConfig(configPath, {
@@ -327,7 +337,7 @@ test('notify skips none backends and swallows desktop and sound delivery failure
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await assert.doesNotReject(() =>
@@ -371,7 +381,7 @@ test('notify auto-selects terminal backends and preserves OSC formatting', async
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   setEnvVar(t, 'KITTY_WINDOW_ID', 'window-1');
@@ -427,7 +437,7 @@ test('notify selects the expected desktop backend commands for auto detection', 
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   setProcessPlatform(t, 'linux');
@@ -509,7 +519,7 @@ test('notify selects sound commands and falls back from canberra to paplay on li
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   setProcessPlatform(t, 'linux');
@@ -577,7 +587,7 @@ test('notify falls back to valid config and warns when project config JSON is in
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_end');
+  const handler = handlers.get('agent_settled');
   assert.equal(typeof handler, 'function');
 
   await handler({}, {
