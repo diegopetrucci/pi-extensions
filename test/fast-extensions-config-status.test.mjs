@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLAUDE_FAST_BETA = 'fast-mode-2026-02-01';
+const SUPPORTED_OPENAI_FAST_MODELS = ['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 let importCounter = 0;
 
 async function loadFreshExtension(relativePath) {
@@ -24,7 +26,7 @@ function setupTempDirs(t) {
   const nestedDir = path.join(projectDir, 'packages', 'app', 'src');
 
   mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
-  mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   mkdirSync(nestedDir, { recursive: true });
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
 
@@ -117,7 +119,7 @@ test('openai-fast honors trusted nested project config over global config and ig
     enabled: false,
     showStatus: true,
   });
-  writeConfig(path.join(projectDir, '.pi', 'openai-fast.json'), {
+  writeConfig(path.join(projectDir, CONFIG_DIR_NAME, 'openai-fast.json'), {
     enabled: true,
     showStatus: false,
   });
@@ -206,7 +208,7 @@ test('openai-fast reports no-model status, hides disabled status indicators, and
   });
 });
 
-test('openai-fast gates request mutation on payload shape, model match, and existing service tier', async (t) => {
+test('openai-fast supports GPT-5.6 Codex variants through config defaults and session toggles', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
@@ -221,29 +223,123 @@ test('openai-fast gates request mutation on payload shape, model match, and exis
 
   const sessionStart = getHandler(harness, 'session_start');
   const beforeProviderRequest = getHandler(harness, 'before_provider_request');
-  const fastContext = createFastContext({
+  const command = getCommand(harness, 'fast');
+
+  for (const modelId of SUPPORTED_OPENAI_FAST_MODELS) {
+    writeConfig(path.join(agentDir, 'extensions', 'openai-fast.json'), {
+      enabled: true,
+      showStatus: true,
+    });
+
+    const configEnabledContext = createFastContext({
+      cwd: projectDir,
+      model: { provider: 'openai-codex', api: 'openai-codex-responses', id: modelId },
+      trusted: true,
+      isUsingOAuth: true,
+    });
+
+    await sessionStart({}, configEnabledContext.ctx);
+    assert.deepEqual(configEnabledContext.statuses.at(-1), { key: 'openai-fast', value: 'fast' });
+    assert.deepEqual(
+      await beforeProviderRequest({ payload: { model: modelId, input: 'hello' } }, configEnabledContext.ctx),
+      { model: modelId, input: 'hello', service_tier: 'priority' },
+    );
+
+    writeConfig(path.join(agentDir, 'extensions', 'openai-fast.json'), {
+      enabled: false,
+      showStatus: true,
+    });
+
+    const commandEnabledContext = createFastContext({
+      cwd: projectDir,
+      model: { provider: 'openai-codex', api: 'openai-codex-responses', id: modelId },
+      trusted: true,
+      isUsingOAuth: true,
+    });
+
+    await sessionStart({}, commandEnabledContext.ctx);
+    await command.handler('', commandEnabledContext.ctx);
+    assert.match(
+      commandEnabledContext.notifications.at(-1).message,
+      new RegExp(`active for openai-codex/${modelId.replace(/\./g, '\\.')}`),
+    );
+    assert.deepEqual(
+      await beforeProviderRequest({ payload: { model: modelId, input: 'hello' } }, commandEnabledContext.ctx),
+      { model: modelId, input: 'hello', service_tier: 'priority' },
+    );
+  }
+});
+
+test('openai-fast keeps rejecting unsupported providers, APIs, models, and pre-shaped payloads', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeConfig(path.join(agentDir, 'extensions', 'openai-fast.json'), {
+    enabled: true,
+    showStatus: true,
+  });
+
+  const openAIFastExtension = await loadFreshExtension('extensions/openai-fast/index.ts');
+  const harness = createExtensionHarness();
+  openAIFastExtension(harness.pi);
+
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeProviderRequest = getHandler(harness, 'before_provider_request');
+  const unsupportedProviderContext = createFastContext({
     cwd: projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' },
+    model: { provider: 'openai', api: 'openai-codex-responses', id: 'gpt-5.6-sol' },
     trusted: true,
     isUsingOAuth: true,
   });
 
+  await sessionStart({}, unsupportedProviderContext.ctx);
+  assert.deepEqual(unsupportedProviderContext.statuses.at(-1), { key: 'openai-fast', value: undefined });
+  assert.equal(
+    await beforeProviderRequest({ payload: { model: 'gpt-5.6-sol', input: 'hello' } }, unsupportedProviderContext.ctx),
+    undefined,
+  );
+
+  const unsupportedApiContext = createFastContext({
+    cwd: projectDir,
+    model: { provider: 'openai-codex', api: 'chat-completions', id: 'gpt-5.6-terra' },
+    trusted: true,
+    isUsingOAuth: true,
+  });
+  await sessionStart({}, unsupportedApiContext.ctx);
+  assert.equal(
+    await beforeProviderRequest({ payload: { model: 'gpt-5.6-terra', input: 'hello' } }, unsupportedApiContext.ctx),
+    undefined,
+  );
+
+  const unsupportedModelContext = createFastContext({
+    cwd: projectDir,
+    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.6-orbit' },
+    trusted: true,
+    isUsingOAuth: true,
+  });
+  await sessionStart({}, unsupportedModelContext.ctx);
+  assert.equal(
+    await beforeProviderRequest({ payload: { model: 'gpt-5.6-orbit', input: 'hello' } }, unsupportedModelContext.ctx),
+    undefined,
+  );
+
+  const fastContext = createFastContext({
+    cwd: projectDir,
+    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.6-luna' },
+    trusted: true,
+    isUsingOAuth: true,
+  });
   await sessionStart({}, fastContext.ctx);
-  assert.deepEqual(fastContext.statuses.at(-1), { key: 'openai-fast', value: 'fast' });
-
   assert.equal(await beforeProviderRequest({ payload: ['not-an-object'] }, fastContext.ctx), undefined);
-  assert.deepEqual(fastContext.statuses.at(-1), { key: 'openai-fast', value: 'fast' });
-
   assert.equal(
     await beforeProviderRequest({ payload: { model: 'gpt-5.5', input: 'hello' } }, fastContext.ctx),
     undefined,
   );
-  assert.deepEqual(fastContext.statuses.at(-1), { key: 'openai-fast', value: 'fast' });
 
-  const existingTierPayload = { model: 'gpt-5.4', input: 'hello', service_tier: 'default' };
+  const existingTierPayload = { model: 'gpt-5.6-luna', input: 'hello', service_tier: 'default' };
   assert.equal(await beforeProviderRequest({ payload: existingTierPayload }, fastContext.ctx), undefined);
   assert.deepEqual(existingTierPayload, {
-    model: 'gpt-5.4',
+    model: 'gpt-5.6-luna',
     input: 'hello',
     service_tier: 'default',
   });
@@ -258,7 +354,7 @@ test('claude-fast honors trusted nested project config over global config and ig
     enabled: false,
     showStatus: true,
   });
-  writeConfig(path.join(projectDir, '.pi', 'claude-fast.json'), {
+  writeConfig(path.join(projectDir, CONFIG_DIR_NAME, 'claude-fast.json'), {
     enabled: true,
     showStatus: false,
   });

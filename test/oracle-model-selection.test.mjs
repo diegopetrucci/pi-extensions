@@ -68,14 +68,15 @@ test('oracle auto-selection prefers gpt-5.6-sol first on openai and defaults it 
   assert.match(result.selection.selectionReason, /hardcoded preference list for openai/i);
 });
 
-test('oracle auto-selection falls back to the next openai preference when gpt-5.6-sol is unavailable', async () => {
+test('oracle auto-selection keeps the gpt-5.6 sol/terra/luna ordering before older openai-codex fallbacks', async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
     createContext({
       model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
       available: [
-        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
         { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        { provider: 'openai-codex', id: 'gpt-5.6-terra', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
       ],
     }),
   );
@@ -83,11 +84,11 @@ test('oracle auto-selection falls back to the next openai preference when gpt-5.
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.5');
+  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.6-terra');
   assert.equal(result.selection.thinkingLevel, 'xhigh');
   assert.deepEqual(
     result.ordered.map((candidate) => candidate.modelRef),
-    ['openai-codex/gpt-5.5', 'openai-codex/gpt-5.4'],
+    ['openai-codex/gpt-5.6-terra', 'openai-codex/gpt-5.6-luna', 'openai-codex/gpt-5.4'],
   );
 });
 

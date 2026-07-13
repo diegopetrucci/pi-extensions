@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -207,6 +210,27 @@ function createCleanGitExec({
     throw new Error(`Unexpected git call: ${args.join(' ')}`);
   };
 }
+
+test('review loads trusted project guidelines from next to the runtime config directory', async (t) => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'review-guidelines-test-'));
+  const projectDir = path.join(rootDir, 'workspace', 'sample-project');
+  const nestedDir = path.join(projectDir, 'packages', 'app');
+
+  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
+  mkdirSync(path.join(projectDir, 'docs'), { recursive: true });
+  mkdirSync(nestedDir, { recursive: true });
+  writeFileSync(path.join(projectDir, 'REVIEW_GUIDELINES.md'), '  Focus on trusted project rules.\n');
+  writeFileSync(path.join(projectDir, 'docs', 'REVIEW_GUIDELINES.md'), 'Ignore me.\n');
+  t.after(() => rmSync(rootDir, { recursive: true, force: true }));
+
+  await assert.doesNotReject(async () => {
+    assert.equal(
+      await reviewTestApi.loadProjectReviewGuidelines(nestedDir),
+      'Focus on trusted project rules.',
+    );
+    assert.equal(await reviewTestApi.loadProjectReviewGuidelines(path.join(rootDir, 'workspace')), null);
+  });
+});
 
 test('review parses blocking findings from findings sections and verdict fallbacks', { concurrency: false }, () => {
   reviewTestApi.resetReviewRuntimeState();

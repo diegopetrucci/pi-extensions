@@ -1,18 +1,24 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+	CONFIG_DIR_NAME,
 	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-const CONFIG_DIR_NAME = ".pi";
-
 const EXTENSION_ID = "openai-fast";
 const PROVIDER_ID = "openai-codex";
 const API_ID = "openai-codex-responses";
 const FAST_SERVICE_TIER = "priority";
-const SUPPORTED_MODELS = new Set(["gpt-5.4", "gpt-5.5"]);
+const SUPPORTED_MODELS = new Set([
+	"gpt-5.4",
+	"gpt-5.5",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-5.6-luna",
+]);
+const SUPPORTED_MODELS_LABEL = "gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, or gpt-5.6-luna";
 
 const DEFAULT_CONFIG: OpenAIFastConfig = {
 	enabled: false,
@@ -148,7 +154,7 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 		return {
 			eligible: false,
 			modelKey: key,
-			reason: "Fast mode is only enabled for gpt-5.4 and gpt-5.5",
+			reason: `Fast mode is only enabled for ${SUPPORTED_MODELS_LABEL}`,
 		};
 	}
 
@@ -251,7 +257,7 @@ export default function openAIFastExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("fast", {
-		description: "Toggle OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4/GPT-5.5",
+		description: "Toggle OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants",
 		getArgumentCompletions: () => null,
 		handler: async (args, ctx) => {
 			const state = getState(ctx);

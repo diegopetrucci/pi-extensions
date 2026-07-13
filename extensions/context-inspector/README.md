@@ -28,9 +28,11 @@ The report is self-contained HTML written locally with private file permissions.
 Options:
 
 - `--no-open`: write the HTML report but do not open a browser.
-- `--keep`: save under `.pi/context-reports/` instead of the OS temp directory.
+- `--keep`: save under `<pi-config-dir>/context-reports/` instead of the OS temp directory.
 - `--redact`: keep token attribution but hide message/tool contents plus paths, commands, session identifiers, and timestamps in the report.
 - `--full`: open the report on the full active branch tab by default.
+
+`<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default).
 
 ## Notes
 
@@ -38,7 +40,7 @@ Options:
 - The current-context chart reconciles to pi's footer-compatible context total when pi knows it.
 - Immediately after compaction, pi may not know exact current context usage until the next model response.
 - The full branch tab includes old pre-compaction history for inspection; that history is not necessarily sent verbatim to the model.
-- `--keep` writes reports under `.pi/context-reports/`; avoid committing those reports because they can contain sensitive session data unless redacted.
+- `--keep` writes reports under `<pi-config-dir>/context-reports/`; avoid committing those reports because they can contain sensitive session data unless redacted.
 
 ## Install
 

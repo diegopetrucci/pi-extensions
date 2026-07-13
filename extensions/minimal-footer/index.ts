@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 import {
 	AuthStorage,
+	CONFIG_DIR_NAME,
 	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -15,7 +16,6 @@ import {
 	type UsageSnapshot,
 } from "./openai-usage";
 
-const CONFIG_DIR_NAME = ".pi";
 
 const DEFAULT_CONFIG: MinimalFooterConfig = {
 	context: {

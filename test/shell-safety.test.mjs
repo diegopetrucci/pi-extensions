@@ -374,6 +374,304 @@ test('permission-gate blocks malformed bash inputs without prompting', async () 
   assert.equal(prompted, false);
 });
 
+test('permission-gate blocks malformed write/edit inputs without prompting', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  let prompted = false;
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const missingWritePath = await toolCallHandler(
+    { toolName: 'write', input: { content: 'x' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'Yes';
+        },
+      },
+    },
+  );
+  const nonStringWriteContent = await toolCallHandler(
+    { toolName: 'write', input: { path: '.env', content: ['x'] } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'Yes';
+        },
+      },
+    },
+  );
+  const blankEditPath = await toolCallHandler(
+    { toolName: 'edit', input: { path: '   ', edits: [] } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'Yes';
+        },
+      },
+    },
+  );
+  const malformedEditShape = await toolCallHandler(
+    { toolName: 'edit', input: { path: '.env', edits: [{ oldText: 'a', newText: 1 }] } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'Yes';
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(missingWritePath, {
+    block: true,
+    reason: 'Malformed write input blocked',
+  });
+  assert.deepEqual(nonStringWriteContent, {
+    block: true,
+    reason: 'Malformed write input blocked',
+  });
+  assert.deepEqual(blankEditPath, {
+    block: true,
+    reason: 'Malformed edit input blocked',
+  });
+  assert.deepEqual(malformedEditShape, {
+    block: true,
+    reason: 'Malformed edit input blocked',
+  });
+  assert.equal(prompted, false);
+});
+
+test('permission-gate blocks protected write/edit paths without UI after normalization', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const protectedWrite = await toolCallHandler(
+    { toolName: 'write', input: { path: 'scratch/../.git/config', content: 'x' } },
+    { hasUI: false },
+  );
+  const protectedEdit = await toolCallHandler(
+    {
+      toolName: 'edit',
+      input: { path: './tmp/../node_modules/pkg/index.js', edits: [{ oldText: 'a', newText: 'b' }] },
+    },
+    { hasUI: false },
+  );
+  const protectedEnv = await toolCallHandler(
+    { toolName: 'write', input: { path: '/tmp/project/.env.production', content: 'SECRET=1' } },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(protectedWrite, {
+    block: true,
+    reason: 'Protected path blocked (write without UI confirmation): scratch/../.git/config',
+  });
+  assert.deepEqual(protectedEdit, {
+    block: true,
+    reason: 'Protected path blocked (edit without UI confirmation): ./tmp/../node_modules/pkg/index.js',
+  });
+  assert.deepEqual(protectedEnv, {
+    block: true,
+    reason: 'Protected path blocked (write without UI confirmation): /tmp/project/.env.production',
+  });
+});
+
+test('permission-gate blocks leading-at and case-insensitive protected path bypasses', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const cases = [
+    { toolName: 'write', input: { path: '@.git/config', content: 'x' } },
+    { toolName: 'write', input: { path: '@/repo/NODE_MODULES/pkg/index.js', content: 'x' } },
+    {
+      toolName: 'edit',
+      input: { path: '@config/.ENV.Production', edits: [{ oldText: 'a', newText: 'b' }] },
+    },
+    { toolName: 'write', input: { path: '@config/../.GiT/config', content: 'x' } },
+  ];
+
+  for (const event of cases) {
+    const result = await toolCallHandler(event, { hasUI: false });
+    assert.equal(result?.block, true, `expected ${event.input.path} to be blocked`);
+    assert.match(result.reason, /Protected path blocked/);
+  }
+});
+
+test('permission-gate respects interactive allow/deny decisions for protected write/edit paths', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const prompts = [];
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const blocked = await toolCallHandler(
+    { toolName: 'write', input: { path: '.env', content: 'SECRET=1' } },
+    {
+      hasUI: true,
+      ui: {
+        async select(prompt, options) {
+          prompts.push({ prompt, options });
+          return 'No';
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(blocked, { block: true, reason: 'Blocked by user' });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].prompt, /Protected path write request/);
+  assert.match(prompts[0].prompt, /\.env/);
+  assert.deepEqual(prompts[0].options, ['Yes', 'No']);
+
+  const allowed = await toolCallHandler(
+    {
+      toolName: 'edit',
+      input: { path: 'config/../.git/config', edits: [{ oldText: 'a', newText: 'b' }] },
+    },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          return 'Yes';
+        },
+      },
+    },
+  );
+
+  assert.equal(allowed, undefined);
+});
+
+test('permission-gate matches protected path segments exactly and skips safe env templates', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  let prompted = false;
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const safeGitNamedFile = await toolCallHandler(
+    { toolName: 'write', input: { path: 'docs/.gitignore', content: 'x' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'No';
+        },
+      },
+    },
+  );
+  const safeNodeModulesNamedDir = await toolCallHandler(
+    {
+      toolName: 'edit',
+      input: { path: 'vendor/node_modules-cache/index.js', edits: [{ oldText: 'a', newText: 'b' }] },
+    },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'No';
+        },
+      },
+    },
+  );
+  const safeEnvExample = await toolCallHandler(
+    { toolName: 'write', input: { path: '.env.example', content: 'KEY=' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'No';
+        },
+      },
+    },
+  );
+  const safeNestedEnvTemplate = await toolCallHandler(
+    { toolName: 'write', input: { path: 'config/.env.production.template', content: 'KEY=' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'No';
+        },
+      },
+    },
+  );
+  const safeEnvrc = await toolCallHandler(
+    { toolName: 'write', input: { path: '.envrc', content: 'layout node' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          prompted = true;
+          return 'No';
+        },
+      },
+    },
+  );
+
+  assert.equal(safeGitNamedFile, undefined);
+  assert.equal(safeNodeModulesNamedDir, undefined);
+  assert.equal(safeEnvExample, undefined);
+  assert.equal(safeNestedEnvTemplate, undefined);
+  assert.equal(safeEnvrc, undefined);
+  assert.equal(prompted, false);
+});
+
+test('permission-gate only excludes terminal env example/template suffixes', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const safeUppercaseTemplate = await toolCallHandler(
+    { toolName: 'write', input: { path: '.ENV.PRODUCTION.TEMPLATE', content: 'KEY=' } },
+    { hasUI: false },
+  );
+  const unsafeExampleSecret = await toolCallHandler(
+    { toolName: 'write', input: { path: '.env.example.secret', content: 'SECRET=1' } },
+    { hasUI: false },
+  );
+  const unsafeTemplateLocal = await toolCallHandler(
+    {
+      toolName: 'edit',
+      input: { path: '.ENV.TEMPLATE.LOCAL', edits: [{ oldText: 'a', newText: 'b' }] },
+    },
+    { hasUI: false },
+  );
+
+  assert.equal(safeUppercaseTemplate, undefined);
+  assert.equal(unsafeExampleSecret?.block, true);
+  assert.match(unsafeExampleSecret.reason, /Protected path blocked/);
+  assert.equal(unsafeTemplateLocal?.block, true);
+  assert.match(unsafeTemplateLocal.reason, /Protected path blocked/);
+});
+
 test('permission-gate respects interactive allow/deny decisions for dangerous bash commands', async () => {
   const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
   const prompts = [];

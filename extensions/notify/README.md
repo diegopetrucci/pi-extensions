@@ -64,10 +64,10 @@ Then reload pi:
 
 Config files are merged, with project config overriding global config:
 
-- `~/.pi/agent/extensions/notify.json`
-- `<project>/.pi/notify.json`
+- `~/<pi-config-dir>/agent/extensions/notify.json`
+- `<project>/<pi-config-dir>/notify.json`
 
-Project config is only read after Pi reports that the project is trusted.
+Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config is only read after Pi reports that the project is trusted.
 
 A ready-to-copy sample file is included at [`notify.example.json`](./notify.example.json).
 

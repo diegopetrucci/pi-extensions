@@ -6,6 +6,7 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const moduleCache = new Map();
@@ -110,7 +111,7 @@ function setupTempDirs(t) {
   const nestedDir = path.join(projectDir, 'packages', 'app', 'src');
 
   mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
-  mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   mkdirSync(nestedDir, { recursive: true });
 
   setEnv(t, 'PI_CODING_AGENT_DIR', agentDir);
@@ -174,7 +175,7 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
     },
   });
 
-  writeJson(path.join(projectDir, '.pi', 'minimal-footer.json'), {
+  writeJson(path.join(projectDir, CONFIG_DIR_NAME, 'minimal-footer.json'), {
     context: {
       showPercent: true,
       dumbZone: {
@@ -290,7 +291,7 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
 
 test('minimal-footer loadConfig falls back when project config is malformed or contains invalid values', (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  const projectConfigPath = path.join(projectDir, '.pi', 'minimal-footer.json');
+  const projectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, 'minimal-footer.json');
 
   writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
     context: {

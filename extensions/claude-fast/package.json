@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-claude-fast",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A pi extension that enables Anthropic Claude Fast mode for supported Claude Opus models by injecting speed=fast.",
   "keywords": [
     "pi-package",
