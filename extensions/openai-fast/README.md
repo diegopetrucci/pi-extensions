@@ -43,7 +43,7 @@ Optional global config:
 Optional project config:
 
 ```text
-<pi-config-dir>/openai-fast.json
+<project>/<pi-config-dir>/openai-fast.json
 ```
 
 Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config overrides global config after Pi reports that the project is trusted.

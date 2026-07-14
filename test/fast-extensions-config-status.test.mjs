@@ -259,9 +259,9 @@ test('openai-fast supports GPT-5.6 Codex variants through config defaults and se
 
     await sessionStart({}, commandEnabledContext.ctx);
     await command.handler('', commandEnabledContext.ctx);
-    assert.match(
-      commandEnabledContext.notifications.at(-1).message,
-      new RegExp(`active for openai-codex/${modelId.replace(/\./g, '\\.')}`),
+    assert.equal(
+      commandEnabledContext.notifications.at(-1).message.includes(`active for openai-codex/${modelId}`),
+      true,
     );
     assert.deepEqual(
       await beforeProviderRequest({ payload: { model: modelId, input: 'hello' } }, commandEnabledContext.ctx),
