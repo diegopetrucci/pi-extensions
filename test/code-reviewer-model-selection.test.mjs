@@ -219,14 +219,14 @@ test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallb
   );
 });
 
-test('code_reviewer same-provider openai-codex fallback prefers gpt-5.6-sol with high thinking', async () => {
+test('code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/terra/luna ordering with high thinking', async () => {
   const { resolveThinkingLevel, selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createContext({
       model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
       available: [
-        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true },
-        { provider: 'openai-codex', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-terra', reasoning: true },
         { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
       ],
     }),
@@ -235,10 +235,10 @@ test('code_reviewer same-provider openai-codex fallback prefers gpt-5.6-sol with
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-5.6-sol');
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-5.6-terra');
   assert.deepEqual(
     result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['openai-codex/gpt-5.6-sol', 'openai-codex/gpt-5.5', 'openai-codex/gpt-5.4'],
+    ['openai-codex/gpt-5.6-terra', 'openai-codex/gpt-5.6-luna', 'openai-codex/gpt-5.4'],
   );
   assert.deepEqual(resolveThinkingLevel(result.selection, undefined), {
     requested: 'high',

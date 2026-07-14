@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,7 +23,7 @@ function setupTempDirs(t) {
   const projectDir = path.join(rootDir, 'workspace', 'sample-project');
 
   mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
-  mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
 
   return { agentDir, projectDir };
@@ -245,7 +246,7 @@ test('brrr uses trusted project config over global config and formats webhook pa
     imageUrl: 'https://global.example/image.png',
   });
 
-  writeBrrrConfig(path.join(projectDir, '.pi', 'brrr.json'), {
+  writeBrrrConfig(path.join(projectDir, CONFIG_DIR_NAME, 'brrr.json'), {
     webhook: 'https://api.brrr.now/v1/br_project',
     title: 'Project {project}',
     message: 'Project {cwd}',
@@ -454,7 +455,7 @@ test('brrr falls back to the valid config and warns when project config JSON is 
     includeLastAssistantMessage: false,
     message: 'Global fallback {project}',
   });
-  const invalidProjectConfigPath = path.join(projectDir, '.pi', 'brrr.json');
+  const invalidProjectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, 'brrr.json');
   writeFileSync(invalidProjectConfigPath, '{ invalid json\n');
 
   const fetchCalls = patchFetch(t, async () => ({ status: 202 }));

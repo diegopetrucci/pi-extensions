@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
@@ -24,7 +25,7 @@ function setupTempDirs(t) {
   const projectDir = path.join(rootDir, 'project');
 
   mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
-  mkdirSync(path.join(projectDir, '.pi'), { recursive: true });
+  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
 
   return { agentDir, projectDir };
@@ -183,7 +184,7 @@ test('notify uses trusted project config over global config and ignores untruste
     },
   });
 
-  writeNotifyConfig(path.join(projectDir, '.pi', 'notify.json'), {
+  writeNotifyConfig(path.join(projectDir, CONFIG_DIR_NAME, 'notify.json'), {
     title: 'Project Title',
     body: 'Project Body',
     channels: {
@@ -577,7 +578,7 @@ test('notify falls back to valid config and warns when project config JSON is in
     },
   });
 
-  const invalidProjectConfigPath = path.join(projectDir, '.pi', 'notify.json');
+  const invalidProjectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, 'notify.json');
   writeFileSync(invalidProjectConfigPath, '{ invalid json\n');
 
   patchExecFile(t, ({ callback }) => callback(null, '', ''));

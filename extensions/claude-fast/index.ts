@@ -1,12 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+	CONFIG_DIR_NAME,
 	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-
-const CONFIG_DIR_NAME = ".pi";
 
 const EXTENSION_ID = "claude-fast";
 const PROVIDER_ID = "anthropic";

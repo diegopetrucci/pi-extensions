@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 const EXTENSION_ID = "context-inspector";
 const IMAGE_TOKEN_ESTIMATE = 1200;
@@ -309,7 +309,7 @@ function usageText(): string {
 		"",
 		"Options:",
 		"  --no-open   Write the report but do not open a browser.",
-		"  --keep      Save under .pi/context-reports/ instead of the OS temp directory.",
+		"  --keep      Save under " + CONFIG_DIR_NAME + "/context-reports/ instead of the OS temp directory.",
 		"  --redact    Hide message/tool contents while keeping token attribution.",
 		"  --full      Open the report on the full active branch tab instead of current context.",
 	].join("\n");
@@ -1012,7 +1012,7 @@ function reportPath(ctx: ExtensionCommandContext, options: CommandOptions): stri
 	const rawSessionId = options.redact ? "redacted" : (safeCall(() => ctx.sessionManager.getSessionId()) ?? "session");
 	const fileName = `pi-context-${sanitizeFilePart(rawSessionId)}-${Date.now()}.html`;
 	if (options.keep) {
-		const dir = join(ctx.cwd, ".pi", "context-reports");
+		const dir = join(ctx.cwd, CONFIG_DIR_NAME, "context-reports");
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
 		try { chmodSync(dir, 0o700); } catch { /* best effort */ }
 		return join(dir, fileName);

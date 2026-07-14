@@ -29,14 +29,14 @@
  * - `/review --extra "focus on performance regressions"` - add extra review instruction (works with any mode)
  *
  * Project-specific review guidelines:
- * - If the project is trusted and a REVIEW_GUIDELINES.md file exists in the
- *   same directory as .pi, its contents are appended to the review prompt.
+ * - If the project is trusted and a REVIEW_GUIDELINES.md file exists next to
+ *   the project config directory, its contents are appended to the review prompt.
  *
  * Note: PR review requires a clean working tree (no uncommitted changes to tracked files).
  */
 
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, BorderedLoader } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, DynamicBorder, BorderedLoader } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	fuzzyFilter,
@@ -49,7 +49,6 @@ import {
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-const CONFIG_DIR_NAME = ".pi";
 
 // State to track fresh session review (where we branched from).
 // Module-level state means only one review can be active at a time.
@@ -1089,6 +1088,7 @@ export const __test__ = {
 	parsePrReference,
 	parseReviewPaths,
 	REVIEW_SUMMARY_PROMPT,
+	loadProjectReviewGuidelines,
 	resetReviewRuntimeState,
 	tokenizeArgs,
 };

@@ -1,6 +1,6 @@
 # permission-gate
 
-A small pi extension that prompts for confirmation before running potentially dangerous bash commands.
+A small pi extension that prompts for confirmation before running potentially dangerous bash commands or writing to protected paths.
 
 This is adapted from the original `permission-gate.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts) and kept basically the same.
 
@@ -9,8 +9,14 @@ This is adapted from the original `permission-gate.ts` example in [`earendil-wor
 - `rm -rf`
 - `sudo`
 - `chmod` / `chown` with `777`
+- direct `write` / `edit` calls touching normalized protected paths:
+  - exact `.git` path segments
+  - exact `node_modules` path segments
+  - secret-bearing `.env` files such as `.env` and `.env.production`
 
-If pi is running without an interactive UI, it blocks matching commands by default.
+Safe `.env` templates/examples such as `.env.example` and `.env.production.template` are allowed.
+
+If pi is running without an interactive UI, it blocks matching commands and protected path writes by default.
 
 ## Install
 
@@ -41,5 +47,6 @@ Then reload pi:
 ## Notes
 
 - Hooks the `tool_call` event.
-- Only inspects the `bash` tool.
-- Prompts with a simple `Yes` / `No` selector before allowing dangerous commands.
+- Inspects `bash`, `write`, and `edit` tool calls.
+- Normalizes relative/absolute paths before matching so traversal tricks do not bypass the guard.
+- Prompts with a simple `Yes` / `No` selector before allowing dangerous commands or protected path writes.

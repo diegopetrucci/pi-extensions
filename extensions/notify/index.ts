@@ -9,17 +9,15 @@
  * - sound playback
  *
  * Config files (project overrides global):
- * - ~/.pi/agent/extensions/notify.json
- * - <cwd>/.pi/notify.json, when the project is trusted
+ * - ~/<pi-config-dir>/agent/extensions/notify.json
+ * - <cwd>/<pi-config-dir>/notify.json, when the project is trusted
  */
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-
-const CONFIG_DIR_NAME = ".pi";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 type TerminalBackend = "auto" | "osc777" | "osc99" | "none";
 type DesktopBackend = "auto" | "macos" | "linux" | "windows-toast" | "none";

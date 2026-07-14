@@ -5,18 +5,17 @@
  * for more input.
  *
  * Config files (project overrides global):
- * - ~/.pi/agent/extensions/brrr.json
- * - <cwd>/.pi/brrr.json, when the project is trusted
+ * - ~/<pi-config-dir>/agent/extensions/brrr.json
+ * - <cwd>/<pi-config-dir>/brrr.json, when the project is trusted
  */
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
 
 const execFileAsync = promisify(execFile);
-const CONFIG_DIR_NAME = ".pi";
 
 interface BrrrConfig {
 	enabled: boolean;

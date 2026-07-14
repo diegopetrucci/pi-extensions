@@ -89,10 +89,10 @@ Then reload pi:
 
 Config files are merged, with project config overriding global config:
 
-- `~/.pi/agent/extensions/minimal-footer.json`
-- `<project>/.pi/minimal-footer.json`
+- `~/<pi-config-dir>/agent/extensions/minimal-footer.json`
+- `<project>/<pi-config-dir>/minimal-footer.json`
 
-Project config is only read after Pi reports that the project is trusted.
+Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config is only read after Pi reports that the project is trusted.
 
 A ready-to-copy sample file is included at [`minimal-footer.example.json`](./minimal-footer.example.json).
 

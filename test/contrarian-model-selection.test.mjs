@@ -104,15 +104,15 @@ test('contrarian auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 acr
   assert.match(result.selection.selectionReason, /hardcoded preference lists while preferring an opposite provider\/model family/i);
 });
 
-test('contrarian auto-selection prefers gpt-5.6-sol first within openai and openai-codex fallback paths', async () => {
+test('contrarian auto-selection keeps the gpt-5.6 sol/terra/luna ordering across openai fallback paths', async () => {
   const { selectContrarianModel } = await loadContrarianTestUtils();
   const result = await selectContrarianModel(
     createContext({
       model: { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
       available: [
-        { provider: 'openai-codex', id: 'gpt-5.5', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true },
         { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-        { provider: 'openai-codex', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-5.6-terra', reasoning: true },
       ],
     }),
   );
@@ -120,13 +120,13 @@ test('contrarian auto-selection prefers gpt-5.6-sol first within openai and open
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.6-sol');
+  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.6-terra');
   assert.deepEqual(
     result.ordered.map((candidate) => candidate.modelRef),
     [
-      'openai-codex/gpt-5.6-sol',
+      'openai-codex/gpt-5.6-terra',
+      'openai-codex/gpt-5.6-luna',
       'openai/gpt-5.5-pro',
-      'openai-codex/gpt-5.5',
     ],
   );
   assert.match(result.selection.selectionReason, /hardcoded preference lists while preferring an opposite provider\/model family/i);

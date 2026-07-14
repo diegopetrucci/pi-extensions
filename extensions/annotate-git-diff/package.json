@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-annotate-git-diff",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A standalone pi extension that adds /annotate-git-diff, a native Glimpse UI for annotating git diffs and sending feedback to the editor.",
   "keywords": [
     "pi-package",
@@ -42,7 +42,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "dependencies": {
-    "@tailwindcss/browser": "^4.3.0",
+    "@tailwindcss/browser": "^4.3.2",
     "glimpseui": "^0.8.1",
     "monaco-editor": "0.52.2"
   },

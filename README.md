@@ -14,7 +14,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 ### Providers
 
 - [`claude-fast`](./extensions/claude-fast): Adds `/claude-fast` to enable Anthropic Claude Fast mode for supported Claude Opus models by injecting `speed: "fast"`.
-- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4 and GPT-5.5 by injecting the priority service tier.
+- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants by injecting the priority service tier.
 
 ### UI
 
@@ -40,7 +40,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
-- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands like `rm -rf`, `sudo`, and `chmod 777`.
+- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands and protected `write`/`edit` targets like `.git`, `node_modules`, and secret-bearing `.env` files.
 
 ### Quality of life
 

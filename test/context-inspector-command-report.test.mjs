@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..');
 const contextInspectorModule = await import(pathToFileURL(path.join(repoRoot, 'extensions/context-inspector/index.ts')).href);
 const contextInspectorExtension = contextInspectorModule.default;
+const keptReportsPattern = new RegExp(`\\${path.sep}${CONFIG_DIR_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\${path.sep}context-reports\\${path.sep}`);
 
 function createBranchEntries() {
   return [
@@ -95,7 +97,7 @@ function createCommandContext(t, { cwd, branchEntries = createBranchEntries(), c
           return 'main';
         },
         getSessionFile() {
-          return path.join(rootDir, '.pi', 'sessions', 'main.json');
+          return path.join(rootDir, CONFIG_DIR_NAME, 'sessions', 'main.json');
         },
       },
       async waitForIdle() {
@@ -145,6 +147,7 @@ test('context command offers flag completions and shows help without generating 
   assert.equal(commandContext.notifications.at(-1).level, 'info');
   assert.match(commandContext.notifications.at(-1).message, /^Usage: \/context \[--no-open\] \[--keep\] \[--redact\] \[--full\]/);
   assert.match(commandContext.notifications.at(-1).message, /--no-open   Write the report but do not open a browser\./);
+  assert.match(commandContext.notifications.at(-1).message, new RegExp(`--keep\\s+Save under ${CONFIG_DIR_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/context-reports\\/ instead of the OS temp directory\\.`));
   assert.deepEqual(harness.execCalls, []);
 });
 
@@ -163,7 +166,7 @@ test('context command writes a kept redacted report with --no-open and does not 
   assert.deepEqual(harness.execCalls, []);
 
   const reportPath = extractReportPath(commandContext.notifications.at(-1).message);
-  assert.match(reportPath, new RegExp(`\\${path.sep}\\.pi\\${path.sep}context-reports\\${path.sep}`));
+  assert.match(reportPath, keptReportsPattern);
   assert.match(path.basename(reportPath), /^pi-context-redacted-\d+\.html$/);
 
   const reportHtml = readFileSync(reportPath, 'utf8');
@@ -195,7 +198,7 @@ test('context command warns when browser open fails and still writes the report'
   assert.match(commandContext.notifications.at(-1).message, /browser unavailable/);
 
   const reportPath = extractReportPath(commandContext.notifications.at(-1).message);
-  assert.match(reportPath, new RegExp(`\\${path.sep}\\.pi\\${path.sep}context-reports\\${path.sep}`));
+  assert.match(reportPath, keptReportsPattern);
   assert.match(path.basename(reportPath), /^pi-context-session-123-\d+\.html$/);
   assert.match(readFileSync(reportPath, 'utf8'), /Need repo status/);
 });

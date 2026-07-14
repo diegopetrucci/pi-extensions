@@ -42,16 +42,16 @@ The extension defaults to off so installing the full collection does not acciden
 Optional global config:
 
 ```text
-~/.pi/agent/extensions/claude-fast.json
+~/<pi-config-dir>/agent/extensions/claude-fast.json
 ```
 
 Optional project config:
 
 ```text
-.pi/claude-fast.json
+<project>/<pi-config-dir>/claude-fast.json
 ```
 
-Project config overrides global config after Pi reports that the project is trusted.
+Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config overrides global config after Pi reports that the project is trusted.
 
 ```json
 {
