@@ -14,7 +14,7 @@ import {
 	formatUsageSummary,
 	isOpenAICodexProvider,
 	type UsageSnapshot,
-} from "./openai-usage";
+} from "./openai-usage.ts";
 
 
 const DEFAULT_CONFIG: MinimalFooterConfig = {

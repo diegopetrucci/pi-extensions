@@ -41,5 +41,8 @@
   "dependencies": {
     "glimpseui": "^0.8.1"
   },
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  }
 }

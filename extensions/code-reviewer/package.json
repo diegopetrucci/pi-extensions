@@ -31,5 +31,9 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
   }
 }
