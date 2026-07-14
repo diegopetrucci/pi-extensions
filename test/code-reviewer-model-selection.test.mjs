@@ -3,30 +3,15 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 import ts from 'typescript';
 
 import { createExtensionHarness } from './extension-test-helpers.mjs';
-
-const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, '..');
+import { createModelSelectionContext, loadRoleTestUtils, repoRoot } from './support/provider-policy-contract-support.mjs';
 
 async function loadCodeReviewerTestUtils() {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'extensions/code-reviewer/index.ts')).href;
-  const extensionModule = await import(moduleUrl);
-  return extensionModule.__test__;
-}
-
-function createContext({ model, available }) {
-  return {
-    model,
-    modelRegistry: {
-      async getAvailable() {
-        return available;
-      },
-    },
-  };
+  return loadRoleTestUtils('code-reviewer');
 }
 
 async function loadCodeReviewerExtensionWithMockPi(t) {
@@ -157,7 +142,7 @@ export function __setCreateAgentSessionBehaviors(nextBehaviors) {
 test('code_reviewer auto-selection prefers an opposite provider and model family when available', async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
-    createContext({
+    createModelSelectionContext({
       model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
       available: [
         { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
@@ -180,7 +165,7 @@ test('code_reviewer auto-selection prefers an opposite provider and model family
 test('code_reviewer auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
-    createContext({
+    createModelSelectionContext({
       model: { provider: 'custom', id: 'solver-1', reasoning: true },
       available: [
         { provider: 'custom', id: 'solver-1', reasoning: true },
@@ -199,7 +184,7 @@ test('code_reviewer auto-selection falls back to the current provider when no op
 test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallback paths', async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
-    createContext({
+    createModelSelectionContext({
       model: { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
       available: [
         { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
@@ -222,7 +207,7 @@ test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallb
 test('code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/terra/luna ordering with high thinking', async () => {
   const { resolveThinkingLevel, selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
-    createContext({
+    createModelSelectionContext({
       model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
       available: [
         { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true },
@@ -246,28 +231,6 @@ test('code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/te
     clamped: false,
     note: 'defaulted to high',
   });
-});
-
-test('code_reviewer auto-selection preserves fallback tiers after contrarian candidates', async () => {
-  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
-  const result = await selectCodeReviewerModel(
-    createContext({
-      model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
-      available: [
-        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-        { provider: 'openai', id: 'gpt-5.5-mini', reasoning: false },
-        { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
-      ],
-    }),
-  );
-
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-
-  assert.deepEqual(
-    result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['anthropic/claude-opus-4.8', 'openai/gpt-5.5-pro', 'openai/gpt-5.5-mini'],
-  );
 });
 
 test('code_reviewer auto-selection works without ctx.model, clamps active thinking, and reports the final model details', async (t) => {
@@ -355,54 +318,4 @@ test('code_reviewer falls back to lower-priority selected models when preferred 
     ],
   );
   assert.deepEqual(createCalls.map((call) => call.thinkingLevel), ['high', 'high']);
-});
-
-test('code_reviewer thinking resolution defaults to high for reasoning models and off for non-reasoning models', async () => {
-  const { resolveThinkingLevel } = await loadCodeReviewerTestUtils();
-
-  assert.deepEqual(resolveThinkingLevel({ provider: 'custom', id: 'solver-2', reasoning: true }, undefined), {
-    requested: 'high',
-    effective: 'high',
-    clamped: false,
-    note: 'defaulted to high',
-  });
-  assert.deepEqual(resolveThinkingLevel({ provider: 'custom', id: 'solver-1', reasoning: false }, undefined), {
-    requested: 'off',
-    effective: 'off',
-    clamped: false,
-    note: 'defaulted to off for non-reasoning model',
-  });
-});
-
-test('code_reviewer max thinking is preserved when supported and clamps to xhigh when unsupported', async () => {
-  const { normalizeThinkingLevel, resolveThinkingLevel } = await loadCodeReviewerTestUtils();
-  const model = {
-    provider: 'custom',
-    id: 'solver-max',
-    reasoning: true,
-    thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: {} },
-  };
-
-  assert.equal(normalizeThinkingLevel('max'), 'max');
-  assert.deepEqual(resolveThinkingLevel(model, 'max'), {
-    requested: 'max',
-    effective: 'max',
-    clamped: false,
-    note: 'requested max',
-  });
-  assert.deepEqual(resolveThinkingLevel({ ...model, thinkingLevelMap: { ...model.thinkingLevelMap, max: null } }, 'max'), {
-    requested: 'max',
-    effective: 'xhigh',
-    clamped: true,
-    note: 'requested max; clamped to xhigh',
-  });
-});
-
-test('code_reviewer auto-selection reports when no authenticated models are available', async () => {
-  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
-
-  assert.deepEqual(await selectCodeReviewerModel(createContext({ available: [] })), {
-    ok: false,
-    error: 'No authenticated models are available. Log in or configure an API key first.',
-  });
 });

@@ -1076,6 +1076,7 @@ export const __test__ = {
 	buildSafeGitCommand,
 	formatToolCall,
 	getBlockedBashReason,
+	isModelAvailabilityError,
 	normalizeThinkingLevel,
 	resolveThinkingLevel,
 	selectCodeReviewerModel,
