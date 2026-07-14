@@ -230,19 +230,29 @@ never required to exist. Full shape, with defaults:
 
 Notes:
 
-- `thresholds.minCharsSaved` is reserved for a future minimum-size filter and
-  is **not** currently enforced by the pipeline; the net-benefit gate's
-  break-even math is what actually decides whether a prune applies.
+- `thresholds.minCharsSaved` is a minimum-size floor enforced against fresh
+  **automatic** strategy proposals only, before the net-benefit gate runs: a
+  candidate whose character savings (original content chars minus placeholder
+  chars) fall below this value is dropped up front and never reaches gate or
+  batch consideration. Manual prunes (`/prune`) and already-persisted/replayed
+  decisions always bypass this floor, same as the gate. Set to `0` to disable
+  filtering entirely. This is independent of the net-benefit gate's
+  break-even math (`gate.*`), which is a separate, later check on whatever
+  survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
   different thresholds; both default to `gate.breakEvenThreshold`. Real
-  mid-loop/idle detection isn't wired through yet, so this always evaluates as
-  `idle` in v1 — the field exists so the seam is ready once that lands. The
-  representative-corpus benchmark (see [Roadmap](#roadmap)) shows `mid_loop`
-  candidates carry ~all realized net benefit and `idle` candidates carry ~none
-  at r=0.1, which argues for a stricter `idle` default — but since every live
-  evaluation runs as `idle` today, defaulting it stricter would silently
-  disable most automatic pruning. Both states are intentionally kept at
-  parity until real agent-state detection lands; that's a follow-up ticket.
+  mid-loop/idle detection is wired through the `context` event handler
+  (pe-zy4s): the state is classified straight from the message payload —
+  `idle` if the most recent relevant message is a user message (this is the
+  first LLM call of the turn), `mid_loop` if it's an assistant message or a
+  tool result (the agent is iterating mid-turn). The representative-corpus
+  benchmark (see [Roadmap](#roadmap)) was re-derived against this same
+  runtime-observable definition and found the state-split REVERSED from an
+  earlier turn-end-based analysis: at r=0.1, `idle` candidates now carry
+  essentially all the realized net benefit and `mid_loop` candidates carry
+  essentially none. Since `idle` is not the worthless state under this
+  definition, both states are kept at parity (`22`/`22`) rather than forcing
+  a stricter default in either direction.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case) — see [Roadmap](#roadmap) for the full
@@ -296,7 +306,45 @@ Options:
 - `--ratio R`: cached-price ratio(s) to model; repeatable and/or
   comma-separated (e.g. `--ratio 0.1,0.2`). Default: `0.1`.
 - `--json`: emit a full machine-readable JSON dump instead of aligned text.
+- `--simulate-compression`: additionally SIMULATE v2-style range compression
+  (docs/v2-design.md §1/§4 go/no-go evidence) alongside — never mixed into —
+  the deterministic results. See below.
+- `--sim-summary-fraction F`: summary size as a fraction of range tokens;
+  repeatable/comma-separated (e.g. `--sim-summary-fraction 0.1,0.15,0.3`).
+  Default: `0.15`.
+- `--sim-summary-min-tokens N`: floor on summary tokens regardless of
+  fraction. Default: `200`.
+- `--sim-summarizer-cost-mult M`: relative per-token price of the summarizer
+  call vs. the main model. Default: `1.0` (same per-token price; a
+  deliberate simplification that ignores summarizer latency/availability).
+- `--sim-min-range-tokens N`: minimum contiguous range size to be
+  considered. Default: `2000`.
 - `--help`: print usage.
+
+### Compression-simulation mode (`--simulate-compression`)
+
+This is a v2 go/no-go evidence generator that does **not** require building
+v2: it identifies plausible v2-style `compress` (range mode) opportunities —
+contiguous spans of complete, non-recent, non-protected messages, never
+splitting a toolCall/toolResult pair — during the same replay pass, and
+models the outcome:
+
+```text
+summaryTokens      = max(fraction * rangeTokens, summaryMinTokens)
+oneTimeCost        = cacheBustPenalty(earliest range position)
+                       + summarizerCostMult * (rangeTokens + summaryTokens)
+recurringSaving     = r * (rangeTokens - summaryTokens)
+realizedNetBenefit  = actualRemainingCalls * recurringSaving - oneTimeCost
+```
+
+Each distinct range is recorded once, at the earliest call boundary where it
+first exists and meets `--sim-min-range-tokens`; ranges never overlap. The
+same auto-expanding break-even threshold sweep as the deterministic
+strategies runs against this separate SIMULATED population, reported
+side-by-side with (but never combined with) the deterministic results — the
+two populations are computed **independently**; a simulated range may fully
+contain deterministic candidates, and no overlap/interaction between the two
+is modeled or netted out.
 
 With no positional paths, it defaults to every `*.jsonl` file found
 recursively under `~/.pi/agent/sessions`.
@@ -386,6 +434,22 @@ At r=0.1 (aggressive prompt caching, the common Anthropic case) the total
 realized benefit across the whole 1,390-session corpus is only ~20.6k
 token-units — economically marginal, on the order of pennies. Savings only
 become material at weaker caching, r>=0.25.
+
+**pe-zy4s update (2026-07-08): this idle/mid_loop split used a turn-END
+definition** ("idle" = this call IS the turn's final assistant message, only
+knowable in hindsight via replay) **that was never runtime-observable.** Once
+real runtime agent-state detection landed (turn-START definition: "idle" =
+this is the FIRST LLM call of a turn; see the config-notes bullet above), the
+benchmark's candidate labeling was aligned to that same definition and
+re-derived on the representative corpus (460 gate-eligible candidates on the
+current `~/.the-last-harness/agent/sessions` corpus). The split **reverses**:
+at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now carries essentially
+all the value, and `mid_loop` (T=1, ~0 realized net benefit) carries
+essentially none. Per the decision rule (stricter idle default only if idle
+is shown ~worthless), this evidence does **not** support a stricter idle
+default — parity (`22`/`22`) is kept. The table above is retained as the
+historical turn-END-definition record; it no longer reflects how the runtime
+classifies agent state.
 
 **This reframes, rather than weakens, the case for v2.** Small deterministic
 removals (dedupe/error-purge/superseded-file-ops) structurally cannot beat

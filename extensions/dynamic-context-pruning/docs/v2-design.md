@@ -555,6 +555,22 @@ Anthropic case — total realized benefit across the whole 1,390-session corpus
 is only ~20.6k token-units: economically marginal, on the order of pennies.
 Savings only become material at weaker caching, r>=0.25.
 
+**pe-zy4s update (2026-07-08)**: the `mid_loop`/`idle` split above was
+measured under a turn-END definition of "idle" (this call IS the turn's
+final assistant message, only knowable in hindsight via replay), which is not
+something the live runtime can observe in advance. Once real runtime
+agent-state detection landed, using a turn-START definition instead ("idle" =
+this is the FIRST LLM call of a turn), the benchmark's candidate labeling was
+aligned to that same runtime-observable definition and re-derived on the
+current representative corpus (460 gate-eligible candidates). The split
+**reverses**: at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now
+carries essentially all the value and `mid_loop` (T=1, ~0) carries
+essentially none. Per the extension's state-conditioned-defaults decision
+rule, this does not support a stricter idle default; the runtime keeps
+parity (`22`/`22`). The table above is retained as the historical
+turn-END-definition record; the extension README's Roadmap section carries
+the up-to-date note.
+
 **Reframed go/no-go implication**: this is evidence *for*, not against,
 prototyping v2 — but for a specific reason. Condition (1) above ("a
 meaningfully positive aggregate") is technically satisfied even at r=0.1, but
