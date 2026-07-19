@@ -60,6 +60,15 @@ function getRuntimeDeclarations(manifest) {
   return declarations;
 }
 
+function getDeclaredRuntimeDependencyNames(manifest) {
+  return [
+    ...new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.optionalDependencies ?? {}),
+    ]),
+  ].sort();
+}
+
 function packPackage(packageDef, packDestination) {
   const args = ['pack', '--ignore-scripts', '--json', '--pack-destination', packDestination];
   if (packageDef.workspace) args.push('--workspace', packageDef.workspace);
@@ -70,8 +79,32 @@ function packPackage(packageDef, packDestination) {
   return path.join(packDestination, parsed[0].filename);
 }
 
-function getInstalledPackageDir(fixtureRoot, packageName) {
-  return path.join(fixtureRoot, 'node_modules', ...packageName.split('/'));
+function sanitizePackageName(packageName) {
+  return packageName.replace(/^@/, '').replaceAll('/', '__');
+}
+
+function getInstalledPackageDir(rootPath, packageName) {
+  return path.join(rootPath, 'node_modules', ...packageName.split('/'));
+}
+
+function getInstalledDeclaredDependencyDir(packageName) {
+  const dependencyDir = getInstalledPackageDir(repoRoot, packageName);
+  assert.ok(
+    existsSync(dependencyDir) && statSync(dependencyDir).isDirectory(),
+    `declared runtime dependency ${packageName} is missing from ${toPosix(path.relative(repoRoot, dependencyDir))}; run npm ci before tarball smoke validation`,
+  );
+  return dependencyDir;
+}
+
+function packInstalledDependency(packageName, packDestination) {
+  const dependencyDir = getInstalledDeclaredDependencyDir(packageName);
+  const stdout = execFileSync('npm', ['pack', dependencyDir, '--ignore-scripts', '--json', '--pack-destination', packDestination], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.length, 1, `expected one npm pack result for dependency ${packageName}`);
+  return path.join(packDestination, parsed[0].filename);
 }
 
 function findSkillDirectories(entryPath) {
@@ -123,26 +156,50 @@ test('publishable tarballs install offline and Pi loads their declared runtime e
 
   try {
     const packDestination = path.join(tempRoot, 'tarballs');
-    await mkdir(packDestination, { recursive: true });
+    const dependencyPackDestination = path.join(packDestination, 'dependencies');
+    const packagePackDestination = path.join(packDestination, 'packages');
+    await mkdir(dependencyPackDestination, { recursive: true });
+    await mkdir(packagePackDestination, { recursive: true });
 
     const packedPackages = publishablePackages.map((packageDef) => {
       const manifest = readJson(path.join(repoRoot, packageDef.manifestPath));
       assertPiHostPeersAvailable(manifest);
       return {
         manifest,
-        tarballPath: packPackage(packageDef, packDestination),
+        runtimeDependencyNames: getDeclaredRuntimeDependencyNames(manifest),
+        tarballPath: packPackage(packageDef, packagePackDestination),
       };
     });
 
-    for (const { manifest, tarballPath } of packedPackages) {
-      const fixtureRoot = path.join(tempRoot, 'fixture');
+    const dependencyTarballs = new Map(
+      [...new Set(packedPackages.flatMap(({ runtimeDependencyNames }) => runtimeDependencyNames))].map((packageName) => [
+        packageName,
+        packInstalledDependency(packageName, dependencyPackDestination),
+      ]),
+    );
+
+    for (const { manifest, runtimeDependencyNames, tarballPath } of packedPackages) {
+      const fixtureRoot = path.join(tempRoot, 'fixtures', sanitizePackageName(manifest.name));
       const agentDir = path.join(fixtureRoot, 'agent');
+      const cacheDir = path.join(tempRoot, 'cache', sanitizePackageName(manifest.name));
+      const fixtureDependencies = Object.fromEntries([
+        [manifest.name, `file:${tarballPath}`],
+        ...runtimeDependencyNames.map((packageName) => {
+          const dependencyTarballPath = dependencyTarballs.get(packageName);
+          assert.ok(
+            dependencyTarballPath,
+            `missing packed dependency tarball for ${manifest.name} runtime dependency ${packageName}`,
+          );
+          return [packageName, `file:${dependencyTarballPath}`];
+        }),
+      ]);
 
       try {
         await mkdir(agentDir, { recursive: true });
+        await mkdir(cacheDir, { recursive: true });
         await writeFile(
           path.join(fixtureRoot, 'package.json'),
-          `${JSON.stringify({ private: true, dependencies: { [manifest.name]: `file:${tarballPath}` } }, null, 2)}\n`,
+          `${JSON.stringify({ private: true, dependencies: fixtureDependencies }, null, 2)}\n`,
         );
 
         execFileSync(
@@ -155,6 +212,8 @@ test('publishable tarballs install offline and Pi loads their declared runtime e
             '--no-fund',
             '--package-lock=false',
             '--legacy-peer-deps',
+            '--cache',
+            cacheDir,
           ],
           { cwd: fixtureRoot, encoding: 'utf8', stdio: 'pipe' },
         );
