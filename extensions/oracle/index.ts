@@ -1125,6 +1125,7 @@ function renderCollapsedText(text: string, lineLimit = COLLAPSED_LINE_LIMIT): st
 
 export const __test__ = {
 	findAvailableModel,
+	isModelAvailabilityError,
 	parseModelPreference,
 	resolveThinkingLevel,
 	selectOracleModel,

@@ -17,7 +17,8 @@
     "ci": "npm run preflight:install-state && npm run typecheck && npm test",
     "preflight:install-state": "node scripts/check-install-state.mjs",
     "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepare-release": "node scripts/prepare-release.mjs"
   },
   "files": [
     "extensions",

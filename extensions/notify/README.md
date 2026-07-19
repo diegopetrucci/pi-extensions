@@ -1,6 +1,6 @@
 # notify
 
-A pi extension that sends notifications when the agent finishes and is waiting for input.
+A pi extension that sends notifications when the agent has fully settled and is waiting for input.
 
 This started from the original `notify.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/notify.ts), but now supports multiple notification channels and JSON configuration.
 
@@ -137,7 +137,7 @@ You can also customize the sound backend and options if needed.
 
 ## Notes
 
-- Hooks the `agent_end` event.
+- Hooks the `agent_settled` event so automatic retries, compaction retries, and queued follow-ups do not trigger intermediate notifications.
 - Default message is `Pi` / `Ready for input`.
 - Terminal, desktop, bell, and sound channels can be enabled independently.
 - To opt into sound playback, set `channels.sound` to `true`.
