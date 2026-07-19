@@ -175,7 +175,7 @@ function scaffolds(version, ordered, versions) {
     [`release-notes-v${version}.md`, `# Release notes — v${version}\n\n## Highlights\n\n<!-- Describe verified user-facing changes. -->\n\n## Packaging\n\n${packages}\n\n## Validation\n\n<!-- Record evidence only after commands have completed. -->\n\n${marker}\n`],
     [`github-release-v${version}.md`, `Release v${version} includes the package set listed below.\n\n## Highlights\n\n<!-- Add verified highlights. -->\n\n## Packages\n\n${packages}\n\n## Install\n\n\`\`\`bash\npi install npm:${ordered.at(-1)?.name ?? ''}\n\`\`\`\n\n${marker}\n`],
     [`announcement-v${version}.md`, `# Announcement drafts — v${version}\n\n## Short\n\n<!-- Draft after release facts are verified. -->\n\n## Packages\n\n${packages}\n\n${marker}\n`],
-    [`publish-checklist-v${version}.md`, `# Publish checklist — v${version}\n\n## Target package versions\n\n${ordered.map((pkg) => `- [ ] \`${pkg.name}@${versions[pkg.name]}\``).join('\n')}\n\n## Validation evidence\n\n- [ ] record completed checks here\n- [ ] confirm no staged files\n\n## Human-only release actions\n\n- [ ] publish selected packages manually (this tool cannot publish)\n- [ ] commit, tag, push, and create the GitHub release outside this tool\n\n${marker}\n`],
+    [`publish-checklist-v${version}.md`, `# Publish checklist — v${version}\n\n## Target package versions\n\n${ordered.map((pkg) => `- [ ] \`${pkg.name}@${versions[pkg.name]}\``).join('\n')}\n\n## Validation evidence\n\n- [ ] record completed checks here\n- [ ] confirm no staged files\n\n## Agent-safe follow-up actions\n\n- [ ] commit release prep changes outside this tool\n- [ ] tag the release outside this tool\n- [ ] push the branch and tag outside this tool\n- [ ] create the GitHub release outside this tool\n\n## Human-only release actions\n\n- [ ] publish selected packages manually (this tool cannot publish)\n\n${marker}\n`],
   ]);
 }
 
@@ -235,7 +235,11 @@ export async function prepareRelease({ cwd = process.cwd(), inputPath, write = f
   }
   const selected = releaseOrder(changed);
   const rootPackage = selected.find((pkg) => pkg.umbrella);
-  const releaseVersion = input.releaseVersion ?? (rootPackage && input.versions[rootPackage.name]);
+  const rootTargetVersion = rootPackage ? input.versions[rootPackage.name] : undefined;
+  if (rootPackage && input.releaseVersion !== undefined && input.releaseVersion !== rootTargetVersion) {
+    throw new Error(`Explicit releaseVersion ${input.releaseVersion} must match selected root target ${rootPackage.name}@${rootTargetVersion}`);
+  }
+  const releaseVersion = input.releaseVersion ?? rootTargetVersion;
   if (!releaseVersion || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(releaseVersion)) throw new Error('Input needs an exact releaseVersion when the root package is unchanged');
   const docsDir = path.resolve(root, input.docsDir ?? 'docs');
   const scaffoldEntries = [...scaffolds(releaseVersion, selected, input.versions)];

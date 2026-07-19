@@ -135,6 +135,28 @@ test('new absent baseline is changed and exact versions are mandatory', async (t
   );
 });
 
+test('selected root rejects a mismatched explicit releaseVersion before document validation, while unchanged root keeps independent releaseVersion', async (t) => {
+  const { root, input } = await fixture(t);
+  await mkdir(path.join(root, 'docs'), { recursive: true });
+  await writeFile(path.join(root, 'docs/github-release-v9.9.9.md'), 'stale document without marker\n');
+  input.releaseVersion = '9.9.9';
+  await json(path.join(root, 'release.json'), input);
+  await assert.rejects(
+    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { local: changedHashes }) }),
+    /Explicit releaseVersion 9\.9\.9 must match selected root target @example\/umbrella@1\.1\.0/,
+  );
+
+  const workspaceOnlyInput = {
+    releaseVersion: '4.5.6',
+    versions: { '@example/a': '1.1.0' },
+  };
+  await json(path.join(root, 'workspace-only.json'), workspaceOnlyInput);
+  const summary = await prepareRelease({ cwd: root, inputPath: 'workspace-only.json', run: mockRunner(root, { local: { '@example/a': 'changed-a-artifact' } }) });
+  assert.equal(summary.releaseVersion, '4.5.6');
+  assert.deepEqual(summary.packages.map(({ name }) => name), ['@example/a']);
+  assert.ok(summary.documents.every(({ path: filePath }) => filePath.includes('v4.5.6')));
+});
+
 test('ambiguous or mixed 404 output hard-fails and an empty selection is rejected', async (t) => {
   const { root } = await fixture(t);
   await assert.rejects(
@@ -154,6 +176,10 @@ test('changed inputs cannot reuse stale managed document evidence or mutate mani
   const generatedBody = await readFile(path.join(root, 'docs/github-release-v1.1.0.md'), 'utf8');
   assert.match(generatedBody, /^Release v1\.1\.0 includes the package set listed below\.\n\n## Highlights[\s\S]*## Packages[\s\S]*## Install/);
   assert.doesNotMatch(generatedBody, /^<!--/);
+  const checklist = await readFile(path.join(root, 'docs/publish-checklist-v1.1.0.md'), 'utf8');
+  assert.match(checklist, /## Agent-safe follow-up actions\n\n- \[ \] commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/);
+  assert.match(checklist, /## Human-only release actions\n\n- \[ \] publish selected packages manually \(this tool cannot publish\)/);
+  assert.doesNotMatch(checklist, /Human-only release actions[\s\S]*commit, tag, push, and create the GitHub release/s);
   const manifestPath = path.join(root, 'packages/a/package.json');
   const before = await readFile(manifestPath);
   input.versions['@example/a'] = '1.2.0';
