@@ -2,7 +2,7 @@
 
 ## Completion Reminder
 
-After completing work in this repository, trigger or walk through the release checklist and publishing flow only when the change adds a user-facing feature or tests, certifies, or bumps compatibility with a new Pi version, including `.pi-fleet-tested-version` changes. Do not trigger a release for maintenance-only hardening, tests, documentation, packaging, or internal tooling unless the user explicitly requests one.
+After completing work in this repository, trigger or walk through the release checklist and publishing flow only when the change adds a user-facing feature or tests, certifies, or bumps compatibility with a new Pi version, including `.pi-fleet-tested-version` changes. Do not trigger a release for other maintenance-only changes—such as hardening, tests unrelated to new Pi compatibility, documentation, packaging, or internal tooling—unless the user explicitly requests one.
 
 ## README Extension Ordering
 
