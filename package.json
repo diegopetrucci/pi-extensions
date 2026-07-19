@@ -17,7 +17,7 @@
     "ci": "npm run preflight:install-state && npm run typecheck && npm test",
     "preflight:install-state": "node scripts/check-install-state.mjs",
     "test": "node --test test/*.test.mjs",
-    "typecheck": "npx tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --skipLibCheck $(git ls-files '*.ts')"
+    "typecheck": "tsc -p tsconfig.json"
   },
   "files": [
     "extensions",
@@ -86,5 +86,8 @@
   },
   "overrides": {
     "protobufjs": "^7.6.4"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

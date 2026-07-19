@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,6 +16,35 @@ function readText(relativePath) {
 function toPosix(filePath) {
   return filePath.split(path.sep).join('/');
 }
+
+const expectedNodeEngine = '>=22.19.0';
+const explicitEsmLowRiskCohort = new Set([
+  'brrr',
+  'claude-fast',
+  'confirm-destructive',
+  'context-cap',
+  'dirty-repo-guard',
+  'gnosis',
+  'inline-bash',
+  'notify',
+  'openai-fast',
+  'permission-gate',
+  'quiet-tools',
+  'todo',
+]);
+const explicitEsmComplexCohort = new Set([
+  'agent-workflow-audit',
+  'code-reviewer',
+  'context-inspector',
+  'contrarian',
+  'git-footer',
+  'librarian',
+  'minimal-footer',
+  'oracle',
+  'review',
+  'triage-comments',
+]);
+const documentedNonExecutableWorkspacePackages = new Set(['illustrations-to-explain-things']);
 
 function getRuntimeDeclarations(manifest) {
   const declarations = [];
@@ -96,7 +126,7 @@ function getRootReadmeExtensionSections() {
   return sections.filter((section) => section.entries.length > 0);
 }
 
-test('workspace package manifests keep directory, publish, and runtime metadata consistent', () => {
+test('workspace package manifests keep directory, publish, runtime, and Node metadata consistent', () => {
   const packageNames = new Set();
 
   for (const packageDef of getWorkspacePackageDefs()) {
@@ -109,6 +139,7 @@ test('workspace package manifests keep directory, publish, and runtime metadata 
     assert.match(manifest.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
     assert.equal(manifest.repository?.directory, `extensions/${packageDir}`);
     assert.deepEqual(manifest.publishConfig, { access: 'public' });
+    assert.deepEqual(manifest.engines, { node: expectedNodeEngine });
     assert.ok(Array.isArray(manifest.files), `${packageDir} should declare published files`);
     assert.ok(manifest.files.includes('README.md'), `${packageDir} should publish its README`);
     assert.ok(
@@ -130,6 +161,129 @@ test('workspace package manifests keep directory, publish, and runtime metadata 
     assert.ok(!packageNames.has(manifest.name), `duplicate workspace package name: ${manifest.name}`);
     packageNames.add(manifest.name);
   }
+});
+
+test('root package uses the tracked strict tsconfig and the shared Node minimum', () => {
+  const manifest = readJson('package.json');
+  const tsconfig = readJson('tsconfig.json');
+
+  assert.equal(manifest.scripts?.typecheck, 'tsc -p tsconfig.json');
+  assert.deepEqual(manifest.engines, { node: expectedNodeEngine });
+  assert.equal(tsconfig.compilerOptions?.target, 'ES2022');
+  assert.equal(tsconfig.compilerOptions?.module, 'NodeNext');
+  assert.equal(tsconfig.compilerOptions?.moduleResolution, 'NodeNext');
+  assert.equal(tsconfig.compilerOptions?.allowImportingTsExtensions, true);
+  assert.equal(tsconfig.compilerOptions?.strict, true);
+  assert.equal(tsconfig.compilerOptions?.noEmit, true);
+  assert.deepEqual(tsconfig.include, ['**/*.ts']);
+  assert.ok(Array.isArray(tsconfig.exclude) && tsconfig.exclude.includes('.tickets'));
+});
+
+test('CI validates the exact minimum Node release and current supported LTS', () => {
+  const workflow = readText('.github/workflows/ci.yml');
+
+  assert.match(workflow, /node-version:\s*\n\s*- 22\.19\.0\s*\n\s*- 24/);
+  assert.match(workflow, /name: Validate \(Node \$\{\{ matrix\.node-version \}\}\)/);
+});
+
+test('all executable TypeScript workspace packages declare explicit ESM metadata while skill-only packages stay exempt', () => {
+  for (const packageDef of getWorkspacePackageDefs()) {
+    const packageDir = path.basename(packageDef.packageRoot);
+    const manifest = readJson(packageDef.manifestPath);
+    const runtimeDeclarations = getRuntimeDeclarations(manifest);
+    const hasExecutableTypeScriptEntry = runtimeDeclarations.some(
+      ({ kind, entry }) => kind === 'extension' && /\.ts$/u.test(entry),
+    );
+    const expectedType = hasExecutableTypeScriptEntry ? 'module' : undefined;
+
+    assert.equal(
+      manifest.type,
+      expectedType,
+      `${packageDir} should ${expectedType ? '' : 'not '}declare explicit ESM metadata`,
+    );
+
+    if (!hasExecutableTypeScriptEntry) {
+      assert.ok(
+        documentedNonExecutableWorkspacePackages.has(packageDir),
+        `${packageDir} should remain a documented non-executable workspace exception`,
+      );
+      assert.deepEqual(
+        runtimeDeclarations.map(({ kind }) => kind),
+        ['skill'],
+        `${packageDir} should stay skill-only while exempt from explicit ESM metadata`,
+      );
+    }
+  }
+});
+
+test('low-risk explicit ESM extension entries import without typeless package warnings', () => {
+  const entryPaths = getWorkspacePackageDefs()
+    .filter((packageDef) => explicitEsmLowRiskCohort.has(path.basename(packageDef.packageRoot)))
+    .flatMap((packageDef) => {
+      const manifest = readJson(packageDef.manifestPath);
+      return getRuntimeDeclarations(manifest)
+        .filter(({ kind }) => kind === 'extension')
+        .map(({ entry }) => resolvePackageEntry(packageDef, entry));
+    });
+
+  const loaderScript = [
+    'import { pathToFileURL } from "node:url";',
+    `const entryPaths = ${JSON.stringify(entryPaths)};`,
+    'for (const entryPath of entryPaths) {',
+    '  await import(pathToFileURL(entryPath).href);',
+    '}',
+  ].join('\n');
+
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', loaderScript], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+
+  assert.equal(
+    result.status,
+    0,
+    `direct entry import check failed with stderr:\n${result.stderr || '<empty>'}\nstdout:\n${result.stdout || '<empty>'}`,
+  );
+  assert.doesNotMatch(
+    result.stderr,
+    /MODULE_TYPELESS_PACKAGE_JSON/,
+    `expected low-risk explicit ESM entry imports to avoid typeless package warnings, got:\n${result.stderr || '<empty>'}`,
+  );
+});
+
+test('complex explicit ESM extension entries import without typeless package warnings', () => {
+  const entryPaths = getWorkspacePackageDefs()
+    .filter((packageDef) => explicitEsmComplexCohort.has(path.basename(packageDef.packageRoot)))
+    .flatMap((packageDef) => {
+      const manifest = readJson(packageDef.manifestPath);
+      return getRuntimeDeclarations(manifest)
+        .filter(({ kind }) => kind === 'extension')
+        .map(({ entry }) => resolvePackageEntry(packageDef, entry));
+    });
+
+  const loaderScript = [
+    'import { pathToFileURL } from "node:url";',
+    `const entryPaths = ${JSON.stringify(entryPaths)};`,
+    'for (const entryPath of entryPaths) {',
+    '  await import(pathToFileURL(entryPath).href);',
+    '}',
+  ].join('\n');
+
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', loaderScript], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+
+  assert.equal(
+    result.status,
+    0,
+    `complex entry import check failed with stderr:\n${result.stderr || '<empty>'}\nstdout:\n${result.stdout || '<empty>'}`,
+  );
+  assert.doesNotMatch(
+    result.stderr,
+    /MODULE_TYPELESS_PACKAGE_JSON/,
+    `expected complex explicit ESM entry imports to avoid typeless package warnings, got:\n${result.stderr || '<empty>'}`,
+  );
 });
 
 test('root collection manifest includes every non-standalone workspace runtime declaration exactly once', () => {
