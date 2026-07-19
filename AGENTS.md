@@ -2,7 +2,7 @@
 
 ## Completion Reminder
 
-After changing anything in this repository, if the work is done, ask the user to go through the release checklist and publishing flow before considering the task complete.
+After completing work in this repository, trigger or walk through the release checklist and publishing flow only when the change adds a user-facing feature or tests, certifies, or bumps compatibility with a new Pi version, including `.pi-fleet-tested-version` changes. Do not trigger a release for maintenance-only hardening, tests, documentation, packaging, or internal tooling unless the user explicitly requests one.
 
 ## README Extension Ordering
 
