@@ -191,6 +191,62 @@ test('minimal-footer openai usage adds OAuth account header and normalizes usage
   assert.ok(fetchCalls[0].init.signal instanceof AbortSignal)
 })
 
+test('minimal-footer openai usage supports modelRegistry auth and stored OAuth account ids', async (t) => {
+  const authDir = await mkdtemp(path.join(repoRoot, '.tmp-openai-auth-'))
+  const originalAgentDir = process.env.PI_CODING_AGENT_DIR
+  process.env.PI_CODING_AGENT_DIR = authDir
+  t.after(async () => {
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir
+    await rm(authDir, { recursive: true, force: true })
+  })
+
+  await writeFile(
+    path.join(authDir, 'auth.json'),
+    JSON.stringify({
+      'openai-codex': {
+        type: 'oauth',
+        access: 'stored-token-should-not-be-used',
+        refresh: 'refresh-token',
+        expires: Date.now() + 60_000,
+        accountId: ' acct-registry ',
+      },
+    }),
+  )
+
+  const authCalls = []
+  const modelRegistry = {
+    token: 'runtime-token-456',
+    async getProviderAuth(providerId) {
+      authCalls.push([providerId, this.token])
+      return { auth: { apiKey: this.token } }
+    },
+  }
+
+  await withPatchedFetch(async (_url, init) => {
+    assert.deepEqual(init.headers, {
+      Authorization: 'Bearer runtime-token-456',
+      Accept: 'application/json',
+      'ChatGPT-Account-Id': 'acct-registry',
+    })
+    return {
+      ok: true,
+      async json() {
+        return {}
+      },
+    }
+  }, async () => {
+    const snapshot = await fetchOpenAICodexUsage(modelRegistry)
+    assert.deepEqual(snapshot, {
+      primary: undefined,
+      secondary: undefined,
+      fetchedAt: snapshot.fetchedAt,
+    })
+  })
+
+  assert.deepEqual(authCalls, [['openai-codex', 'runtime-token-456']])
+})
+
 test('minimal-footer openai usage omits the account header for non-oauth credentials', async () => {
   const authStorage = {
     async getApiKey() {
@@ -295,6 +351,7 @@ test('minimal-footer openai usage aborts on timeout and clears the scheduled tim
       })
     }, async () => {
       const usagePromise = fetchOpenAICodexUsage(authStorage, { timeoutMs: 321 })
+      await Promise.resolve()
       await Promise.resolve()
 
       assert.equal(timers.length, 1)

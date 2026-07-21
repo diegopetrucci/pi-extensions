@@ -1,4 +1,6 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PROVIDER_ID = "openai-codex";
 
@@ -61,10 +63,58 @@ function parseUsageSnapshot(data: WhamUsageResponse): Omit<UsageSnapshot, "fetch
 	};
 }
 
-function getOAuthAccountId(authStorage: AuthStorage): string | undefined {
-	const credential = authStorage.get(PROVIDER_ID);
-	if (!credential || credential.type !== "oauth") return undefined;
-	const accountId = (credential as { accountId?: unknown }).accountId;
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function readStoredProviderCredential(providerId: string): unknown {
+	try {
+		const data = JSON.parse(readFileSync(join(getAgentDir(), "auth.json"), "utf-8")) as unknown;
+		if (!isRecord(data)) return undefined;
+		return data[providerId];
+	} catch {
+		return undefined;
+	}
+}
+
+async function getAccessToken(authSource: unknown): Promise<string | undefined> {
+	if (isRecord(authSource) && typeof authSource.getProviderAuth === "function") {
+		const result = await (authSource as {
+			getProviderAuth(providerId: string): Promise<unknown>;
+		}).getProviderAuth(PROVIDER_ID);
+		if (isRecord(result) && isRecord(result.auth) && typeof result.auth.apiKey === "string") {
+			return result.auth.apiKey;
+		}
+	}
+
+	if (isRecord(authSource) && typeof authSource.getApiKey === "function") {
+		const token = await (authSource as {
+			getApiKey(providerId: string, options: { includeFallback: boolean }): Promise<unknown>;
+		}).getApiKey(PROVIDER_ID, { includeFallback: false });
+		return typeof token === "string" ? token : undefined;
+	}
+
+	const credential = readStoredProviderCredential(PROVIDER_ID);
+	if (!isRecord(credential) || credential.type !== "oauth") return undefined;
+	return typeof credential.access === "string" ? credential.access : undefined;
+}
+
+function getOAuthAccountId(authSource: unknown): string | undefined {
+	let credential: unknown;
+
+	if (
+		isRecord(authSource) &&
+		typeof authSource.getApiKey === "function" &&
+		typeof authSource.get === "function"
+	) {
+		if (typeof authSource.reload === "function") authSource.reload();
+		credential = (authSource as { get(providerId: string): unknown }).get(PROVIDER_ID);
+	} else {
+		credential = readStoredProviderCredential(PROVIDER_ID);
+	}
+
+	if (!isRecord(credential) || credential.type !== "oauth") return undefined;
+	const accountId = credential.accountId;
 	return typeof accountId === "string" && accountId.trim()
 		? accountId.trim()
 		: undefined;
@@ -96,16 +146,13 @@ export function formatUsageSummary(
 }
 
 export async function fetchOpenAICodexUsage(
-	authStorage: AuthStorage,
+	authSource: unknown,
 	options?: { timeoutMs?: number },
 ): Promise<UsageSnapshot | undefined> {
-	const accessToken = await authStorage.getApiKey(PROVIDER_ID, {
-		includeFallback: false,
-	});
+	const accessToken = await getAccessToken(authSource);
 	if (!accessToken) return undefined;
 
-	authStorage.reload();
-	const accountId = getOAuthAccountId(authStorage);
+	const accountId = getOAuthAccountId(authSource);
 	const controller = new AbortController();
 	const timeoutMs = options?.timeoutMs ?? 10_000;
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
