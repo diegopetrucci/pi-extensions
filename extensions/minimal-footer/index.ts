@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 import {
-	AuthStorage,
 	CONFIG_DIR_NAME,
 	getAgentDir,
 	type ExtensionAPI,
@@ -108,7 +107,6 @@ interface MinimalFooterConfig {
 }
 
 type UsageSessionState = {
-	authStorage: AuthStorage;
 	config: MinimalFooterConfig;
 	snapshot?: UsageSnapshot;
 	lastFetchedAt?: number;
@@ -857,7 +855,7 @@ async function refreshUsageIfNeeded(
 	state.requestRender?.();
 	state.inflight = (async () => {
 		try {
-			const snapshot = await fetchOpenAICodexUsage(state.authStorage, {
+			const snapshot = await fetchOpenAICodexUsage(ctx.modelRegistry, {
 				timeoutMs: config.codexUsage.requestTimeoutMs,
 			});
 			if (snapshot) {
@@ -908,7 +906,6 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		const state: UsageSessionState = {
-			authStorage: AuthStorage.create(),
 			config: loadConfig(ctx),
 			loading: false,
 		};
