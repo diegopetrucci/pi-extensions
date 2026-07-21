@@ -99,8 +99,10 @@ function parsePack(stdout, label) {
 
 function isExactNotFound(result) {
   if (result.code === 0) return false;
-  const codes = [...result.stderr.matchAll(/(?:npm\s+(?:(?:error|ERR!)\s+)?code\s+|["']code["']\s*:\s*["'])(E\d+)/gim)].map((match) => match[1].toUpperCase());
-  return codes.length > 0 && codes.every((code) => code === 'E404') && !/\b(?!404\b)[45]\d\d\b/.test(result.stderr);
+  const codes = [...result.stderr.matchAll(/(?:npm\s+(?:(?:error|ERR!)\s+)?code\s+|["']code["']\s*:\s*["'])(E[0-9A-Z]+)/gim)].map((match) => match[1].toUpperCase());
+  const hasOnly404Codes = codes.length > 0 && codes.every((code) => code === 'E404');
+  const hasOnlyTargetCodes = codes.length > 0 && codes.every((code) => code === 'ETARGET') && /No matching version found/i.test(result.stderr);
+  return (hasOnly404Codes || hasOnlyTargetCodes) && !/\b(?!404\b)[45]\d\d\b/.test(result.stderr);
 }
 
 async function checked(run, file, args, options, label) {

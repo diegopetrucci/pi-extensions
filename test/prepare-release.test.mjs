@@ -135,6 +135,26 @@ test('new absent baseline is changed and exact versions are mandatory', async (t
   );
 });
 
+test('npm pack ETARGET no matching version output is treated as an absent baseline', async (t) => {
+  const { root, input } = await fixture(t);
+  delete input.versions['plain-addon'];
+  await json(path.join(root, 'release.json'), input);
+  const run = mockRunner(root);
+  await assert.rejects(
+    prepareRelease({
+      cwd: root,
+      inputPath: 'release.json',
+      run: async (file, args, options) => {
+        if (args[0] === 'pack' && args.some((arg) => arg === 'plain-addon@1.0.0')) {
+          return { code: 1, stdout: '', stderr: 'npm error code ETARGET\nnpm error notarget No matching version found for plain-addon@1.0.0.' };
+        }
+        return run(file, args, options);
+      },
+    }),
+    /Changed package plain-addon needs an exact target version/,
+  );
+});
+
 test('selected root rejects a mismatched explicit releaseVersion before document validation, while unchanged root keeps independent releaseVersion', async (t) => {
   const { root, input } = await fixture(t);
   await mkdir(path.join(root, 'docs'), { recursive: true });
