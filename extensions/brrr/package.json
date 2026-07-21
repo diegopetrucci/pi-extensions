@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-brrr",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "A pi extension that sends brrr push notifications when pi is ready for input.",
   "keywords": [
     "pi-package",

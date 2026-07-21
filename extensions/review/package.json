@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-review",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "A standalone pi extension that adds /review and /end-review commands adapted from mitsuhiko/agent-stuff.",
   "keywords": [
     "pi-package",

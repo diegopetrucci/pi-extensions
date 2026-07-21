@@ -220,7 +220,13 @@ type ModelRegistryContext = {
 	modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> };
 };
 
-type CreateAgentSessionModel = NonNullable<Parameters<typeof createAgentSession>[0]>["model"];
+type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
+type CreateAgentSessionModel = CreateAgentSessionOptions["model"];
+
+function getModelRuntimeOption(ctx: { modelRegistry?: unknown }): Pick<CreateAgentSessionOptions, "modelRuntime"> {
+	const modelRuntime = (ctx.modelRegistry as { runtime?: CreateAgentSessionOptions["modelRuntime"] } | undefined)?.runtime;
+	return modelRuntime ? { modelRuntime } : {};
+}
 
 const MODEL_AVAILABILITY_ERROR_PATTERN =
 	/\b(?:404|403|not[_ ]?found(?:[_ ]?error)?|model[_ ]?not[_ ]?found(?:[_ ]?error)?|no such model|unknown model|does not exist|is not available|not available|model[_ ]?not[_ ]?available|unsupported model|invalid model|forbidden|access[ _-]?denied|permission[ _-]?denied|not[ _-]?entitled|do(?:es)? not have access)\b/i;
@@ -1182,7 +1188,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 					try {
 						const created = await createAgentSession({
 							cwd,
-							modelRegistry: ctx.modelRegistry,
+							...getModelRuntimeOption(ctx),
 							resourceLoader,
 							settingsManager: isolatedSettingsManager,
 							sessionManager: SessionManager.inMemory(cwd),

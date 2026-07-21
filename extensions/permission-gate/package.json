@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-permission-gate",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "A pi extension that prompts before dangerous bash commands and protected file writes.",
   "keywords": [
     "pi-package",

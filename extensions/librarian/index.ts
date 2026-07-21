@@ -39,6 +39,13 @@ type PiModel = {
 	thinkingLevelMap?: ThinkingLevelMap;
 };
 
+type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
+
+function getModelRuntimeOption(ctx: { modelRegistry?: unknown }): Pick<CreateAgentSessionOptions, "modelRuntime"> {
+	const modelRuntime = (ctx.modelRegistry as { runtime?: CreateAgentSessionOptions["modelRuntime"] } | undefined)?.runtime;
+	return modelRuntime ? { modelRuntime } : {};
+}
+
 const DEFAULT_CACHE_MODE: CacheMode = "disabled";
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "low";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -1145,7 +1152,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 
 					const created = await createAgentSession({
 						cwd: workspace,
-						modelRegistry: ctx.modelRegistry,
+						...getModelRuntimeOption(ctx),
 						resourceLoader,
 						sessionManager: SessionManager.inMemory(workspace),
 						model: candidate.model,

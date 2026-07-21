@@ -69,6 +69,13 @@ type ParsedArgs = {
 	error?: string;
 };
 
+type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
+
+function getModelRuntimeOption(ctx: { modelRegistry?: unknown }): Pick<CreateAgentSessionOptions, "modelRuntime"> {
+	const modelRuntime = (ctx.modelRegistry as { runtime?: CreateAgentSessionOptions["modelRuntime"] } | undefined)?.runtime;
+	return modelRuntime ? { modelRuntime } : {};
+}
+
 function parseArgs(args: string): ParsedArgs {
 	const parts = args.trim().split(/\s+/).filter(Boolean);
 	const focusParts: string[] = [];
@@ -1013,7 +1020,7 @@ async function runAudit(
 		const tools = options.planOnly ? ["read", "grep", "find", "ls"] : ["read", "grep", "find", "ls", "bash"];
 		const created = await createAgentSession({
 			cwd,
-			modelRegistry: ctx.modelRegistry,
+			...getModelRuntimeOption(ctx),
 			resourceLoader,
 			settingsManager: isolatedSettingsManager,
 			sessionManager: SessionManager.inMemory(cwd),

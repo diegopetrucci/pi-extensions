@@ -91,6 +91,13 @@ const MUTATING_GH_API_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 type TriageStatus = "running" | "done" | "error" | "aborted";
 
+type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
+
+function getModelRuntimeOption(ctx: { modelRegistry?: unknown }): Pick<CreateAgentSessionOptions, "modelRuntime"> {
+	const modelRuntime = (ctx.modelRegistry as { runtime?: CreateAgentSessionOptions["modelRuntime"] } | undefined)?.runtime;
+	return modelRuntime ? { modelRuntime } : {};
+}
+
 type ToolCall = {
 	id: string;
 	name: string;
@@ -2035,7 +2042,7 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
 
 				const created = await createAgentSession({
 					cwd,
-					modelRegistry: ctx.modelRegistry,
+					...getModelRuntimeOption(ctx),
 					resourceLoader,
 					settingsManager: isolatedSettingsManager,
 					sessionManager: SessionManager.inMemory(cwd),

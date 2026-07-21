@@ -2,7 +2,7 @@
 
 `scripts/prepare-release.mjs` performs deterministic release bookkeeping only. It cannot publish, use token helpers, commit, tag, push, or create a GitHub release itself. npm lifecycle scripts are disabled for every operation.
 
-The tool discovers the root package and workspaces from the root `workspaces` configuration and derives package names from their manifests. It compares each local `npm pack --dry-run --json` artifact with the exact currently-versioned artifact on the pinned public registry. This makes packed untracked files and root/workspace overlap visible instead of relying on Git path prefixes. Only an exact npm `E404`/`404 Not Found` means absent; other registry failures stop the run.
+The tool discovers the root package and workspaces from the root `workspaces` configuration and derives package names from their manifests. It compares each local `npm pack --dry-run --json` artifact with the exact currently-versioned artifact on the pinned public registry. This makes packed untracked files and root/workspace overlap visible instead of relying on Git path prefixes. Only exact npm not-found responses (`E404`/`404 Not Found`, or `ETARGET` with `No matching version found` from `npm pack`) mean absent; other registry failures stop the run.
 
 ## Input and dry-run
 
