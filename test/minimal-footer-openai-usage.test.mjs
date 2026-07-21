@@ -216,9 +216,10 @@ test('minimal-footer openai usage supports modelRegistry auth and stored OAuth a
 
   const authCalls = []
   const modelRegistry = {
+    token: 'runtime-token-456',
     async getProviderAuth(providerId) {
-      authCalls.push(providerId)
-      return { auth: { apiKey: 'runtime-token-456' } }
+      authCalls.push([providerId, this.token])
+      return { auth: { apiKey: this.token } }
     },
   }
 
@@ -243,7 +244,7 @@ test('minimal-footer openai usage supports modelRegistry auth and stored OAuth a
     })
   })
 
-  assert.deepEqual(authCalls, ['openai-codex'])
+  assert.deepEqual(authCalls, [['openai-codex', 'runtime-token-456']])
 })
 
 test('minimal-footer openai usage omits the account header for non-oauth credentials', async () => {

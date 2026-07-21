@@ -79,19 +79,18 @@ function readStoredProviderCredential(providerId: string): unknown {
 
 async function getAccessToken(authSource: unknown): Promise<string | undefined> {
 	if (isRecord(authSource) && typeof authSource.getProviderAuth === "function") {
-		const getProviderAuth = authSource.getProviderAuth as (providerId: string) => Promise<unknown>;
-		const result = await getProviderAuth(PROVIDER_ID);
+		const result = await (authSource as {
+			getProviderAuth(providerId: string): Promise<unknown>;
+		}).getProviderAuth(PROVIDER_ID);
 		if (isRecord(result) && isRecord(result.auth) && typeof result.auth.apiKey === "string") {
 			return result.auth.apiKey;
 		}
 	}
 
 	if (isRecord(authSource) && typeof authSource.getApiKey === "function") {
-		const getApiKey = authSource.getApiKey as (
-			providerId: string,
-			options: { includeFallback: boolean },
-		) => Promise<unknown>;
-		const token = await getApiKey(PROVIDER_ID, { includeFallback: false });
+		const token = await (authSource as {
+			getApiKey(providerId: string, options: { includeFallback: boolean }): Promise<unknown>;
+		}).getApiKey(PROVIDER_ID, { includeFallback: false });
 		return typeof token === "string" ? token : undefined;
 	}
 
@@ -109,8 +108,7 @@ function getOAuthAccountId(authSource: unknown): string | undefined {
 		typeof authSource.get === "function"
 	) {
 		if (typeof authSource.reload === "function") authSource.reload();
-		const getCredential = authSource.get as (providerId: string) => unknown;
-		credential = getCredential(PROVIDER_ID);
+		credential = (authSource as { get(providerId: string): unknown }).get(PROVIDER_ID);
 	} else {
 		credential = readStoredProviderCredential(PROVIDER_ID);
 	}
