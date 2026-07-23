@@ -5,7 +5,24 @@
  * Demonstrates how to cancel session events using the before_* events.
  */
 
-import type { ExtensionAPI, SessionBeforeSwitchEvent, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionBeforeSwitchEvent, SessionEntry } from "@earendil-works/pi-coding-agent";
+
+function hasUnsavedUserWork(entries: SessionEntry[]): boolean {
+	let sawAssistant = false;
+
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (entry.type !== "message") continue;
+		if (entry.message.role === "assistant") {
+			sawAssistant = true;
+			break;
+		}
+		if (entry.message.role === "user") return true;
+	}
+
+	if (sawAssistant) return false;
+	return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx) => {
@@ -24,11 +41,9 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		// reason === "resume" - check if there are unsaved changes (messages since last assistant response)
+		// reason === "resume" - check if there are unsaved changes (user messages newer than the last assistant response)
 		const entries = ctx.sessionManager.getEntries();
-		const hasUnsavedWork = entries.some(
-			(e): e is SessionMessageEntry => e.type === "message" && e.message.role === "user",
-		);
+		const hasUnsavedWork = hasUnsavedUserWork(entries);
 
 		if (hasUnsavedWork) {
 			const confirmed = await ctx.ui.confirm(

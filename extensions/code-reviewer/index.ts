@@ -11,6 +11,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import type { Usage } from "@earendil-works/pi-ai";
+
 const MAX_TOOL_CALLS_TO_KEEP = 80;
 const MAX_TURNS = 8;
 const MAX_RUN_MS = 8 * 60 * 1000;
@@ -463,26 +465,72 @@ function applyModelAttemptDetails(details: ReviewDetails, model: PiModel, thinki
 	details.thinkingLevelNote = thinking.note;
 }
 
-function extractLastAssistantText(messages: unknown[]): string {
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as { role?: string; content?: unknown };
-		if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
-		const parts: string[] = [];
-		for (const part of message.content) {
-			if (part && typeof part === "object" && (part as { type?: string }).type === "text") {
-				const text = (part as { text?: unknown }).text;
-				if (typeof text === "string") parts.push(text);
-			}
-		}
-		if (parts.length > 0) return parts.join("").trim();
-	}
-	return "";
+function createEmptyUsage(): Usage {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 }
 
-function isAbortLikeError(error: unknown): boolean {
-	if (error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError") return true;
-	const message = error instanceof Error ? error.message : String(error);
-	return /aborted|cancelled|canceled/i.test(message);
+function addUsage(total: Usage, usage: Usage): void {
+	total.input += usage.input || 0;
+	total.output += usage.output || 0;
+	total.cacheRead += usage.cacheRead || 0;
+	total.cacheWrite += usage.cacheWrite || 0;
+	if (usage.cacheWrite1h !== undefined) total.cacheWrite1h = (total.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+	if (usage.reasoning !== undefined) total.reasoning = (total.reasoning ?? 0) + usage.reasoning;
+	total.totalTokens += usage.totalTokens || 0;
+	total.cost.input += usage.cost?.input || 0;
+	total.cost.output += usage.cost?.output || 0;
+	total.cost.cacheRead += usage.cost?.cacheRead || 0;
+	total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
+	total.cost.total += usage.cost?.total || 0;
+}
+
+type AssistantLikeMessage = { role?: string; content?: unknown; stopReason?: unknown; errorMessage?: unknown; usage?: unknown };
+
+function addAssistantMessageUsage(total: Usage, message: unknown): void {
+	const assistant = message as AssistantLikeMessage;
+	if (assistant?.role !== "assistant" || !assistant.usage || typeof assistant.usage !== "object") return;
+	addUsage(total, assistant.usage as Usage);
+}
+
+function aggregateAssistantUsage(messages: unknown[]): Usage {
+	const total = createEmptyUsage();
+	for (const message of messages) addAssistantMessageUsage(total, message);
+	return total;
+}
+
+function addSessionEventUsage(total: Usage, event: unknown): void {
+	const sessionEvent = event as { type?: string; message?: unknown; result?: { usage?: Usage } };
+	if (sessionEvent?.type === "message_end") return void addAssistantMessageUsage(total, sessionEvent.message);
+	if (sessionEvent?.type === "compaction_end" && sessionEvent.result?.usage) addUsage(total, sessionEvent.result.usage);
+}
+
+function inspectFinalAssistant(messages: unknown[]):
+	| { ok: true; answer: string; stopReason?: string }
+	| { ok: false; reason: string; stopReason?: string; errorMessage?: string } {
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const message = messages[i] as AssistantLikeMessage;
+		if (message?.role !== "assistant") continue;
+		const stopReason = typeof message.stopReason === "string" ? message.stopReason.trim() : "";
+		const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+		const answer = Array.isArray(message.content)
+			? message.content
+				.map((part) => (part && typeof part === "object" && (part as { type?: string }).type === "text" && typeof (part as { text?: unknown }).text === "string"
+					? (part as { text: string }).text
+					: ""))
+				.join("")
+				.trim()
+			: "";
+		if (stopReason === "error") return { ok: false, reason: `code_reviewer subagent error: ${errorMessage || "provider/model error"}`, stopReason, errorMessage };
+		if (stopReason === "aborted") return { ok: false, reason: "code_reviewer subagent aborted before producing a usable answer", stopReason };
+		if (answer) return { ok: true, answer, stopReason: stopReason || undefined };
+		return { ok: false, reason: stopReason ? `code_reviewer subagent produced no final assistant text (stopReason: ${stopReason})` : "code_reviewer subagent produced no final assistant text", stopReason: stopReason || undefined, errorMessage: errorMessage || undefined };
+	}
+	return { ok: false, reason: "code_reviewer subagent produced no assistant message" };
+}
+
+function classifyRunFailure(error: unknown, aborted: boolean): { status: "aborted" | "error"; message: string; error?: string } {
+	const message = aborted ? "Aborted" : error instanceof Error ? error.message : String(error);
+	return { status: aborted ? "aborted" : "error", message, error: aborted ? undefined : message };
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -1086,9 +1134,21 @@ export const __test__ = {
 	normalizeThinkingLevel,
 	resolveThinkingLevel,
 	selectCodeReviewerModel,
+	aggregateAssistantUsage,
+	addAssistantMessageUsage,
+	addSessionEventUsage,
+	inspectFinalAssistant,
+	classifyRunFailure,
 };
 
 export default function codeReviewerExtension(pi: ExtensionAPI) {
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "code_reviewer") return undefined;
+		const details = event.details as ReviewDetails | undefined;
+		if (details?.status !== "error") return undefined;
+		return { isError: true };
+	});
+
 	pi.registerTool({
 		name: "code_reviewer",
 		label: "Code reviewer",
@@ -1126,24 +1186,29 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 			let unsubscribe: (() => void) | undefined;
 			let runTimeout: NodeJS.Timeout | undefined;
 			let abortListenerAdded = false;
-			let aborted = Boolean(signal?.aborted);
+			let callerAborted = Boolean(signal?.aborted);
+			const usage = createEmptyUsage();
 
 			const emit = () => {
 				onUpdate?.({ content: [{ type: "text", text: lastContent }], details });
 			};
 
-			const abort = () => {
-				aborted = true;
+			const abortForCleanup = () => {
+				void session?.abort();
+			};
+
+			const abortFromCaller = () => {
+				callerAborted = true;
 				details.status = "aborted";
 				details.endedAt = Date.now();
 				lastContent = "Aborted";
 				emit();
-				void session?.abort();
+				abortForCleanup();
 			};
 
-			if (signal?.aborted) abort();
+			if (signal?.aborted) abortFromCaller();
 			if (signal && !signal.aborted) {
-				signal.addEventListener("abort", abort);
+				signal.addEventListener("abort", abortFromCaller);
 				abortListenerAdded = true;
 			}
 
@@ -1199,6 +1264,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 						attemptSession = created.session;
 						session = attemptSession;
 						attemptUnsubscribe = attemptSession.subscribe((event) => {
+							addSessionEventUsage(usage, event);
 							switch (event.type) {
 								case "turn_end":
 									details.turns += 1;
@@ -1235,20 +1301,29 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 						});
 						unsubscribe = attemptUnsubscribe;
 
-						if (!aborted) {
+						if (!callerAborted) {
 							const promptPromise = attemptSession.prompt(buildUserPrompt(input, cwd), { expandPromptTemplates: false });
 							const timeoutPromise = new Promise<never>((_resolve, reject) => {
 								runTimeout = setTimeout(() => {
-									abort();
+									abortForCleanup();
 									reject(new Error(`code_reviewer timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
 								}, MAX_RUN_MS);
 							});
 							await Promise.race([promptPromise, timeoutPromise]);
 						}
 
-						answer = extractLastAssistantText(attemptSession.state.messages);
-						succeeded = true;
-						break;
+						const outcome = inspectFinalAssistant(attemptSession.state.messages);
+						if (outcome.ok) {
+							answer = outcome.answer;
+							succeeded = true;
+							break;
+						}
+						lastAttemptError = outcome.reason;
+						const canFallBack =
+							index < modelSelection.ordered.length - 1 &&
+							outcome.stopReason === "error" &&
+							isModelAvailabilityError(outcome.errorMessage || outcome.reason);
+						if (!canFallBack) break;
 					} catch (error) {
 						const message = error instanceof Error ? error.message : String(error);
 						lastAttemptError = message;
@@ -1267,26 +1342,34 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
 						}
 					}
 				}
-				if (!answer && !session && lastAttemptError) throw new Error(lastAttemptError);
-				lastContent = answer || (aborted ? "Aborted" : "(no output)");
-				details.status = aborted ? "aborted" : "done";
+				if (!answer) {
+					if (callerAborted) {
+						lastContent = "Aborted";
+						details.status = "aborted";
+					} else {
+						throw new Error(lastAttemptError || "the isolated code_reviewer session finished without a usable answer");
+					}
+				} else {
+					lastContent = answer;
+					details.status = "done";
+				}
 				details.endedAt = Date.now();
 				const report = appendRunDetails(lastContent, details);
 				lastContent = report;
 				emit();
-				return { content: [{ type: "text", text: report }], details };
+				return { content: [{ type: "text", text: report }], details, usage };
 			} catch (error) {
-				const wasAbort = aborted || isAbortLikeError(error);
-				const message = wasAbort ? "Aborted" : error instanceof Error ? error.message : String(error);
-				details.status = wasAbort ? "aborted" : "error";
-				details.error = wasAbort ? undefined : message;
+				const failure = classifyRunFailure(error, callerAborted);
+				const { message } = failure;
+				details.status = failure.status;
+				details.error = failure.error;
 				details.endedAt = Date.now();
 				lastContent = appendRunDetails(`## Verdict\nReview failed.\n\n## Findings\n- major — Review execution failed. Evidence: ${message}. Why it matters: the requested read-only review did not complete.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.\n\n## Run details\n- failure: ${message}`, details);
 				emit();
-				return { content: [{ type: "text", text: lastContent }], details };
+				return { content: [{ type: "text", text: lastContent }], details, usage };
 			} finally {
 				if (runTimeout) clearTimeout(runTimeout);
-				if (signal && abortListenerAdded) signal.removeEventListener("abort", abort);
+				if (signal && abortListenerAdded) signal.removeEventListener("abort", abortFromCaller);
 				unsubscribe?.();
 				session?.dispose();
 			}

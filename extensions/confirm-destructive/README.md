@@ -2,7 +2,7 @@
 
 A small pi extension that asks for confirmation before destructive session actions.
 
-This is adapted from the original `confirm-destructive.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/confirm-destructive.ts) and kept basically the same.
+This is adapted from the original `confirm-destructive.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/confirm-destructive.ts) and kept basically the same.
 
 ## What it checks
 

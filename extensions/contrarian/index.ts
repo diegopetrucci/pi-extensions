@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
-import { getAgentDir, getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import { getAgentDir, getMarkdownTheme, type AgentToolResult, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -25,7 +25,14 @@ interface UsageStats {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
+	reasoning?: number;
+	totalTokens: number;
 	cost: number;
+	costInput: number;
+	costOutput: number;
+	costCacheRead: number;
+	costCacheWrite: number;
 	turns: number;
 	contextTokens: number;
 }
@@ -537,10 +544,89 @@ function createEmptyUsage(): UsageStats {
 		output: 0,
 		cacheRead: 0,
 		cacheWrite: 0,
+		totalTokens: 0,
 		cost: 0,
+		costInput: 0,
+		costOutput: 0,
+		costCacheRead: 0,
+		costCacheWrite: 0,
 		turns: 0,
 		contextTokens: 0,
 	};
+}
+
+function cloneUsageStats(stats: UsageStats): UsageStats {
+	return { ...stats };
+}
+
+function mergeUsageStats(target: UsageStats, source: UsageStats | undefined): UsageStats {
+	if (!source) return target;
+	target.input += source.input;
+	target.output += source.output;
+	target.cacheRead += source.cacheRead;
+	target.cacheWrite += source.cacheWrite;
+	if (source.cacheWrite1h !== undefined) {
+		target.cacheWrite1h = (target.cacheWrite1h ?? 0) + source.cacheWrite1h;
+	}
+	if (source.reasoning !== undefined) {
+		target.reasoning = (target.reasoning ?? 0) + source.reasoning;
+	}
+	target.totalTokens += source.totalTokens;
+	target.cost += source.cost;
+	target.costInput += source.costInput;
+	target.costOutput += source.costOutput;
+	target.costCacheRead += source.costCacheRead;
+	target.costCacheWrite += source.costCacheWrite;
+	target.turns += source.turns;
+	target.contextTokens = source.contextTokens || target.contextTokens;
+	return target;
+}
+
+function usageStatsToToolUsage(stats: UsageStats): Usage {
+	return {
+		input: stats.input,
+		output: stats.output,
+		cacheRead: stats.cacheRead,
+		cacheWrite: stats.cacheWrite,
+		...(stats.cacheWrite1h !== undefined ? { cacheWrite1h: stats.cacheWrite1h } : {}),
+		...(stats.reasoning !== undefined ? { reasoning: stats.reasoning } : {}),
+		totalTokens: stats.totalTokens,
+		cost: {
+			input: stats.costInput,
+			output: stats.costOutput,
+			cacheRead: stats.costCacheRead,
+			cacheWrite: stats.costCacheWrite,
+			total: stats.cost,
+		},
+	};
+}
+
+function addUsageStats(
+	target: UsageStats,
+	source: Usage | undefined,
+	options: { countTurn?: boolean; updateContextTokens?: boolean } = {},
+): void {
+	if (!source) return;
+	if (options.countTurn) target.turns += 1;
+	target.input += source.input || 0;
+	target.output += source.output || 0;
+	target.cacheRead += source.cacheRead || 0;
+	target.cacheWrite += source.cacheWrite || 0;
+	if (source.cacheWrite1h !== undefined) {
+		target.cacheWrite1h = (target.cacheWrite1h ?? 0) + source.cacheWrite1h;
+	}
+	if (source.reasoning !== undefined) {
+		target.reasoning = (target.reasoning ?? 0) + source.reasoning;
+	}
+	target.totalTokens += source.totalTokens || 0;
+	target.cost += source.cost?.total || 0;
+	target.costInput += source.cost?.input || 0;
+	target.costOutput += source.cost?.output || 0;
+	target.costCacheRead += source.cost?.cacheRead || 0;
+	target.costCacheWrite += source.cost?.cacheWrite || 0;
+	if (options.updateContextTokens) {
+		target.contextTokens = source.totalTokens || target.contextTokens;
+	}
 }
 
 function getContrarianConfigPath(): string {
@@ -631,6 +717,7 @@ function formatUsage(stats: UsageStats): string {
 	if (stats.output) parts.push(`↓${formatTokens(stats.output)}`);
 	if (stats.cacheRead) parts.push(`R${formatTokens(stats.cacheRead)}`);
 	if (stats.cacheWrite) parts.push(`W${formatTokens(stats.cacheWrite)}`);
+	if (stats.reasoning) parts.push(`T${formatTokens(stats.reasoning)}`);
 	if (stats.cost) parts.push(`$${stats.cost.toFixed(4)}`);
 	if (stats.contextTokens) parts.push(`ctx:${formatTokens(stats.contextTokens)}`);
 	return parts.join(" ");
@@ -1034,6 +1121,7 @@ async function runContrarian(
 	signal: AbortSignal | undefined,
 	onUpdate: ((result: { content: Array<{ type: "text"; text: string }>; details: ContrarianDetails }) => void) | undefined,
 	defaultCwd: string,
+	spawnImpl: typeof spawn = spawn,
 ): Promise<{ ok: true; output: string; details: ContrarianDetails } | { ok: false; error: string; details: ContrarianDetails }> {
 	const cwd = params.cwd ?? defaultCwd;
 	const includeBash = params.includeBash ?? false;
@@ -1085,7 +1173,7 @@ async function runContrarian(
 	let wasAborted = false;
 
 	const exitCode = await new Promise<number>((resolve) => {
-		const proc = spawn(invocation.command, invocation.args, {
+		const proc = spawnImpl(invocation.command, invocation.args, {
 			cwd,
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -1123,18 +1211,16 @@ async function runContrarian(
 				const errorMessageField = event.message.errorMessage;
 				lastErrorMessage = typeof errorMessageField === "string" ? errorMessageField : undefined;
 
-				const messageUsage = event.message.usage;
-				if (messageUsage) {
-					usage.turns += 1;
-					usage.input += messageUsage.input || 0;
-					usage.output += messageUsage.output || 0;
-					usage.cacheRead += messageUsage.cacheRead || 0;
-					usage.cacheWrite += messageUsage.cacheWrite || 0;
-					usage.cost += messageUsage.cost?.total || 0;
-					usage.contextTokens = messageUsage.totalTokens || usage.contextTokens;
-				}
-
+				addUsageStats(usage, event.message.usage as Usage | undefined, {
+					countTurn: true,
+					updateContextTokens: true,
+				});
 				emit();
+				return;
+			}
+
+			if (event.type === "compaction_end") {
+				addUsageStats(usage, event.result?.usage as Usage | undefined);
 			}
 		};
 
@@ -1150,26 +1236,53 @@ async function runContrarian(
 			emit();
 		});
 
+		let closed = false;
+		let killTimer: ReturnType<typeof setTimeout> | undefined;
+		let abortListener: (() => void) | undefined;
+
+		const childHasExited = () => proc.exitCode !== null || proc.signalCode !== null;
+		const clearEscalation = () => {
+			if (killTimer) {
+				clearTimeout(killTimer);
+				killTimer = undefined;
+			}
+		};
+		const cleanup = () => {
+			clearEscalation();
+			if (signal && abortListener) {
+				signal.removeEventListener("abort", abortListener);
+				abortListener = undefined;
+			}
+		};
+
+		proc.on("exit", () => {
+			clearEscalation();
+		});
+
 		proc.on("close", (code) => {
+			closed = true;
+			cleanup();
 			if (buffer.trim()) processLine(buffer);
 			resolve(code ?? 0);
 		});
 
 		proc.on("error", (error) => {
+			cleanup();
 			stderr += `${error instanceof Error ? error.message : String(error)}\n`;
 			resolve(1);
 		});
 
 		if (signal) {
-			const killProc = () => {
+			abortListener = () => {
 				wasAborted = true;
 				proc.kill("SIGTERM");
-				setTimeout(() => {
-					if (!proc.killed) proc.kill("SIGKILL");
+				if (closed || childHasExited()) return;
+				killTimer = setTimeout(() => {
+					if (!closed && !childHasExited()) proc.kill("SIGKILL");
 				}, 5000);
 			};
-			if (signal.aborted) killProc();
-			else signal.addEventListener("abort", killProc, { once: true });
+			if (signal.aborted) abortListener();
+			else signal.addEventListener("abort", abortListener, { once: true });
 		}
 	});
 
@@ -1178,6 +1291,7 @@ async function runContrarian(
 	details.durationMs = Date.now() - startedAt;
 
 	if (wasAborted) {
+		if (details.exitCode === 0) details.exitCode = 1;
 		return { ok: false, error: "Contrarian was aborted.", details };
 	}
 
@@ -1187,6 +1301,7 @@ async function runContrarian(
 	// so callers can distinguish transient provider errors from a genuinely
 	// empty response.
 	if (lastStopReason === "error" || lastStopReason === "aborted") {
+		if (details.exitCode === 0) details.exitCode = 1;
 		return {
 			ok: false,
 			error: formatContrarianModelError(lastStopReason, lastErrorMessage),
@@ -1203,6 +1318,7 @@ async function runContrarian(
 	}
 
 	if (!finalOutput.trim()) {
+		if (details.exitCode === 0) details.exitCode = 1;
 		return {
 			ok: false,
 			error: details.stderr || "Contrarian finished without returning any text.",
@@ -1223,15 +1339,26 @@ function renderCollapsedText(text: string, lineLimit = COLLAPSED_LINE_LIMIT): st
 	return [...lines.slice(0, lineLimit), `... (${lines.length - lineLimit} more lines)`].join("\n");
 }
 
+type ContrarianExtensionDeps = {
+	spawnImpl?: typeof spawn;
+};
+
 export const __test__ = {
+	createContrarianExtension,
 	findAvailableModel,
 	isModelAvailabilityError,
 	parseModelPreference,
+	runContrarian,
 	resolveThinkingLevel,
 	selectContrarianModel,
 };
 
 export default function contrarianExtension(pi: ExtensionAPI) {
+	createContrarianExtension(pi);
+}
+
+function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDeps = {}) {
+	const spawnImpl = deps.spawnImpl ?? spawn;
 	const activeRuns = new Map<string, ContrarianUiRun>();
 	let preferences: ContrarianPreferences = {};
 
@@ -1377,6 +1504,13 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "contrarian") return undefined;
+		const details = event.details as ContrarianDetails | undefined;
+		if ((details?.exitCode ?? 0) === 0) return undefined;
+		return { isError: true };
+	});
+
 	pi.registerTool({
 		name: "contrarian",
 		label: "Contrarian",
@@ -1387,9 +1521,10 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use contrarian when you need to stress-test a proposal, implementation plan, design, assumption, bug hypothesis, review conclusion, or product direction.",
 			"Ask contrarian to steelman the strongest opposing case and separate confirmed objections, plausible concerns, and unresolved unknowns.",
-			"Do not use it for routine low-value work; it is slower than the main agent.",
-			"The contrarian is read-only by default. Set includeBash only when shell-based inspection is genuinely useful.",
-			"The contrarian requests high by default for reasoning models; defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
+			"Do not use contrarian for routine low-value work; contrarian is slower than the main agent.",
+			"The contrarian tool is read-only by default and only exposes read, grep, find, and ls unless contrarian includeBash is enabled.",
+			"Set contrarian includeBash only when the extra bash inspection tool is genuinely useful; keep contrarian relying on read, grep, find, and ls otherwise.",
+			"The contrarian tool requests high by default for reasoning models; contrarian defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
 		],
 		parameters: ContrarianParams,
 
@@ -1414,6 +1549,14 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 			try {
 				const attempts: ContrarianSelection[] = [];
 				const seen = new Set<string>();
+				const aggregateUsage = createEmptyUsage();
+				const finalizeResult = (
+					result: { content: Array<{ type: "text"; text: string }>; details: ContrarianDetails },
+				): AgentToolResult<ContrarianDetails> => ({
+					...result,
+					details: { ...result.details, usage: cloneUsageStats(aggregateUsage) },
+					usage: usageStatsToToolUsage(aggregateUsage),
+				});
 				const pushAttempt = (candidate: ContrarianSelection | undefined) => {
 					if (!candidate) return;
 					const key = `${candidate.provider}/${candidate.modelId}`.toLowerCase();
@@ -1455,7 +1598,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 				} else {
 					const selectionResult = await selectContrarianModel(ctx, configuredThinkingLevel);
 					if (!selectionResult.ok) {
-						return {
+						return finalizeResult({
 							content: [{ type: "text", text: selectionResult.error }],
 							details: {
 								modelRef: "",
@@ -1472,7 +1615,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 								durationMs: 0,
 								cwd: params.cwd ?? ctx.cwd,
 							},
-						};
+						});
 					}
 					for (const candidate of selectionResult.ordered) pushAttempt(candidate);
 				}
@@ -1496,25 +1639,26 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 					uiRun.selection = attempt;
 					updateContrarianUi(ctx, activeRuns);
 
-					const result = await runContrarian(attempt, { ...params, task }, signal, handleUpdate, ctx.cwd);
+					const result = await runContrarian(attempt, { ...params, task }, signal, handleUpdate, ctx.cwd, spawnImpl);
+					mergeUsageStats(aggregateUsage, result.details.usage);
 					if (result.ok) {
-						return {
+						return finalizeResult({
 							content: [{ type: "text", text: result.output }],
 							details: result.details,
-						};
+						});
 					}
 
 					lastErrorResult = result;
 					const canFallBack = index < attempts.length - 1 && isModelAvailabilityError(result.error);
 					if (!canFallBack) {
-						return {
+						return finalizeResult({
 							content: [{ type: "text", text: result.error }],
 							details: result.details,
-						};
+						});
 					}
 				}
 
-				return {
+				return finalizeResult({
 					content: [
 						{ type: "text", text: lastErrorResult?.error ?? "Contrarian could not select an available model." },
 					],
@@ -1534,7 +1678,7 @@ export default function contrarianExtension(pi: ExtensionAPI) {
 							durationMs: 0,
 							cwd: params.cwd ?? ctx.cwd,
 						},
-				};
+				});
 			} finally {
 				activeRuns.delete(toolCallId);
 				updateContrarianUi(ctx, activeRuns);

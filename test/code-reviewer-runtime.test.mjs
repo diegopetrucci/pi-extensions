@@ -41,6 +41,167 @@ function createGuardHandlers(factory) {
 	return handlers;
 }
 
+test("aggregates usage across assistant and compaction session events", async () => {
+	const mod = await loadRuntime();
+	const { aggregateAssistantUsage, addAssistantMessageUsage, addSessionEventUsage } = mod.__test__;
+
+	assert.deepEqual(
+		aggregateAssistantUsage([
+			{ role: 'user', usage: { input: 999 } },
+			{
+				role: 'assistant',
+				usage: {
+					input: 10,
+					output: 20,
+					cacheRead: 1,
+					cacheWrite: 2,
+					cacheWrite1h: 1,
+					reasoning: 3,
+					totalTokens: 30,
+					cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 },
+				},
+			},
+			{
+				role: 'assistant',
+				usage: {
+					input: 4,
+					output: 5,
+					cacheRead: 6,
+					cacheWrite: 7,
+					totalTokens: 9,
+					cost: { input: 0.4, output: 0.5, cacheRead: 0.6, cacheWrite: 0.7, total: 2.2 },
+				},
+			},
+		]),
+		{
+			input: 14,
+			output: 25,
+			cacheRead: 7,
+			cacheWrite: 9,
+			cacheWrite1h: 1,
+			reasoning: 3,
+			totalTokens: 39,
+			cost: { input: 0.5, output: 0.7, cacheRead: 0.61, cacheWrite: 0.72, total: 2.5300000000000002 },
+		},
+	);
+	const explicitZeros = aggregateAssistantUsage([{ role: 'assistant', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } }]);
+	assert.equal(explicitZeros.cacheWrite1h, 0);
+	assert.equal(explicitZeros.reasoning, 0);
+	const unreported = aggregateAssistantUsage([]);
+	assert.equal('cacheWrite1h' in unreported, false);
+	assert.equal('reasoning' in unreported, false);
+
+	const eventTotal = aggregateAssistantUsage([]);
+	addSessionEventUsage(eventTotal, {
+		type: 'compaction_end',
+		result: {
+			usage: {
+				input: 2,
+				output: 3,
+				cacheRead: 4,
+				cacheWrite: 5,
+				cacheWrite1h: 6,
+				reasoning: 7,
+				totalTokens: 8,
+				cost: { input: 0.2, output: 0.3, cacheRead: 0.4, cacheWrite: 0.5, total: 1.4 },
+			},
+		},
+	});
+	addSessionEventUsage(eventTotal, {
+		type: 'message_end',
+		message: {
+			role: 'assistant',
+			usage: { input: 7, output: 11, cacheRead: 0, cacheWrite: 0, totalTokens: 18, cost: { input: 0.7, output: 1.1, cacheRead: 0, cacheWrite: 0, total: 1.8 } },
+		},
+	});
+	assert.equal(eventTotal.input, 9);
+	assert.equal(eventTotal.output, 14);
+	assert.equal(eventTotal.cacheRead, 4);
+	assert.equal(eventTotal.cacheWrite, 5);
+	assert.equal(eventTotal.cacheWrite1h, 6);
+	assert.equal(eventTotal.reasoning, 7);
+	assert.equal(eventTotal.totalTokens, 26);
+	assert.equal(eventTotal.cost.total, 3.2);
+});
+
+test("code-reviewer classifies final assistant outcomes", async () => {
+	const mod = await loadRuntime();
+	const { inspectFinalAssistant } = mod.__test__;
+
+	assert.deepEqual(inspectFinalAssistant([]), {
+		ok: false,
+		reason: 'code_reviewer subagent produced no assistant message',
+	});
+	assert.deepEqual(
+		inspectFinalAssistant([{ role: 'assistant', stopReason: 'error', errorMessage: '404 model not found', content: [{ type: 'text', text: 'partial' }] }]),
+		{
+			ok: false,
+			reason: 'code_reviewer subagent error: 404 model not found',
+			stopReason: 'error',
+			errorMessage: '404 model not found',
+		},
+	);
+	assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'aborted', content: [{ type: 'text', text: 'partial' }] }]), {
+		ok: false,
+		reason: 'code_reviewer subagent aborted before producing a usable answer',
+		stopReason: 'aborted',
+	});
+	assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'stop', content: [] }]), {
+		ok: false,
+		reason: 'code_reviewer subagent produced no final assistant text (stopReason: stop)',
+		stopReason: 'stop',
+		errorMessage: undefined,
+	});
+	assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'ok' }] }]), {
+		ok: true,
+		answer: 'ok',
+		stopReason: 'stop',
+	});
+});
+
+test("code-reviewer distinguishes caller aborts from internal timeouts", async () => {
+	const mod = await loadRuntime();
+	const { classifyRunFailure } = mod.__test__;
+
+	assert.deepEqual(classifyRunFailure(new Error('code_reviewer timed out after 480 seconds.'), false), {
+		status: 'error',
+		message: 'code_reviewer timed out after 480 seconds.',
+		error: 'code_reviewer timed out after 480 seconds.',
+	});
+	assert.deepEqual(classifyRunFailure(new Error('code_reviewer subagent aborted before producing a usable answer'), false), {
+		status: 'error',
+		message: 'code_reviewer subagent aborted before producing a usable answer',
+		error: 'code_reviewer subagent aborted before producing a usable answer',
+	});
+	assert.deepEqual(classifyRunFailure(Object.assign(new Error('unexpected abort'), { name: 'AbortError' }), false), {
+		status: 'error',
+		message: 'unexpected abort',
+		error: 'unexpected abort',
+	});
+	assert.deepEqual(classifyRunFailure(new Error('provider error after caller abort'), true), {
+		status: 'aborted',
+		message: 'Aborted',
+		error: undefined,
+	});
+});
+
+test("code_reviewer tool_result marks only terminal failures as errors", async () => {
+	const mod = await loadRuntime();
+	const handlers = new Map();
+	mod.default({
+		on(eventName, handler) {
+			handlers.set(eventName, handler);
+		},
+		registerTool() {},
+	});
+	const toolResult = handlers.get('tool_result');
+	assert.equal(typeof toolResult, 'function');
+	assert.deepEqual(await toolResult({ toolName: 'code_reviewer', details: { status: 'error' } }), { isError: true });
+	assert.equal(await toolResult({ toolName: 'code_reviewer', details: { status: 'aborted' } }), undefined);
+	assert.equal(await toolResult({ toolName: 'code_reviewer', details: { status: 'done' } }), undefined);
+	assert.equal(await toolResult({ toolName: 'bash', details: { status: 'error' } }), undefined);
+});
+
 test("blocks git local-file options that bypass tool path guards", async () => {
 	const mod = await loadRuntime();
 	const { getBlockedBashReason } = mod.__test__;

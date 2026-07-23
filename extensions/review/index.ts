@@ -1996,36 +1996,71 @@ Instructions:
 		pi.appendEntry(REVIEW_STATE_TYPE, { active: false });
 	}
 
+	type SummaryNavigationResult =
+		| { status: "success" }
+		| { status: "cancelled" }
+		| { status: "late-success" }
+		| { status: "error"; error: string };
+
 	async function navigateWithSummary(
 		ctx: ExtensionCommandContext,
 		originId: string,
 		showLoader: boolean,
-	): Promise<{ cancelled: boolean; error?: string } | null> {
+	): Promise<SummaryNavigationResult> {
 		if (showLoader && ctx.mode === "tui") {
-			return ctx.ui.custom<{ cancelled: boolean; error?: string } | null>((tui, theme, _kb, done) => {
+			return ctx.ui.custom<SummaryNavigationResult>((tui, theme, _kb, done) => {
 				const loader = new BorderedLoader(tui, theme, "Returning and summarizing review branch...");
-				loader.onAbort = () => done(null);
+				let finished = false;
+				let abortRequested = false;
 
-				ctx.navigateTree(originId, {
-					summarize: true,
-					customInstructions: REVIEW_SUMMARY_PROMPT,
-					replaceInstructions: true,
-				})
-					.then(done)
-					.catch((err) => done({ cancelled: false, error: err instanceof Error ? err.message : String(err) }));
+				const finish = (result: SummaryNavigationResult) => {
+					if (finished) return;
+					finished = true;
+					done(result);
+				};
+
+				const navigationPromise = ctx
+					.navigateTree(originId, {
+						summarize: true,
+						customInstructions: REVIEW_SUMMARY_PROMPT,
+						replaceInstructions: true,
+					})
+					.then((result) => {
+						finish(
+							result.cancelled
+								? { status: "cancelled" }
+								: abortRequested
+									? { status: "late-success" }
+									: { status: "success" },
+						);
+					})
+					.catch((err) => {
+						finish({ status: "error", error: err instanceof Error ? err.message : String(err) });
+					});
+
+				loader.onAbort = () => {
+					if (abortRequested) return;
+					abortRequested = true;
+					void Promise.resolve()
+						.then(() => ctx.abort())
+						.catch(() => undefined)
+						.then(() => navigationPromise)
+						.catch(() => undefined);
+				};
 
 				return loader;
 			});
 		}
 
 		try {
-			return await ctx.navigateTree(originId, {
+			const result = await ctx.navigateTree(originId, {
 				summarize: true,
 				customInstructions: REVIEW_SUMMARY_PROMPT,
 				replaceInstructions: true,
 			});
+			return result.cancelled ? { status: "cancelled" } : { status: "success" };
 		} catch (error) {
-			return { cancelled: false, error: error instanceof Error ? error.message : String(error) };
+			return { status: "error", error: error instanceof Error ? error.message : String(error) };
 		}
 	}
 
@@ -2064,22 +2099,21 @@ Instructions:
 		}
 
 		const summaryResult = await navigateWithSummary(ctx, originId, options.showSummaryLoader ?? false);
-		if (summaryResult === null) {
-			ctx.ui.notify("Summarization cancelled. Use /end-review to try again.", "info");
-			return "cancelled";
-		}
-
-		if (summaryResult.error) {
+		if (summaryResult.status === "error") {
 			ctx.ui.notify(`Summarization failed: ${summaryResult.error}`, "error");
 			return "error";
 		}
 
-		if (summaryResult.cancelled) {
+		if (summaryResult.status === "cancelled") {
 			ctx.ui.notify("Navigation cancelled. Use /end-review to try again.", "info");
 			return "cancelled";
 		}
 
 		clearReviewState(ctx);
+		if (summaryResult.status === "late-success") {
+			ctx.ui.notify("Cancellation arrived too late; review already completed, and no follow-up was queued.", "warning");
+			return "ok";
+		}
 
 		if (action === "returnAndSummarize") {
 			if (!ctx.ui.getEditorText().trim()) {

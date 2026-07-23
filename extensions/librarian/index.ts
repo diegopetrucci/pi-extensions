@@ -1,10 +1,12 @@
-import type { Dirent } from "node:fs";
+import { randomUUID } from "node:crypto";
+import type { Dirent, Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
 	DefaultResourceLoader,
 	SessionManager,
@@ -26,6 +28,11 @@ const CACHE_TTL_MS = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
 const CACHE_METADATA_FILE = ".pi-librarian-cache.json";
 const CACHE_MARKER_FILE = ".pi-librarian-cache-used";
 const CACHE_CONFIG_FILE = "librarian.json";
+const CLEANUP_LOCK_FILE = ".cleanup.lock";
+const CLEANUP_LOCK_STALE_MS = 5 * 60 * 1000;
+const CLEANUP_LOCK_HEARTBEAT_MS = 60 * 1000;
+// Absolute owner lease prevents PID reuse from keeping an abandoned lock forever.
+const CLEANUP_LOCK_MAX_LEASE_MS = 24 * 60 * 60 * 1000;
 
 type LibrarianStatus = "running" | "done" | "error" | "aborted";
 
@@ -252,54 +259,236 @@ async function isManagedRepoCache(repoDir: string): Promise<boolean> {
 			(await pathExists(path.join(repoDir, CACHE_MARKER_FILE))));
 }
 
-async function cleanupExpiredCache(cacheRoot: string): Promise<{ deleted: number; errors: string[] }> {
-	const errors: string[] = [];
-	let deleted = 0;
-	const now = Date.now();
-	const root = path.resolve(cacheRoot);
-	const lockPath = path.join(root, ".cleanup.lock");
-	let lock: FileHandle | undefined;
+type CleanupLockOwner = {
+	pid: number;
+	hostname: string;
+	token: string;
+	acquiredAt: string;
+};
 
+type CleanupLock = {
+	handle: FileHandle;
+	path: string;
+	owner: CleanupLockOwner;
+	identity: Pick<Stats, "dev" | "ino">;
+};
+
+function sameFileIdentity(left: Pick<Stats, "dev" | "ino">, right: Pick<Stats, "dev" | "ino">): boolean {
+	return left.dev === right.dev && left.ino === right.ino;
+}
+
+function parseCleanupLockOwner(value: string): CleanupLockOwner | undefined {
 	try {
-		lock = await fs.open(lockPath, "wx");
+		const owner = JSON.parse(value) as Partial<CleanupLockOwner>;
+		if (!Number.isSafeInteger(owner.pid) || (owner.pid ?? 0) <= 0) return undefined;
+		if (typeof owner.hostname !== "string" || !owner.hostname) return undefined;
+		if (typeof owner.token !== "string" || !owner.token) return undefined;
+		if (typeof owner.acquiredAt !== "string" || !owner.acquiredAt) return undefined;
+		if (!Number.isFinite(Date.parse(owner.acquiredAt))) return undefined;
+		return owner as CleanupLockOwner;
+	} catch {
+		return undefined;
+	}
+}
+
+function isCleanupLockLeaseExpired(owner: CleanupLockOwner | undefined, now = Date.now()): boolean {
+	if (!owner) return true;
+	const acquiredAt = Date.parse(owner.acquiredAt);
+	if (!Number.isFinite(acquiredAt)) return true;
+	return Math.max(0, now - acquiredAt) > CLEANUP_LOCK_MAX_LEASE_MS;
+}
+
+function isRecordedOwnerAlive(owner: CleanupLockOwner | undefined): boolean {
+	if (!owner || owner.hostname !== os.hostname()) return false;
+	try {
+		process.kill(owner.pid, 0);
+		return true;
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "EEXIST") return { deleted, errors };
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+async function restoreMovedLock(movedPath: string, lockPath: string): Promise<void> {
+	try {
+		// link() restores only when lockPath is still absent; unlike rename(), it cannot overwrite a newer owner.
+		await fs.link(movedPath, lockPath);
+		await fs.rm(movedPath, { force: true });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		// Preserve both owners rather than deleting the moved lock when another owner won the canonical path.
+	}
+}
+
+async function removeLockPathIfOwned(lockPath: string, identity: Pick<Stats, "dev" | "ino">): Promise<void> {
+	const currentStat = await fs.stat(lockPath).catch(() => undefined);
+	if (!currentStat || !sameFileIdentity(identity, currentStat)) return;
+	await fs.rm(lockPath, { force: true }).catch(() => undefined);
+}
+
+async function getCleanupLockPathIdentity(lockPath: string): Promise<Pick<Stats, "dev" | "ino"> | undefined> {
+	const canonicalPath = await fs.realpath(lockPath).catch((error: NodeJS.ErrnoException) => {
+		if (error.code === "ENOENT") return undefined;
+		throw error;
+	});
+	if (!canonicalPath) return undefined;
+	const currentStat = await fs.stat(canonicalPath).catch((error: NodeJS.ErrnoException) => {
+		if (error.code === "ENOENT") return undefined;
+		throw error;
+	});
+	return currentStat ? { dev: currentStat.dev, ino: currentStat.ino } : undefined;
+}
+
+async function cleanupLockOwnershipError(lock: CleanupLock, stage: string): Promise<string | undefined> {
+	const currentIdentity = await getCleanupLockPathIdentity(lock.path);
+	if (currentIdentity && sameFileIdentity(lock.identity, currentIdentity)) return undefined;
+	return `cleanup lock ownership lost before ${stage}; stopping cleanup.`;
+}
+
+async function tryAcquireCleanupLock(root: string): Promise<CleanupLock | undefined> {
+	const lockPath = path.join(root, CLEANUP_LOCK_FILE);
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const owner: CleanupLockOwner = {
+			pid: process.pid,
+			hostname: os.hostname(),
+			token: randomUUID(),
+			acquiredAt: new Date().toISOString(),
+		};
+		try {
+			const handle = await fs.open(lockPath, "wx");
+			const identity = await handle.stat();
+			try {
+				await handle.writeFile(JSON.stringify(owner), "utf8");
+				await handle.sync();
+				return { handle, path: lockPath, owner, identity };
+			} catch (error) {
+				await handle.close().catch(() => undefined);
+				await removeLockPathIfOwned(lockPath, identity);
+				throw error;
+			}
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+
+		let existing: FileHandle | undefined;
+		try {
+			existing = await fs.open(lockPath, "r");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
+		}
+		try {
+			const stat = await existing.stat();
+			const recordedOwner = parseCleanupLockOwner(await existing.readFile("utf8"));
+			const now = Date.now();
+			const ageMs = Math.max(0, now - stat.mtimeMs);
+			if (!recordedOwner) {
+				if (ageMs <= CLEANUP_LOCK_STALE_MS) return undefined;
+			} else {
+				const leaseExpired = isCleanupLockLeaseExpired(recordedOwner, now);
+				if (isRecordedOwnerAlive(recordedOwner) && !leaseExpired) return undefined;
+				if (!leaseExpired && ageMs <= CLEANUP_LOCK_STALE_MS) return undefined;
+			}
+
+			const stalePath = path.join(root, `${CLEANUP_LOCK_FILE}.stale-${process.pid}-${randomUUID()}`);
+			try {
+				await fs.rename(lockPath, stalePath);
+			} catch (renameError) {
+				if ((renameError as NodeJS.ErrnoException).code === "ENOENT") continue;
+				throw renameError;
+			}
+			const movedStat = await fs.stat(stalePath).catch(() => undefined);
+			if (!movedStat || !sameFileIdentity(stat, movedStat)) {
+				await restoreMovedLock(stalePath, lockPath);
+				return undefined;
+			}
+			await fs.rm(stalePath, { force: true });
+		} finally {
+			await existing.close().catch(() => undefined);
+		}
+	}
+	return undefined;
+}
+
+async function heartbeatCleanupLock(lock: CleanupLock): Promise<void> {
+	const now = new Date();
+	await lock.handle.utimes(now, now);
+}
+
+async function releaseCleanupLock(lock: CleanupLock): Promise<void> {
+	await lock.handle.close().catch(() => undefined);
+	const currentStat = await fs.stat(lock.path).catch(() => undefined);
+	if (!currentStat || !sameFileIdentity(lock.identity, currentStat)) return;
+	const releasePath = `${lock.path}.release-${process.pid}-${lock.owner.token}`;
+	try {
+		await fs.rename(lock.path, releasePath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
 		throw error;
 	}
+	const movedStat = await fs.stat(releasePath).catch(() => undefined);
+	if (!movedStat || !sameFileIdentity(lock.identity, movedStat)) {
+		await restoreMovedLock(releasePath, lock.path);
+		return;
+	}
+	await fs.rm(releasePath, { force: true });
+}
 
-	try {
-		const hosts = await safeReadDir(root);
-		for (const host of hosts) {
-			if (!host.isDirectory()) continue;
-			const hostDir = path.join(root, host.name);
-			const owners = await safeReadDir(hostDir);
-			for (const owner of owners) {
-				if (!owner.isDirectory()) continue;
-				const ownerDir = path.join(hostDir, owner.name);
-				const repos = await safeReadDir(ownerDir);
-				for (const repo of repos) {
-					if (!repo.isDirectory()) continue;
-					const repoDir = path.join(ownerDir, repo.name);
-					if (!isInside(root, repoDir)) continue;
+async function cleanupExpiredRepos(root: string, now: number, lock: CleanupLock): Promise<{ deleted: number; errors: string[] }> {
+	const errors: string[] = [];
+	let deleted = 0;
+	const ownershipBeforeScan = await cleanupLockOwnershipError(lock, "cache scan");
+	if (ownershipBeforeScan) return { deleted, errors: [ownershipBeforeScan] };
 
-					try {
-						if (!(await isManagedRepoCache(repoDir))) continue;
-						const lastUsedAt = await getRepoLastUsedAt(repoDir);
-						if (lastUsedAt === undefined || now - lastUsedAt <= CACHE_TTL_MS) continue;
-						await fs.rm(repoDir, { recursive: true, force: true });
-						deleted += 1;
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						errors.push(`${repoDir}: ${message}`);
-					}
+	const hosts = await safeReadDir(root);
+	for (const host of hosts) {
+		if (!host.isDirectory()) continue;
+		const hostDir = path.join(root, host.name);
+		const owners = await safeReadDir(hostDir);
+		for (const owner of owners) {
+			if (!owner.isDirectory()) continue;
+			const ownerDir = path.join(hostDir, owner.name);
+			const repos = await safeReadDir(ownerDir);
+			for (const repo of repos) {
+				if (!repo.isDirectory()) continue;
+				const repoDir = path.join(ownerDir, repo.name);
+				if (!isInside(root, repoDir)) continue;
+
+				try {
+					if (!(await isManagedRepoCache(repoDir))) continue;
+					const lastUsedAt = await getRepoLastUsedAt(repoDir);
+					if (lastUsedAt === undefined || now - lastUsedAt <= CACHE_TTL_MS) continue;
+					const ownershipBeforeDelete = await cleanupLockOwnershipError(lock, `deleting ${repoDir}`);
+					if (ownershipBeforeDelete) return { deleted, errors: [...errors, ownershipBeforeDelete] };
+					await fs.rm(repoDir, { recursive: true, force: true });
+					deleted += 1;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					errors.push(`${repoDir}: ${message}`);
 				}
 			}
 		}
+	}
 
-		return { deleted, errors };
+	return { deleted, errors };
+}
+
+async function cleanupExpiredCache(cacheRoot: string): Promise<{ deleted: number; errors: string[] }> {
+	const now = Date.now();
+	const root = path.resolve(cacheRoot);
+	let lock: CleanupLock | undefined;
+	let heartbeat: NodeJS.Timeout | undefined;
+
+	try {
+		lock = await tryAcquireCleanupLock(root);
+		if (!lock) return { deleted: 0, errors: [] };
+		heartbeat = setInterval(() => {
+			if (lock) void heartbeatCleanupLock(lock).catch(() => undefined);
+		}, CLEANUP_LOCK_HEARTBEAT_MS);
+		heartbeat.unref?.();
+		return await cleanupExpiredRepos(root, now, lock);
 	} finally {
-		await lock?.close().catch(() => undefined);
-		await fs.rm(lockPath, { force: true }).catch(() => undefined);
+		if (heartbeat) clearInterval(heartbeat);
+		if (lock) await releaseCleanupLock(lock).catch(() => undefined);
 	}
 }
 
@@ -735,12 +924,44 @@ function buildUserPrompt(query: string, repos: string[], owners: string[], maxSe
 	return `Task: locate and cite exact GitHub code locations that answer the query.\n\nQuery: ${query}\nRepository filters: ${repos.length ? repos.join(", ") : "(none)"}\nOwner filters: ${owners.length ? owners.join(", ") : "(none)"}\nMax search results per gh search call: ${maxSearchResults}\nLocal checkout cache: ${cache.mode === "enabled" ? `enabled at ${cache.root}` : "disabled"}\nCache decision: ${cache.decisionReason}\n\nRespond directly with concise, citation-heavy findings. Always pass --limit ${maxSearchResults} to gh search code unless a narrower command is clearly better.`;
 }
 
-type AssistantLikeMessage = {
-	role?: string;
-	content?: unknown;
-	stopReason?: unknown;
-	errorMessage?: unknown;
-};
+function createEmptyUsage(): Usage {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+}
+
+function addUsage(total: Usage, usage: Usage): void {
+	total.input += usage.input || 0;
+	total.output += usage.output || 0;
+	total.cacheRead += usage.cacheRead || 0;
+	total.cacheWrite += usage.cacheWrite || 0;
+	if (usage.cacheWrite1h !== undefined) total.cacheWrite1h = (total.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+	if (usage.reasoning !== undefined) total.reasoning = (total.reasoning ?? 0) + usage.reasoning;
+	total.totalTokens += usage.totalTokens || 0;
+	total.cost.input += usage.cost?.input || 0;
+	total.cost.output += usage.cost?.output || 0;
+	total.cost.cacheRead += usage.cost?.cacheRead || 0;
+	total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
+	total.cost.total += usage.cost?.total || 0;
+}
+
+type AssistantLikeMessage = { role?: string; content?: unknown; stopReason?: unknown; errorMessage?: unknown; usage?: unknown };
+
+function addAssistantMessageUsage(total: Usage, message: unknown): void {
+	const assistant = message as AssistantLikeMessage;
+	if (assistant?.role !== "assistant" || !assistant.usage || typeof assistant.usage !== "object") return;
+	addUsage(total, assistant.usage as Usage);
+}
+
+function aggregateAssistantUsage(messages: unknown[]): Usage {
+	const total = createEmptyUsage();
+	for (const message of messages) addAssistantMessageUsage(total, message);
+	return total;
+}
+
+function addSessionEventUsage(total: Usage, event: unknown): void {
+	const sessionEvent = event as { type?: string; message?: unknown; result?: { usage?: Usage } };
+	if (sessionEvent?.type === "message_end") return void addAssistantMessageUsage(total, sessionEvent.message);
+	if (sessionEvent?.type === "compaction_end" && sessionEvent.result?.usage) addUsage(total, sessionEvent.result.usage);
+}
 
 function getLastAssistantMessage(messages: unknown[]): AssistantLikeMessage | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -750,17 +971,69 @@ function getLastAssistantMessage(messages: unknown[]): AssistantLikeMessage | un
 	return undefined;
 }
 
-function extractLastAssistantText(messages: unknown[]): string {
+function inspectFinalAssistant(messages: unknown[]):
+	| { ok: true; answer: string; message: AssistantLikeMessage; stopReason?: string }
+	| { ok: false; reason: string; message?: AssistantLikeMessage; stopReason?: string; errorMessage?: string } {
 	const message = getLastAssistantMessage(messages);
-	if (!message || !Array.isArray(message.content)) return "";
-	const parts: string[] = [];
-	for (const part of message.content) {
-		if (part && typeof part === "object" && (part as { type?: string }).type === "text") {
-			const text = (part as { text?: unknown }).text;
-			if (typeof text === "string") parts.push(text);
-		}
+	if (!message) return { ok: false, reason: "the internal subagent produced no assistant message" };
+	const stopReason = typeof message.stopReason === "string" ? message.stopReason.trim() : "";
+	const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+	const answer = Array.isArray(message.content)
+		? message.content
+			.map((part) => (part && typeof part === "object" && (part as { type?: string }).type === "text" && typeof (part as { text?: unknown }).text === "string"
+				? (part as { text: string }).text
+				: ""))
+			.join("")
+			.trim()
+		: "";
+	if (stopReason === "error") {
+		return {
+			ok: false,
+			reason: `the internal subagent stopped with an error: ${errorMessage || "provider/model error"}`,
+			message,
+			stopReason,
+			errorMessage: errorMessage || undefined,
+		};
 	}
-	return parts.join("").trim();
+	if (stopReason === "aborted") {
+		return { ok: false, reason: "the internal subagent was aborted before producing an answer", message, stopReason };
+	}
+	if (answer) return { ok: true, answer, message, stopReason: stopReason || undefined };
+	return { ok: false, reason: describeNoAnswerReason(message, 0), message, stopReason: stopReason || undefined };
+}
+
+function classifyRunFailure(error: unknown, callerAborted: boolean): { status: "aborted" | "error"; message: string; error?: string } {
+	const message = callerAborted ? "Aborted" : error instanceof Error ? error.message : String(error);
+	return { status: callerAborted ? "aborted" : "error", message, error: callerAborted ? undefined : message };
+}
+
+function resolveLibrarianTerminalOutcome(
+	outcome: ReturnType<typeof inspectFinalAssistant> | undefined,
+	callerAborted: boolean,
+	turns: number,
+	fallbackReason?: string,
+): { status: "done"; content: string } | { status: "aborted"; content: "Aborted" } | { status: "error"; reason: string } {
+	if (callerAborted) return { status: "aborted", content: "Aborted" };
+	if (outcome?.ok) return { status: "done", content: outcome.answer };
+	const reason = fallbackReason ?? (outcome?.stopReason ? outcome.reason : describeNoAnswerReason(outcome?.message, turns));
+	return { status: "error", reason };
+}
+
+function createLibrarianAbortController(abortChild: () => void, onCallerAbort: () => void) {
+	let callerAborted = false;
+	return {
+		get callerAborted() {
+			return callerAborted;
+		},
+		abortForCleanup() {
+			abortChild();
+		},
+		abortFromCaller() {
+			callerAborted = true;
+			onCallerAbort();
+			abortChild();
+		},
+	};
 }
 
 function describeNoAnswerReason(message: AssistantLikeMessage | undefined, turns: number): string {
@@ -808,18 +1081,29 @@ function renderAnswer(details: LibrarianDetails): string {
 	return details.status === "running" ? "(searching GitHub...)" : "(no output)";
 }
 
-function isAbortLikeError(error: unknown): boolean {
-	if (error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError") return true;
-	const message = error instanceof Error ? error.message : String(error);
-	return /aborted|cancelled|canceled/i.test(message);
-}
-
 export const __test__ = {
 	buildLibrarianCandidates,
 	findAvailableModel,
 	isModelAvailabilityError,
 	parseModelPreference,
 	resolveThinkingLevel,
+	aggregateAssistantUsage,
+	addAssistantMessageUsage,
+	addSessionEventUsage,
+	inspectFinalAssistant,
+	classifyRunFailure,
+	resolveLibrarianTerminalOutcome,
+	createLibrarianAbortController,
+	cleanupExpiredCache,
+	cleanupExpiredRepos,
+	cleanupLockOwnershipError,
+	tryAcquireCleanupLock,
+	heartbeatCleanupLock,
+	releaseCleanupLock,
+	CLEANUP_LOCK_FILE,
+	CLEANUP_LOCK_STALE_MS,
+	CLEANUP_LOCK_MAX_LEASE_MS,
+	isCleanupLockLeaseExpired,
 };
 
 export default function librarianExtension(pi: ExtensionAPI) {
@@ -1087,25 +1371,27 @@ export default function librarianExtension(pi: ExtensionAPI) {
 			let unsubscribe: (() => void) | undefined;
 			let runTimeout: NodeJS.Timeout | undefined;
 			let abortListenerAdded = false;
-			let aborted = Boolean(signal?.aborted);
+			const usage = createEmptyUsage();
 
 			const emit = (force = false) => {
 				void force;
 				onUpdate?.({ content: [{ type: "text", text: lastContent }], details });
 			};
 
-			const abort = () => {
-				aborted = true;
-				details.status = "aborted";
-				details.endedAt = Date.now();
-				lastContent = "Aborted";
-				emit(true);
-				void session?.abort();
-			};
+			const abortController = createLibrarianAbortController(
+				() => void session?.abort(),
+				() => {
+					details.status = "aborted";
+					details.endedAt = Date.now();
+					lastContent = "Aborted";
+					emit(true);
+				},
+			);
+			const abortFromCaller = () => abortController.abortFromCaller();
 
-			if (signal?.aborted) abort();
+			if (signal?.aborted) abortFromCaller();
 			if (signal && !signal.aborted) {
-				signal.addEventListener("abort", abort);
+				signal.addEventListener("abort", abortFromCaller);
 				abortListenerAdded = true;
 			}
 
@@ -1144,7 +1430,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 
 				const runAttempt = async (
 					candidate: LibrarianCandidate,
-				): Promise<{ answer: string; lastAssistant: AssistantLikeMessage | undefined }> => {
+				): Promise<ReturnType<typeof inspectFinalAssistant>> => {
 					details.model = candidate.details;
 					details.turns = 0;
 					details.toolCalls = [];
@@ -1161,7 +1447,9 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					});
 
 					session = created.session as typeof session;
+					if (abortController.callerAborted) abortController.abortForCleanup();
 					unsubscribe = (created.session as any).subscribe((event: any) => {
+						addSessionEventUsage(usage, event);
 						switch (event.type) {
 							case "turn_end":
 								details.turns += 1;
@@ -1192,22 +1480,20 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					});
 
 					try {
-						if (!aborted) {
+						if (!abortController.callerAborted) {
 							const promptPromise = created.session.prompt(buildUserPrompt(query, repos, owners, maxSearchResults, details.cache), {
 								expandPromptTemplates: false,
 							});
 							const timeoutPromise = new Promise<never>((_resolve, reject) => {
 								runTimeout = setTimeout(() => {
-									abort();
+									abortController.abortForCleanup();
 									reject(new Error(`Librarian timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`));
 								}, MAX_RUN_MS);
 							});
 							await Promise.race([promptPromise, timeoutPromise]);
 						}
 
-						const lastAssistant = session ? getLastAssistantMessage(session.state.messages) : undefined;
-						const answer = session ? extractLastAssistantText(session.state.messages) : "";
-						return { answer, lastAssistant };
+						return inspectFinalAssistant(session?.state.messages ?? []);
 					} finally {
 						if (runTimeout) {
 							clearTimeout(runTimeout);
@@ -1220,57 +1506,48 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					}
 				};
 
-				let answer = "";
-				let lastAssistant: AssistantLikeMessage | undefined;
+				let lastOutcome: ReturnType<typeof inspectFinalAssistant> | undefined;
 				let attemptErrorReason: string | undefined;
 				for (let index = 0; index < candidates.length; index++) {
-					if (aborted) break;
+					if (abortController.callerAborted) break;
 					const candidate =
 						index === 0 ? candidates[index] : withLibrarianFallbackReason(candidates[index], candidates[index - 1]);
 
-					let attempt: { answer: string; lastAssistant: AssistantLikeMessage | undefined };
+					let attempt: ReturnType<typeof inspectFinalAssistant>;
 					try {
 						attempt = await runAttempt(candidate);
 					} catch (error) {
-						// Let aborts/timeouts propagate to the outer handler.
-						if (aborted || isAbortLikeError(error)) throw error;
+						if (abortController.callerAborted) throw error;
 						// Some providers throw (rather than carry the error on the assistant
 						// message) when a model is unavailable; treat that like a
 						// message-carried availability error and fall back to the next model.
 						const message = error instanceof Error ? error.message : String(error);
 						if (index < candidates.length - 1 && isModelAvailabilityError(message)) {
-							answer = "";
-							lastAssistant = undefined;
+							lastOutcome = undefined;
 							attemptErrorReason = `the internal subagent stopped with an error: ${message}`;
 							continue;
 						}
 						throw error;
 					}
 
-					answer = attempt.answer;
-					lastAssistant = attempt.lastAssistant;
-					if (answer || aborted) break;
+					lastOutcome = attempt;
+					if (abortController.callerAborted || attempt.ok) break;
 
-					attemptErrorReason = describeNoAnswerReason(lastAssistant, details.turns);
-					const errorMessage =
-						lastAssistant && lastAssistant.stopReason === "error" && typeof lastAssistant.errorMessage === "string"
-							? lastAssistant.errorMessage
-							: undefined;
-					const canFallBack = index < candidates.length - 1 && isModelAvailabilityError(errorMessage);
+					attemptErrorReason = attempt.stopReason ? attempt.reason : describeNoAnswerReason(attempt.message, details.turns);
+					const canFallBack =
+						index < candidates.length - 1 &&
+						attempt.stopReason === "error" &&
+						isModelAvailabilityError(attempt.errorMessage);
 					if (!canFallBack) break;
 				}
 
-				if (answer) {
-					lastContent = answer;
-					details.status = "done";
-				} else if (aborted) {
-					lastContent = "Aborted";
-					details.status = "aborted";
+				const terminal = resolveLibrarianTerminalOutcome(lastOutcome, abortController.callerAborted, details.turns, attemptErrorReason);
+				details.status = terminal.status;
+				if (terminal.status === "error") {
+					lastContent = formatInternalFailure(details, terminal.reason);
+					details.error = terminal.reason;
 				} else {
-					details.status = "error";
-					const reason = attemptErrorReason ?? describeNoAnswerReason(lastAssistant, details.turns);
-					lastContent = formatInternalFailure(details, reason);
-					details.error = reason;
+					lastContent = terminal.content;
 				}
 				details.endedAt = Date.now();
 				emit(true);
@@ -1278,12 +1555,13 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: lastContent }],
 					details,
+					usage,
 				};
 			} catch (error) {
-				const wasAbort = aborted || isAbortLikeError(error);
-				const message = wasAbort ? "Aborted" : error instanceof Error ? error.message : String(error);
-				details.status = wasAbort ? "aborted" : "error";
-				details.error = wasAbort ? undefined : message;
+				const failure = classifyRunFailure(error, abortController.callerAborted);
+				const { message } = failure;
+				details.status = failure.status;
+				details.error = failure.error;
 				details.endedAt = Date.now();
 				lastContent = message;
 				emit(true);
@@ -1291,10 +1569,11 @@ export default function librarianExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: message }],
 					details,
+					usage,
 				};
 			} finally {
 				if (runTimeout) clearTimeout(runTimeout);
-				if (signal && abortListenerAdded) signal.removeEventListener("abort", abort);
+				if (signal && abortListenerAdded) signal.removeEventListener("abort", abortFromCaller);
 				unsubscribe?.();
 				session?.dispose();
 			}

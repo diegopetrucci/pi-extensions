@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-dirty-repo-guard",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A pi extension that prompts before session changes when the current git repo has uncommitted changes.",
   "keywords": [
     "pi-package",
