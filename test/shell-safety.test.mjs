@@ -310,7 +310,7 @@ test('permission-gate ignores non-bash tool events', async () => {
   assert.equal(prompted, false);
 });
 
-test('permission-gate blocks dangerous bash commands when no UI is available', async () => {
+test('permission-gate blocks destructive rm variants and shell wrappers when no UI is available', async () => {
   const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
   const { pi, handlers } = createPi();
   permissionGate(pi);
@@ -318,15 +318,183 @@ test('permission-gate blocks dangerous bash commands when no UI is available', a
   const toolCallHandler = handlers.get('tool_call');
   assert.equal(typeof toolCallHandler, 'function');
 
-  const result = await toolCallHandler(
-    { toolName: 'bash', input: { command: 'rm -rf /tmp/example' } },
-    { hasUI: false },
-  );
+  for (const command of [
+    'rm -rf /tmp/example',
+    'rm -fr /tmp/example',
+    'rm -r -f /tmp/example',
+    'rm -f -r /tmp/example',
+    'rm -Rf /tmp/example',
+    'rm -fR /tmp/example',
+    'rm --recursive --force /tmp/example',
+    'rm --force --recursive /tmp/example',
+    'rm /tmp/example -rf',
+    '/bin/rm -rf /tmp/example',
+    'time rm -rf /tmp/example',
+    '/usr/bin/time /bin/rm -rf /tmp/example',
+    'nohup rm -rf /tmp/example',
+    'nice rm -rf /tmp/example',
+    'nice -n 5 rm -rf /tmp/example',
+    'timeout 5 rm -rf /tmp/example',
+    'stdbuf -oL rm -rf /tmp/example',
+    'busybox rm -rf /tmp/example',
+    'busybox sh -c "rm -rf /tmp/example"',
+    'time nohup /bin/rm -rf /tmp/example',
+    'command rm -rf /tmp/example',
+    'command -- rm -rf /tmp/example',
+    'env rm -rf /tmp/example',
+    'env -u PATH rm -rf /tmp/example',
+    'env -uPATH rm -rf /tmp/example',
+    'env --unset PATH rm -rf /tmp/example',
+    'env --unset=PATH rm -rf /tmp/example',
+    'env -C /tmp rm -rf example',
+    'env -C/tmp rm -rf example',
+    'env --chdir /tmp rm -rf example',
+    'env --chdir=/tmp rm -rf example',
+    'xargs rm -rf < paths.txt',
+    'xargs -n1 rm -rf < paths.txt',
+    'xargs -n 1 rm -rf < paths.txt',
+    'xargs --max-args=1 rm -rf < paths.txt',
+    'xargs -P4 rm -rf < paths.txt',
+    'xargs -P 4 rm -rf < paths.txt',
+    'xargs --max-procs=4 rm -rf < paths.txt',
+    'xargs -I{} rm -rf {}',
+    'xargs -I {} rm -rf {}',
+    'xargs --replace={} rm -rf {}',
+    'xargs --replace rm -rf',
+    'xargs -apaths.txt rm -rf',
+    'xargs -a paths.txt rm -rf',
+    'xargs --arg-file=paths.txt rm -rf',
+    'xargs -E EOF rm -rf < paths.txt',
+    'xargs -EEOF rm -rf < paths.txt',
+    'xargs --eof=EOF rm -rf < paths.txt',
+    'xargs --eof EOF rm -rf',
+    'xargs --eof rm -rf',
+    'xargs --max-lines rm -rf',
+    'find . -name tmp -exec rm -rf {} +',
+    'find . -execdir rm -rf {} +',
+    'find . -exec time rm -rf {} +',
+    'find . -exec /usr/bin/env rm -rf {} +',
+    'printf ok $(rm -rf /tmp/example)',
+    'echo "$(rm -rf /tmp/example)"',
+    'echo "before `rm -rf /tmp/example` after"',
+    'sh -c "rm -rf /tmp/example"',
+    'sh -c "time rm -rf /tmp/example"',
+    "sh -c 'rm -rf /tmp/example'",
+    '/bin/bash -c "rm -rf /tmp/example"',
+    'bash -lc "rm -rf /tmp/example"',
+    'zsh -fc "rm -rf /tmp/example"',
+    'dash -c "rm -rf /tmp/example"',
+    'ksh -c "rm -rf /tmp/example"',
+    'command /bin/bash -c "rm -rf /tmp/example"',
+    'env SHELL=/bin/sh sh -c "rm -rf /tmp/example"',
+    'eval "rm -rf /tmp/example"',
+    "eval 'rm -rf /tmp/example'",
+    'eval rm -rf /tmp/example',
+    'eval time rm -rf /tmp/example',
+    '(rm -rf /tmp/example)',
+  ]) {
+    const result = await toolCallHandler(
+      { toolName: 'bash', input: { command } },
+      { hasUI: false },
+    );
 
-  assert.deepEqual(result, {
-    block: true,
-    reason: 'Dangerous command blocked (no UI for confirmation)',
-  });
+    assert.deepEqual(result, {
+      block: true,
+      reason: 'Dangerous command blocked (no UI for confirmation)',
+    }, command);
+  }
+});
+
+test('permission-gate keeps wrapper handling shallow with explicit expected outcomes', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  let prompted = false;
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  const expectedOutcomes = [
+    { command: 'command -v rm', blocked: false },
+    { command: 'command -V rm', blocked: false },
+    { command: 'command -v rm rm -rf', blocked: false },
+    { command: 'env --help', blocked: false },
+    { command: 'env --help ignored rm -rf', blocked: false },
+    { command: 'env --version', blocked: false },
+    { command: 'xargs --help', blocked: false },
+    { command: 'xargs --help ignored rm -rf', blocked: false },
+    { command: 'xargs --version', blocked: false },
+    { command: 'rm -- -rf', blocked: false },
+    { command: 'rm -r -- -f', blocked: false },
+    { command: 'rm -f -- -R', blocked: false },
+    { command: 'time rm -- -rf', blocked: false },
+    { command: 'nohup rm -r /tmp/example', blocked: false },
+    { command: 'busybox rm -f /tmp/example', blocked: false },
+    { command: 'env -u PATH printf ok', blocked: false },
+    { command: 'xargs -n1 printf ok < paths.txt', blocked: false },
+    { command: 'xargs -E EOF printf ok < paths.txt', blocked: false },
+    { command: 'xargs --eof=EOF printf ok < paths.txt', blocked: false },
+    { command: 'xargs --eof EOF printf ok', blocked: false },
+    { command: 'xargs -E rm -rf', blocked: false },
+    { command: 'xargs --eof=rm -rf', blocked: false },
+    { command: 'xargs -I rm -rf', blocked: false },
+    { command: 'xargs --replace=rm -rf', blocked: false },
+    { command: 'xargs -L rm -rf', blocked: false },
+    { command: 'xargs --max-lines=rm -rf', blocked: false },
+    { command: 'xargs -s 64 printf ok < paths.txt', blocked: false },
+    { command: 'xargs --max-chars=64 printf ok < paths.txt', blocked: false },
+    { command: 'xargs --max-chars 64 printf ok', blocked: false },
+    { command: 'xargs -d : printf ok < paths.txt', blocked: false },
+    { command: 'xargs --delimiter=: printf ok < paths.txt', blocked: false },
+    { command: 'xargs --delimiter : printf ok', blocked: false },
+    { command: 'xargs -L 2 printf ok < paths.txt', blocked: false },
+    { command: 'xargs --max-lines=2 printf ok < paths.txt', blocked: false },
+    { command: 'xargs --max-lines 2 printf ok', blocked: false },
+    { command: 'command -p rm -rf /tmp/example', blocked: true },
+    { command: 'time rm -rf /tmp/example', blocked: true },
+    { command: 'nohup rm -rf /tmp/example', blocked: true },
+    { command: 'busybox rm -rf /tmp/example', blocked: true },
+    { command: 'env --unset=PATH rm -rf /tmp/example', blocked: true },
+    { command: 'xargs --replace={} rm -rf {}', blocked: true },
+    { command: 'xargs --replace rm -rf', blocked: true },
+    { command: 'xargs -E EOF rm -rf < paths.txt', blocked: true },
+    { command: 'xargs --eof EOF rm -rf', blocked: true },
+    { command: 'xargs --eof rm -rf', blocked: true },
+    { command: 'xargs -s 64 rm -rf < paths.txt', blocked: true },
+    { command: 'xargs --max-chars 64 rm -rf', blocked: true },
+    { command: 'xargs -d : rm -rf < paths.txt', blocked: true },
+    { command: 'xargs --delimiter : rm -rf', blocked: true },
+    { command: 'xargs -L 2 rm -rf < paths.txt', blocked: true },
+    { command: 'xargs --max-lines 2 rm -rf', blocked: true },
+    { command: 'xargs --max-lines rm -rf', blocked: true },
+    { command: 'env /bin/bash -lc "rm -rf /tmp/example"', blocked: true },
+    { command: 'eval rm -rf /tmp/example', blocked: true },
+    { command: ['printf ok', ...Array.from({ length: 100 }, (_, index) => `arg${index}`)].join(' '), blocked: false },
+  ];
+
+  for (const { command, blocked } of expectedOutcomes) {
+    const result = await toolCallHandler(
+      { toolName: 'bash', input: { command } },
+      {
+        hasUI: true,
+        ui: {
+          async select() {
+            prompted = true;
+            return 'No';
+          },
+        },
+      },
+    );
+
+    assert.equal(Boolean(result?.block), blocked, command);
+    if (blocked) {
+      assert.deepEqual(result, { block: true, reason: 'Blocked by user' }, command);
+    } else {
+      assert.equal(result, undefined, command);
+    }
+  }
+
+  assert.equal(prompted, true);
 });
 
 test('permission-gate blocks malformed bash inputs without prompting', async () => {
@@ -740,6 +908,51 @@ test('permission-gate allows non-dangerous bash commands without prompting', asy
   assert.equal(prompted, false);
 });
 
+test('permission-gate preserves benign quoted display text while still catching substitutions', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  let prompted = false;
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  assert.equal(typeof toolCallHandler, 'function');
+
+  for (const command of [
+    'printf "%s\\n" "rm -rf /tmp/example"',
+    'echo "rm -rf /tmp/example"',
+    "printf '%s\n' 'rm -rf /tmp/example'",
+    'rm -r /tmp/example',
+    'rm -f /tmp/example',
+    'env printf "%s\\n" "rm -rf /tmp/example"',
+  ]) {
+    const result = await toolCallHandler(
+      { toolName: 'bash', input: { command } },
+      {
+        hasUI: true,
+        ui: {
+          async select() {
+            prompted = true;
+            return 'No';
+          },
+        },
+      },
+    );
+
+    assert.equal(result, undefined, command);
+  }
+
+  const backtickSubstitution = await toolCallHandler(
+    { toolName: 'bash', input: { command: 'echo `rm -rf /tmp/example`' } },
+    { hasUI: false },
+  );
+
+  assert.equal(prompted, false);
+  assert.deepEqual(backtickSubstitution, {
+    block: true,
+    reason: 'Dangerous command blocked (no UI for confirmation)',
+  });
+});
+
 test('permission-gate distinguishes safe and dangerous command boundaries', async () => {
   const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
   let prompted = false;
@@ -750,7 +963,10 @@ test('permission-gate distinguishes safe and dangerous command boundaries', asyn
   assert.equal(typeof toolCallHandler, 'function');
 
   const safeResult = await toolCallHandler(
-    { toolName: 'bash', input: { command: 'echo sudoers && chmod 755 ./script.sh && rmdir ./tmp' } },
+    {
+      toolName: 'bash',
+      input: { command: 'echo "safe & rm -Rf /tmp/example" && chmod 755 ./script.sh && rmdir ./tmp && rm -r /tmp/example && rm -R /tmp/example && rm -f /tmp/example' },
+    },
     {
       hasUI: true,
       ui: {
@@ -762,7 +978,7 @@ test('permission-gate distinguishes safe and dangerous command boundaries', asyn
     },
   );
   const dangerousRecursiveRm = await toolCallHandler(
-    { toolName: 'bash', input: { command: 'rm --recursive /tmp/example' } },
+    { toolName: 'bash', input: { command: 'printf ok & rm -fr /tmp/example' } },
     { hasUI: false },
   );
   const dangerousChmod = await toolCallHandler(

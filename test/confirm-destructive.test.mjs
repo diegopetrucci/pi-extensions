@@ -111,14 +111,65 @@ test('confirm-destructive only prompts before switching when there is unsaved us
       },
       sessionManager: {
         getEntries() {
-          return [createMessageEntry('assistant')];
+          return [createMessageEntry('user'), createMessageEntry('assistant')];
+        },
+      },
+    },
+  );
+
+  const assistantFreePrompt = await beforeSwitch(
+    { reason: 'resume' },
+    {
+      hasUI: true,
+      ui: {
+        async confirm(title, message) {
+          promptCount += 1;
+          confirmations.push({ title, message });
+          return true;
+        },
+        notify() {},
+      },
+      sessionManager: {
+        getEntries() {
+          return [createMessageEntry('user')];
+        },
+      },
+    },
+  );
+
+  const emptyHistory = await beforeSwitch(
+    { reason: 'resume' },
+    {
+      hasUI: true,
+      ui: {
+        async confirm() {
+          promptCount += 1;
+          return false;
+        },
+        notify() {},
+      },
+      sessionManager: {
+        getEntries() {
+          return [];
         },
       },
     },
   );
 
   assert.equal(allowedWithoutPrompt, undefined);
-  assert.equal(promptCount, 0);
+  assert.equal(assistantFreePrompt, undefined);
+  assert.equal(emptyHistory, undefined);
+  assert.equal(promptCount, 1);
+  assert.deepEqual(confirmations, [
+    {
+      title: 'Switch session?',
+      message: 'You have messages in the current session. Switch anyway?',
+    },
+    {
+      title: 'Switch session?',
+      message: 'You have messages in the current session. Switch anyway?',
+    },
+  ]);
 });
 
 test('confirm-destructive confirms before forking and respects the selected choice', async () => {

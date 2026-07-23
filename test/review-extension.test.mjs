@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
+import { CONFIG_DIR_NAME, initTheme } from '@earendil-works/pi-coding-agent';
 import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -12,6 +12,8 @@ const repoRoot = path.resolve(testDir, '..');
 const reviewModule = await import(pathToFileURL(path.join(repoRoot, 'extensions/review/index.ts')).href);
 const reviewExtension = reviewModule.default;
 const reviewTestApi = reviewModule.__test__;
+
+initTheme('dark');
 
 function createReviewStateContext({ branchEntries = [], entries = branchEntries, mode = 'tui' } = {}) {
   const widgetCalls = [];
@@ -95,6 +97,7 @@ function createReviewCommandContext({
   editorResponses,
   customResponses,
   navigateTreeImpl,
+  abortImpl,
   initialEditorText = '',
 } = {}) {
   const notifications = [];
@@ -105,6 +108,7 @@ function createReviewCommandContext({
   const setEditorTextCalls = [];
   const widgetCalls = [];
   const waitForIdleCalls = [];
+  const abortCalls = [];
   let editorText = initialEditorText;
 
   const nextSelect = createResponseQueue(selectResponses);
@@ -120,6 +124,7 @@ function createReviewCommandContext({
     setEditorTextCalls,
     widgetCalls,
     waitForIdleCalls,
+    abortCalls,
     ctx: {
       hasUI,
       mode,
@@ -168,6 +173,10 @@ function createReviewCommandContext({
           return navigateTreeImpl(id, options);
         }
         return { cancelled: false };
+      },
+      abort() {
+        abortCalls.push(true);
+        return abortImpl?.();
       },
       async waitForIdle() {
         waitForIdleCalls.push(true);
@@ -715,6 +724,153 @@ test('end-review keeps RPC-capable selection dialogs but skips the custom summar
   assert.deepEqual(context.setEditorTextCalls, ['Act on the review findings']);
   assert.deepEqual(context.notifications, [{ message: 'Review complete! Returned and summarized.', level: 'info' }]);
   assert.deepEqual(harness.appendEntries, [{ customType: 'review-session', data: { active: false } }]);
+});
+
+test('end-review escape is idempotent, catches synchronous abort failure, and waits for navigation', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const branchEntries = [
+    {
+      type: 'custom',
+      customType: 'review-session',
+      data: { active: true, originId: 'origin-loader-cancel' },
+    },
+  ];
+  const activeReviewState = createReviewStateContext({ branchEntries });
+  reviewTestApi.applyReviewState(activeReviewState.ctx);
+
+  let resolveNavigation;
+  const navigationSettled = new Promise((resolve) => {
+    resolveNavigation = resolve;
+  });
+
+  const harness = createReviewHarness();
+  const context = createReviewCommandContext({
+    hasUI: true,
+    mode: 'tui',
+    branchEntries,
+    selectResponses: ['Return and summarize'],
+    customResponses: [async (renderer) => {
+      let resolveDone;
+      const doneResult = new Promise((resolve) => {
+        resolveDone = resolve;
+      });
+      const loader = renderer(
+        { requestRender() {} },
+        { fg(_key, text) { return text; } },
+        {},
+        resolveDone,
+      );
+      loader.loader.onAbort();
+      loader.loader.onAbort();
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(context.abortCalls.length, 1);
+      assert.equal(context.navigateCalls.length, 1);
+      assert.equal(harness.appendEntries.length, 0);
+      resolveNavigation({ cancelled: true });
+      const result = await doneResult;
+      loader.dispose?.();
+      return result;
+    }],
+    navigateTreeImpl: () => navigationSettled,
+    abortImpl: () => {
+      throw new Error('synchronous abort failure');
+    },
+  });
+
+  await harness.endReviewHandler('', context.ctx);
+
+  assert.equal(context.customCalls.length, 1);
+  assert.deepEqual(context.notifications, [{ message: 'Navigation cancelled. Use /end-review to try again.', level: 'info' }]);
+  assert.deepEqual(context.setEditorTextCalls, []);
+  assert.deepEqual(harness.appendEntries, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.equal(reviewTestApi.getReviewRuntimeState().reviewOriginId, 'origin-loader-cancel');
+});
+
+test('end-review late success after escape clears review state, warns, and suppresses follow-up actions', { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+
+  const branchEntries = [
+    {
+      type: 'custom',
+      customType: 'review-session',
+      data: { active: true, originId: 'origin-loader-async-cancel' },
+    },
+  ];
+  const activeReviewState = createReviewStateContext({ branchEntries });
+  reviewTestApi.applyReviewState(activeReviewState.ctx);
+
+  let resolveNavigation;
+  const navigationSettled = new Promise((resolve) => {
+    resolveNavigation = resolve;
+  });
+
+  let loader;
+  const harness = createReviewHarness();
+  const context = createReviewCommandContext({
+    hasUI: true,
+    mode: 'tui',
+    branchEntries,
+    selectResponses: ['Return and summarize'],
+    customResponses: [(renderer) => new Promise((resolve) => {
+      loader = renderer(
+        { requestRender() {} },
+        { fg(_key, text) { return text; } },
+        {},
+        (result) => {
+          loader.dispose?.();
+          resolve(result);
+        },
+      );
+    })],
+    navigateTreeImpl: () => navigationSettled,
+    abortImpl: async () => {
+      throw new Error('async abort failure');
+    },
+  });
+
+  let handlerSettled = false;
+  const endReviewRun = harness.endReviewHandler('', context.ctx).then(() => {
+    handlerSettled = true;
+  });
+
+  await Promise.resolve();
+  assert.ok(loader);
+
+  loader.loader.onAbort();
+  loader.loader.onAbort();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(context.abortCalls.length, 1);
+  assert.equal(context.navigateCalls.length, 1);
+  assert.equal(handlerSettled, false);
+  assert.deepEqual(context.notifications, []);
+  assert.deepEqual(context.setEditorTextCalls, []);
+  assert.deepEqual(harness.appendEntries, []);
+  assert.deepEqual(harness.sentUserMessages, []);
+
+  branchEntries.splice(0, branchEntries.length, {
+    type: 'custom',
+    customType: 'review-session',
+    data: { active: false },
+  });
+  reviewTestApi.applyReviewState(context.ctx);
+  resolveNavigation({ cancelled: false });
+  await endReviewRun;
+
+  assert.equal(context.customCalls.length, 1);
+  assert.deepEqual(context.notifications, [{
+    message: 'Cancellation arrived too late; review already completed, and no follow-up was queued.',
+    level: 'warning',
+  }]);
+  assert.deepEqual(context.setEditorTextCalls, []);
+  assert.deepEqual(harness.appendEntries, [{ customType: 'review-session', data: { active: false } }]);
+  assert.deepEqual(harness.sentUserMessages, []);
+  assert.equal(reviewTestApi.getReviewRuntimeState().reviewOriginId, undefined);
 });
 
 test('review summary prompt preserves the required handoff sections and reviewer callout guidance', { concurrency: false }, () => {

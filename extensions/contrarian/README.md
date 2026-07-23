@@ -1,6 +1,6 @@
 # contrarian
 
-A read-only contrarian subagent for [pi](https://github.com/earendil-works/pi-mono).
+A read-only contrarian subagent for [pi](https://github.com/earendil-works/pi).
 
 It adds a `contrarian` tool that spins up a separate pi subprocess to stress-test plans, designs, assumptions, bug hypotheses, review conclusions, and product directions by steelmanning the strongest credible opposing case.
 

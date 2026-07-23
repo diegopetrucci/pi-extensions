@@ -2,7 +2,7 @@
 
 A pi extension that adds a branch-aware todo list managed by the agent.
 
-This started from the original `todo.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/todo.ts), with small packaging and snapshot-safety tweaks.
+This started from the original `todo.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/todo.ts), with small packaging and snapshot-safety tweaks.
 
 ## What it adds
 

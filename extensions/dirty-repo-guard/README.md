@@ -2,7 +2,7 @@
 
 A small pi extension that prompts before session changes when the current git repo has uncommitted changes.
 
-This is copied from the original `dirty-repo-guard.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/dirty-repo-guard.ts) and kept basically the same.
+This is copied from the original `dirty-repo-guard.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/dirty-repo-guard.ts) and kept basically the same.
 
 ## What it checks
 

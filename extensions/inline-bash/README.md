@@ -2,7 +2,7 @@
 
 A pi extension that expands inline bash commands in user prompts before they are sent to the agent.
 
-This started from the original `inline-bash.ts` example in [`earendil-works/pi-mono`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/examples/extensions/inline-bash.ts), with small packaging and safety tweaks.
+This started from the original `inline-bash.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/inline-bash.ts), with small packaging and safety tweaks.
 
 ## Usage
 

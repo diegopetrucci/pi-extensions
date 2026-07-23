@@ -24,6 +24,153 @@ function createGuardHandlers(factory) {
   return handlers;
 }
 
+test('triage-comments aggregates usage across assistant and compaction session events', async () => {
+  const { aggregateAssistantUsage, addSessionEventUsage } = await loadTriageTestUtils();
+
+  assert.deepEqual(
+    aggregateAssistantUsage([
+      { role: 'assistant', usage: { input: 3, output: 4, cacheRead: 1, cacheWrite: 2, reasoning: 1, totalTokens: 7, cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 } } },
+      { role: 'user', usage: { input: 500 } },
+      { role: 'assistant', usage: { input: 5, output: 6, cacheRead: 7, cacheWrite: 8, cacheWrite1h: 2, totalTokens: 11, cost: { input: 0.5, output: 0.6, cacheRead: 0.7, cacheWrite: 0.8, total: 2.6 } } },
+    ]),
+    {
+      input: 8,
+      output: 10,
+      cacheRead: 8,
+      cacheWrite: 10,
+      cacheWrite1h: 2,
+      reasoning: 1,
+      totalTokens: 18,
+      cost: { input: 0.6, output: 0.8, cacheRead: 0.71, cacheWrite: 0.8200000000000001, total: 2.93 },
+    },
+  );
+  const explicitZeros = aggregateAssistantUsage([{ role: 'assistant', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } }]);
+  assert.equal(explicitZeros.cacheWrite1h, 0);
+  assert.equal(explicitZeros.reasoning, 0);
+  const unreported = aggregateAssistantUsage([]);
+  assert.equal('cacheWrite1h' in unreported, false);
+  assert.equal('reasoning' in unreported, false);
+
+  const eventTotal = aggregateAssistantUsage([]);
+  addSessionEventUsage(eventTotal, {
+    type: 'compaction_end',
+    result: {
+      usage: {
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 4,
+        cacheWrite1h: 5,
+        reasoning: 6,
+        totalTokens: 7,
+        cost: { input: 0.1, output: 0.2, cacheRead: 0.3, cacheWrite: 0.4, total: 1 },
+      },
+    },
+  });
+  addSessionEventUsage(eventTotal, {
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      usage: {
+        input: 8,
+        output: 9,
+        cacheRead: 10,
+        cacheWrite: 11,
+        totalTokens: 12,
+        cost: { input: 0.8, output: 0.9, cacheRead: 1, cacheWrite: 1.1, total: 3.8 },
+      },
+    },
+  });
+  assert.deepEqual(eventTotal, {
+    input: 9,
+    output: 11,
+    cacheRead: 13,
+    cacheWrite: 15,
+    cacheWrite1h: 5,
+    reasoning: 6,
+    totalTokens: 19,
+    cost: { input: 0.9, output: 1.1, cacheRead: 1.3, cacheWrite: 1.5, total: 4.8 },
+  });
+});
+
+test('triage-comments classifies final assistant outcomes', async () => {
+  const { inspectFinalAssistant } = await loadTriageTestUtils();
+
+  assert.deepEqual(inspectFinalAssistant([]), {
+    ok: false,
+    reason: 'triage_comments subagent produced no assistant message',
+  });
+  assert.deepEqual(
+    inspectFinalAssistant([{ role: 'assistant', stopReason: 'error', errorMessage: 'provider unavailable', content: [{ type: 'text', text: 'partial' }] }]),
+    {
+      ok: false,
+      reason: 'triage_comments subagent error: provider unavailable',
+      stopReason: 'error',
+      errorMessage: 'provider unavailable',
+    },
+  );
+  assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'aborted', content: [{ type: 'text', text: 'partial' }] }]), {
+    ok: false,
+    reason: 'triage_comments subagent aborted before producing a usable answer',
+    stopReason: 'aborted',
+  });
+  assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'stop', content: [] }]), {
+    ok: false,
+    reason: 'triage_comments subagent produced no final assistant text (stopReason: stop)',
+    stopReason: 'stop',
+    errorMessage: undefined,
+  });
+  assert.deepEqual(inspectFinalAssistant([{ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'ok' }] }]), {
+    ok: true,
+    answer: 'ok',
+    stopReason: 'stop',
+  });
+});
+
+test('triage-comments distinguishes caller aborts from internal timeouts', async () => {
+  const { classifyRunFailure } = await loadTriageTestUtils();
+
+  assert.deepEqual(classifyRunFailure(new Error('triage_comments timed out after 480 seconds.'), false), {
+    status: 'error',
+    message: 'triage_comments timed out after 480 seconds.',
+    error: 'triage_comments timed out after 480 seconds.',
+  });
+  assert.deepEqual(classifyRunFailure(new Error('triage_comments subagent aborted before producing a usable answer'), false), {
+    status: 'error',
+    message: 'triage_comments subagent aborted before producing a usable answer',
+    error: 'triage_comments subagent aborted before producing a usable answer',
+  });
+  assert.deepEqual(classifyRunFailure(Object.assign(new Error('unexpected abort'), { name: 'AbortError' }), false), {
+    status: 'error',
+    message: 'unexpected abort',
+    error: 'unexpected abort',
+  });
+  assert.deepEqual(classifyRunFailure(new Error('provider error after caller abort'), true), {
+    status: 'aborted',
+    message: 'Aborted',
+    error: undefined,
+  });
+});
+
+test('triage_comments tool_result marks only terminal failures as errors', async () => {
+  const extensionModule = await import(pathToFileURL(path.join(repoRoot, 'extensions/triage-comments/index.ts')).href);
+  const handlers = new Map();
+  extensionModule.default({
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+    },
+    registerCommand() {},
+    registerTool() {},
+  });
+
+  const toolResult = handlers.get('tool_result');
+  assert.equal(typeof toolResult, 'function');
+  assert.deepEqual(await toolResult({ toolName: 'triage_comments', details: { status: 'error' } }), { isError: true });
+  assert.equal(await toolResult({ toolName: 'triage_comments', details: { status: 'aborted' } }), undefined);
+  assert.equal(await toolResult({ toolName: 'triage_comments', details: { status: 'done' } }), undefined);
+  assert.equal(await toolResult({ toolName: 'bash', details: { status: 'error' } }), undefined);
+});
+
 test('triage-comments parses paste, PR, URL, and help command forms', async () => {
   const { parseTriageCommandArgs } = await loadTriageTestUtils();
 
