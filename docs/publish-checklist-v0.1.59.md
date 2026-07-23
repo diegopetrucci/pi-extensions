@@ -36,6 +36,7 @@
 - [x] deterministic `prepare-release` dry-run was rerun from an explicit JSON input created outside the repo and selected exactly 26 packages after the marker pre-apply (root + 25 tarball-different standalones; `minimal-footer` excluded)
 - [x] selected-target consistency check confirmed all 26 selected manifests and matching local `package-lock.json` entries already match the v0.1.59 targets
 - [x] `npm run ci` passed with 505/505 tests
+- [x] `node --test test/shell-safety.test.mjs` passed with 22/22 tests, covering the permission-gate wrapper/path safety regression surface
 - [x] `node --test test/librarian-command-config-cache.test.mjs test/librarian-model-selection.test.mjs` passed with 15/15 tests
 - [x] `node --test test/provider-model-preferences-catalog.test.mjs` passed with 4/4 tests
 - [x] `node --test test/tarball-runtime-smoke.test.mjs` passed with 1/1 tests, confirming publishable tarballs install offline and Pi loads their declared runtime entries
@@ -46,14 +47,14 @@
 - [x] exact `npm view <name>@<target> version` checks confirmed all 26 selected target versions remain unpublished
 - [x] `git diff --check` passed
 - [x] `git diff --cached --name-only` produced no output
-- [x] `npm pack --dry-run --json` and `npm publish --dry-run --ignore-scripts --access public` passed for the root package plus all 25 selected standalone targets; aggregate dry-run totals were `packages=26`, `totalFiles=299`, `totalTarballBytes=2423934`, `totalUnpackedBytes=4056920`, `suspiciousTotal=0`, and `publishDryRunFailures=0`
+- [x] `npm pack --dry-run --json` and `npm publish --dry-run --ignore-scripts --access public` passed for the root package plus all 25 selected standalone targets; aggregate dry-run totals were `packages=26`, `totalFiles=299`, `totalTarballBytes=2424433`, `totalUnpackedBytes=4060032`, `suspiciousTotal=0`, and `publishDryRunFailures=0`
 - [x] `find . -name '*.tgz' -o -name '*.npmrc' | sort` produced no output
 
 ## Dry-run package contents review
 
 | Package | Result |
 | --- | --- |
-| `@diegopetrucci/pi-extensions@0.1.59` | `156` files, `1264563` byte tarball, `2123152` byte unpacked; expected root runtime bundle only (`LICENSE`, `README.md`, preview assets, `.pi-fleet-tested-version`, and publishable extension runtime files) |
+| `@diegopetrucci/pi-extensions@0.1.59` | `156` files, `1264813` byte tarball, `2124708` byte unpacked; expected root runtime bundle only (`LICENSE`, `README.md`, preview assets, `.pi-fleet-tested-version`, and publishable extension runtime files) |
 | `@diegopetrucci/pi-agent-workflow-audit@0.1.6` | `4` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |
 | `@diegopetrucci/pi-annotate-git-diff@0.1.6` | `14` files; runtime TS sources, README, metadata, and web assets only |
 | `@diegopetrucci/pi-annotate-last-message@0.1.4` | `12` files; runtime TS/UI sources, README, metadata, and web assets only |
@@ -73,7 +74,7 @@
 | `@diegopetrucci/pi-notify@0.1.12` | `5` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `notify.example.json`, `package.json` |
 | `@diegopetrucci/pi-openai-fast@0.1.11` | `5` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `openai-fast.example.json`, `package.json` |
 | `@diegopetrucci/pi-oracle@0.1.21` | `4` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |
-| `@diegopetrucci/pi-permission-gate@0.1.9` | `4` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |
+| `@diegopetrucci/pi-permission-gate@0.1.9` | `4` files, `5293` byte tarball, `20048` byte unpacked; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |
 | `@diegopetrucci/pi-quiet-tools@0.1.7` | `4` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |
 | `@diegopetrucci/pi-review@0.1.9` | `5` files; `.pi-fleet-tested-version`, `LICENSE`, `README.md`, `index.ts`, `package.json` |
 | `@diegopetrucci/pi-todo@0.1.6` | `4` files; `.pi-fleet-tested-version`, `README.md`, `index.ts`, `package.json` |

@@ -292,8 +292,11 @@ function basenameToken(token: string): string {
 	return path.posix.basename(token);
 }
 
-function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; nonExecuting: boolean } {
-	let index = 0;
+function unwrapLeadingWrappers(
+	tokens: ShellToken[],
+	startIndex: number,
+): { headIndex: number; nonExecuting: boolean; consumed: number } {
+	let index = startIndex;
 
 	const consumeOptionValue = (inlinePrefix: string, separateOptions: string[], longOption: string): boolean => {
 		const token = tokens[index]?.text;
@@ -304,6 +307,25 @@ function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; no
 			return true;
 		}
 		if (token.startsWith(`${longOption}=`) || (inlinePrefix && token.startsWith(inlinePrefix) && token.length > inlinePrefix.length)) {
+			index += 1;
+			return true;
+		}
+		return false;
+	};
+
+	const consumeOptionalLongOption = (inlinePrefix: string, shortOption: string, longOption: string): boolean => {
+		const token = tokens[index]?.text;
+		if (!token) return false;
+		if (token === longOption) {
+			index += 1;
+			return true;
+		}
+		if (token === shortOption) {
+			index += 1;
+			if (index < tokens.length) index += 1;
+			return true;
+		}
+		if (token.startsWith(`${longOption}=`) || token.startsWith(inlinePrefix) && token.length > inlinePrefix.length) {
 			index += 1;
 			return true;
 		}
@@ -327,7 +349,9 @@ function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; no
 					index += 1;
 					break;
 				}
-				if (option === "-v" || option === "-V") return { tokens: [], nonExecuting: true };
+				if (option === "-v" || option === "-V") {
+					return { headIndex: tokens.length, nonExecuting: true, consumed: index + 1 - startIndex };
+				}
 				index += 1;
 			}
 			continue;
@@ -342,7 +366,9 @@ function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; no
 					index += 1;
 					break;
 				}
-				if (option === "--help" || option === "--version") return { tokens: [], nonExecuting: true };
+				if (option === "--help" || option === "--version") {
+					return { headIndex: tokens.length, nonExecuting: true, consumed: index + 1 - startIndex };
+				}
 				if (isShellAssignmentToken(option)) {
 					index += 1;
 					continue;
@@ -364,11 +390,17 @@ function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; no
 					index += 1;
 					break;
 				}
-				if (option === "--help" || option === "--version") return { tokens: [], nonExecuting: true };
+				if (option === "--help" || option === "--version") {
+					return { headIndex: tokens.length, nonExecuting: true, consumed: index + 1 - startIndex };
+				}
 				if (consumeOptionValue("-n", ["-n"], "--max-args")) continue;
 				if (consumeOptionValue("-P", ["-P"], "--max-procs")) continue;
-				if (consumeOptionValue("-I", ["-I"], "--replace")) continue;
+				if (consumeOptionalLongOption("-I", "-I", "--replace")) continue;
 				if (consumeOptionValue("-a", ["-a"], "--arg-file")) continue;
+				if (consumeOptionalLongOption("-E", "-E", "--eof")) continue;
+				if (consumeOptionValue("-s", ["-s"], "--max-chars")) continue;
+				if (consumeOptionValue("-d", ["-d"], "--delimiter")) continue;
+				if (consumeOptionalLongOption("-L", "-L", "--max-lines")) continue;
 				if (!option.startsWith("-")) break;
 				index += 1;
 			}
@@ -378,20 +410,19 @@ function unwrapLeadingWrappers(tokens: ShellToken[]): { tokens: ShellToken[]; no
 		break;
 	}
 
-	return { tokens: tokens.slice(index), nonExecuting: false };
+	return { headIndex: index, nonExecuting: false, consumed: index - startIndex };
 }
 
-function detectRecursiveForceRm(tokens: ShellToken[]): boolean {
-	const unwrapped = unwrapLeadingWrappers(tokens);
-	if (unwrapped.nonExecuting) return false;
-
-	const [commandName, ...args] = unwrapped.tokens;
+function detectRecursiveForceRm(tokens: ShellToken[], headIndex: number): boolean {
+	const commandName = tokens[headIndex];
 	if (!commandName || basenameToken(commandName.text) !== "rm") return false;
 
 	let sawRecursive = false;
 	let sawForce = false;
 
-	for (const { text: token } of args) {
+	for (let index = headIndex + 1; index < tokens.length; index += 1) {
+		const token = tokens[index]?.text;
+		if (!token) continue;
 		if (token === "--") break;
 		if (!token.startsWith("-") || token === "-") continue;
 		if (token === "--recursive") sawRecursive = true;
@@ -406,6 +437,48 @@ function detectRecursiveForceRm(tokens: ShellToken[]): boolean {
 	return sawRecursive && sawForce;
 }
 
+function hasDangerousCommandHead(tokens: ShellToken[], headIndex: number): boolean {
+	if (detectRecursiveForceRm(tokens, headIndex)) return true;
+
+	const firstToken = tokens[headIndex];
+	if (!firstToken) return false;
+
+	if (["sh", "bash", "zsh", "dash", "ksh"].includes(basenameToken(firstToken.text))) {
+		for (let index = headIndex + 1; index < tokens.length; index += 1) {
+			const token = tokens[index]?.text;
+			if (!token) break;
+			if (token === "--") break;
+			if (token === "-c" || (/^-[A-Za-z]+$/.test(token) && token.includes("c"))) {
+				const script = tokens[index + 1]?.text;
+				return typeof script === "string" && hasDangerousRecursiveRm(script);
+			}
+			if (!token.startsWith("-")) break;
+		}
+	}
+
+	if (firstToken.text === "eval") {
+		return headIndex + 1 < tokens.length && hasDangerousRecursiveRm(tokens.slice(headIndex + 1).map(({ text }) => text).join(" "));
+	}
+
+	return false;
+}
+
+function hasDangerousCommandSuffix(tokens: ShellToken[]): boolean {
+	let index = 0;
+
+	while (index < tokens.length) {
+		const unwrapped = unwrapLeadingWrappers(tokens, index);
+		if (unwrapped.nonExecuting) return false;
+		if (hasDangerousCommandHead(tokens, unwrapped.headIndex)) return true;
+
+		// Check every possible executable head once, while skipping known-wrapper
+		// option values so data such as an xargs EOF marker is never treated as a command.
+		index += unwrapped.consumed + 1;
+	}
+
+	return false;
+}
+
 function hasDangerousRecursiveRm(command: string): boolean {
 	// Conservative detector: recurse through obvious command-substitution and shell-wrapper
 	// surfaces, then inspect argv-like tokens for rm plus recursive+force semantics.
@@ -415,34 +488,7 @@ function hasDangerousRecursiveRm(command: string): boolean {
 	let currentCommand: ShellToken[] = [];
 	let findExecCommand: ShellToken[] | undefined;
 
-	const evaluateTokens = (commandTokens: ShellToken[]): boolean => {
-		if (commandTokens.length === 0) return false;
-		if (detectRecursiveForceRm(commandTokens)) return true;
-
-		const unwrapped = unwrapLeadingWrappers(commandTokens);
-		if (unwrapped.nonExecuting || unwrapped.tokens.length === 0) return false;
-
-		const [firstToken, ...rest] = unwrapped.tokens;
-		if (!firstToken) return false;
-
-		if (["sh", "bash", "zsh", "dash", "ksh"].includes(basenameToken(firstToken.text))) {
-			for (let index = 0; index < rest.length; index += 1) {
-				const token = rest[index]?.text;
-				if (!token) break;
-				if (token === "--") break;
-				if (token === "-c" || (/^-[A-Za-z]+$/.test(token) && token.includes("c"))) {
-					return typeof rest[index + 1]?.text === "string" && hasDangerousRecursiveRm(rest[index + 1].text);
-				}
-				if (!token.startsWith("-")) break;
-			}
-		}
-
-		if (firstToken.text === "eval") {
-			return rest.length > 0 && hasDangerousRecursiveRm(rest.map(({ text }) => text).join(" "));
-		}
-
-		return false;
-	};
+	const evaluateTokens = (commandTokens: ShellToken[]): boolean => hasDangerousCommandSuffix(commandTokens);
 
 	const resetCurrentCommand = () => {
 		currentCommand = [];
