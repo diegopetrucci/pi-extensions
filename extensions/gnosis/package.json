@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-gnosis",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A pi extension that exposes the gnosis repo-local knowledge base CLI as an agent tool.",
   "keywords": [
     "pi-package",
