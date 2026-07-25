@@ -27,6 +27,7 @@ const CODE_REVIEWER_MODEL_PREFERENCES = [
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 	"gpt-5.5",
+	"claude-opus-5",
 	"claude-opus-4-8",
 	"claude-opus-4.8",
 	"claude-sonnet-5",
@@ -40,6 +41,7 @@ const CODE_REVIEWER_MODEL_PREFERENCES = [
 ];
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-sonnet-5",
@@ -47,6 +49,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-sonnet-4-5",
 	],
 	anthropic: [
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-sonnet-5",
@@ -64,6 +67,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5.3-codex-spark",
 	],
 	"vercel-ai-gateway": [
+		"anthropic/claude-opus-5",
 		"anthropic/claude-fable-5",
 		"anthropic/claude-opus-4.8",
 		"anthropic/claude-opus-4.7",

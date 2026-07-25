@@ -103,20 +103,40 @@ export const PROVIDER_POLICY_CONTRACT = {
       },
     },
     {
+      role: 'oracle',
+      method: 'selectOracleModel',
+      description: 'Oracle prefers Claude Opus 5 over older Claude frontier models on providers that expose it',
+      ctx: {
+        model: { provider: 'anthropic', id: 'claude-sonnet-5', reasoning: true },
+        available: [
+          { provider: 'anthropic', id: 'claude-fable-5', reasoning: true },
+          { provider: 'anthropic', id: 'claude-opus-4-8', reasoning: true },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+        ],
+      },
+      expected: {
+        selectionModelRef: 'anthropic/claude-opus-5',
+        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4-8', 'anthropic/claude-fable-5'],
+        selectionProperties: { thinkingLevel: 'high', autoSelected: true },
+        selectionReason: /hardcoded preference list for anthropic/i,
+      },
+    },
+    {
       role: 'contrarian',
       method: 'selectContrarianModel',
-      description: 'Contrarian stops at the first non-empty opposite-provider reasoning frontier tier instead of appending exhaustive same-provider fallbacks',
+      description: 'Contrarian stops at the first non-empty opposite-provider reasoning frontier tier and prefers Claude Opus 5',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
         available: [
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
           { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
           { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
         ],
       },
       expected: {
-        selectionModelRef: 'anthropic/claude-opus-4.8',
-        orderedModelRefs: ['anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-4.6'],
+        selectionModelRef: 'anthropic/claude-opus-5',
+        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-4.6'],
         selectionProperties: { thinkingLevel: 'high', autoSelected: true },
         selectionReason: /opposite provider\/model family/i,
       },
@@ -124,18 +144,19 @@ export const PROVIDER_POLICY_CONTRACT = {
     {
       role: 'code-reviewer',
       method: 'selectCodeReviewerModel',
-      description: 'Code Reviewer keeps exhaustive fallback tiers after the preferred contrarian candidate set',
+      description: 'Code Reviewer keeps exhaustive fallback tiers after preferring Claude Opus 5 as its contrarian frontier candidate',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
         available: [
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
           { provider: 'openai', id: 'gpt-5.5-mini', reasoning: false },
           { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
         ],
       },
       expected: {
-        selectionModelRef: 'anthropic/claude-opus-4.8',
-        orderedModelRefs: ['anthropic/claude-opus-4.8', 'openai/gpt-5.5-pro', 'openai/gpt-5.5-mini'],
+        selectionModelRef: 'anthropic/claude-opus-5',
+        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4.8', 'openai/gpt-5.5-pro', 'openai/gpt-5.5-mini'],
       },
     },
     {

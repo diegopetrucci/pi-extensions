@@ -1123,7 +1123,10 @@ export const __test__ = {
 };
 
 export default function agentWorkflowAuditExtension(pi: ExtensionAPI) {
-	pi.registerMessageRenderer(CUSTOM_TYPE, (message, { expanded }, theme) => {
+	pi.registerMessageRenderer(CUSTOM_TYPE, (message, options, theme) => {
+		const { expanded } = options;
+		const rendererOptions = options as { outputPad?: number };
+		const outputPad = rendererOptions.outputPad ?? 0;
 		const details = message.details as AuditDetails | undefined;
 		const report = messageContentToText(message.content) || "(no report)";
 		const status = details?.status ?? "done";
@@ -1143,15 +1146,15 @@ export default function agentWorkflowAuditExtension(pi: ExtensionAPI) {
 		const header = `${icon} ${theme.fg("toolTitle", theme.bold("agent-workflow-audit "))}${theme.fg("dim", meta)}`;
 
 		if (!expanded) {
-			return new Text(`${header}\n\n${theme.fg("toolOutput", renderCollapsedReport(report))}`, 0, 0);
+			return new Text(`${header}\n\n${theme.fg("toolOutput", renderCollapsedReport(report))}`, outputPad, 0);
 		}
 
 		const container = new Container();
-		container.addChild(new Text(header, 0, 0));
-		if (details?.cwd) container.addChild(new Text(theme.fg("dim", `cwd: ${details.cwd}`), 0, 0));
-		if (details?.focus) container.addChild(new Text(theme.fg("dim", `focus: ${details.focus}`), 0, 0));
+		container.addChild(new Text(header, outputPad, 0));
+		if (details?.cwd) container.addChild(new Text(theme.fg("dim", `cwd: ${details.cwd}`), outputPad, 0));
+		if (details?.focus) container.addChild(new Text(theme.fg("dim", `focus: ${details.focus}`), outputPad, 0));
 		container.addChild(new Spacer(1));
-		container.addChild(new Markdown(report, 0, 0, getMarkdownTheme()));
+		container.addChild(new Markdown(report, outputPad, 0, getMarkdownTheme()));
 		return container;
 	});
 
