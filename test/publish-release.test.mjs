@@ -1,0 +1,399 @@
+import assert from 'node:assert/strict';
+import { cp, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
+import test from 'node:test';
+import { defaultConfirm, defaultCreateTagSnapshot, PUBLIC_REGISTRY, publishRelease } from '../scripts/publish-release.mjs';
+
+async function json(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function text(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, value);
+}
+
+async function fixture(t) {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'publish-release-'));
+  const root = path.join(tempRoot, 'repo');
+  const snapshot = path.join(tempRoot, 'tag');
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+
+  const evidence = [
+    ['plain-addon', '1.2.3'],
+    ['@example/feature', '1.2.3'],
+    ['@example/umbrella', '1.2.3'],
+  ];
+  const releaseDoc = `Release v1.2.3 helper coverage.\n\n## Packages\n\n- \`plain-addon@1.2.3\`\n- \`@example/feature@1.2.3\`\n- \`@example/umbrella@1.2.3\`\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`;
+
+  for (const base of [root, snapshot]) {
+    await json(path.join(base, 'package.json'), {
+      name: '@example/umbrella',
+      version: '1.2.3',
+      workspaces: ['packages/*'],
+      files: ['README.md', 'index.js'],
+      dependencies: { 'plain-addon': '1.2.3', '@example/feature': '1.2.3' },
+      publishConfig: { access: 'public' },
+    });
+    await json(path.join(base, 'packages/plain-addon/package.json'), {
+      name: 'plain-addon',
+      version: '1.2.3',
+      files: ['index.js', 'README.md'],
+      publishConfig: { access: 'public' },
+    });
+    await json(path.join(base, 'packages/feature/package.json'), {
+      name: '@example/feature',
+      version: '1.2.3',
+      files: ['index.js', 'README.md'],
+      dependencies: { 'plain-addon': '1.2.3' },
+      publishConfig: { access: 'public' },
+    });
+    await text(path.join(base, 'README.md'), '# umbrella\n');
+    await text(path.join(base, 'index.js'), 'export default 1;\n');
+    await text(path.join(base, 'packages/plain-addon/index.js'), 'export default "plain";\n');
+    await text(path.join(base, 'packages/plain-addon/README.md'), '# plain\n');
+    await text(path.join(base, 'packages/feature/index.js'), 'export default "feature";\n');
+    await text(path.join(base, 'packages/feature/README.md'), '# feature\n');
+  }
+
+  await text(path.join(root, 'docs/github-release-v1.2.3.md'), releaseDoc);
+  return { root, snapshot };
+}
+
+function packResponse(name, shasum, files) {
+  return JSON.stringify([{ name, shasum, size: 100 + name.length, unpackedSize: 200 + name.length, files }]);
+}
+
+async function cloneSnapshot(snapshot) {
+  const target = await mkdtemp(path.join(os.tmpdir(), 'publish-release-tag-clone-'));
+  await cp(snapshot, target, { recursive: true });
+  return target;
+}
+
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, packOverrides = {}, whoami = 'tlh-user', calls = [] }) {
+  return async (file, args, options = {}) => {
+    calls.push({ file, args: [...args], cwd: options.cwd });
+    if (file === 'git') {
+      if (args[0] === 'rev-parse') return { code: 0, stdout: 'deadbeef\n', stderr: '' };
+      if (args[0] === 'status') {
+        const packagePath = args.at(-1).includes('packages/feature') ? '@example/feature' : args.at(-1).includes('packages/plain-addon') ? 'plain-addon' : '@example/umbrella';
+        return { code: 0, stdout: dirtyByPackage[packagePath] ?? '', stderr: '' };
+      }
+      throw new Error(`Unexpected git command: ${args.join(' ')}`);
+    }
+    if (file !== 'npm') throw new Error(`Unexpected command: ${file}`);
+    if (args[0] === 'whoami') {
+      if (whoami instanceof Error) return { code: 1, stdout: '', stderr: whoami.message };
+      return { code: 0, stdout: `${whoami}\n`, stderr: '' };
+    }
+    if (args[0] === 'view') {
+      const spec = args[1];
+      if (registryError) return { code: 1, stdout: '', stderr: registryError };
+      if (publishedSpecs.has(spec)) return { code: 0, stdout: JSON.stringify(spec.split('@').at(-1)), stderr: '' };
+      return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
+    }
+    if (args[0] === 'publish') {
+      assert.deepEqual(args, ['publish', '--ignore-scripts', '--access', 'public', `--registry=${PUBLIC_REGISTRY}`]);
+      return { code: 0, stdout: 'published\n', stderr: '' };
+    }
+    assert.equal(args[0], 'pack');
+    assert.deepEqual(args, ['pack', '--dry-run', '--json', '--ignore-scripts', `--registry=${PUBLIC_REGISTRY}`]);
+    const manifest = JSON.parse(await readFile(path.join(options.cwd, 'package.json'), 'utf8'));
+    const packageRoot = path.resolve(options.cwd);
+    const scope = packageRoot.startsWith(path.resolve(root)) ? 'current' : 'snapshot';
+    const fileMap = {
+      '@example/umbrella': [{ path: 'README.md', size: 10 }, { path: 'index.js', size: 17 }, { path: 'package.json', size: 99 }],
+      'plain-addon': [{ path: 'README.md', size: 8 }, { path: 'index.js', size: 24 }, { path: 'package.json', size: 88 }],
+      '@example/feature': [{ path: 'README.md', size: 10 }, { path: 'index.js', size: 26 }, { path: 'package.json', size: 91 }],
+      '@example/zebra': [{ path: 'README.md', size: 8 }, { path: 'index.js', size: 24 }, { path: 'package.json', size: 88 }],
+      '@example/ångstrom': [{ path: 'README.md', size: 11 }, { path: 'index.js', size: 27 }, { path: 'package.json', size: 92 }],
+    };
+    const shasum = packOverrides[`${scope}:${manifest.name}`] ?? `${manifest.name}:${scope === 'snapshot' ? 'same' : 'same'}`;
+    return { code: 0, stdout: packResponse(manifest.name, shasum, fileMap[manifest.name]), stderr: '' };
+  };
+}
+
+test('dry-run verifies evidence against the tag, checks auth, and never executes npm publish', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const calls = [];
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({ root, snapshot, publishedSpecs: new Set(['plain-addon@1.2.3']), calls }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.equal(result.mode, 'dry-run');
+  assert.equal(result.authUser, 'tlh-user');
+  assert.deepEqual(result.planned.map(({ name, action }) => `${name}:${action}`), [
+    'plain-addon:skip',
+    '@example/feature:publish',
+    '@example/umbrella:publish',
+  ]);
+  assert.deepEqual(result.skipped, ['plain-addon@1.2.3']);
+  assert.deepEqual(result.published, []);
+  assert.equal(calls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
+});
+
+test('workspace-only evidence is allowed when it preserves dependency order', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const evidence = [['plain-addon', '1.2.3'], ['@example/feature', '1.2.3']];
+  await text(
+    path.join(root, 'docs/github-release-v1.2.3.md'),
+    `Workspace-only release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`,
+  );
+  const calls = [];
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({ root, snapshot, calls }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.deepEqual(result.planned.map(({ name }) => name), ['plain-addon', '@example/feature']);
+  assert.equal(result.planned.some(({ umbrella }) => umbrella), false);
+  assert.equal(calls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
+});
+
+test('workspace publish ordering uses raw code-point sorting like prepare-release', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  const snapshotManifest = JSON.parse(await readFile(path.join(snapshot, 'package.json'), 'utf8'));
+  rootManifest.dependencies = { '@example/zebra': '1.2.3', '@example/ångstrom': '1.2.3' };
+  snapshotManifest.dependencies = { '@example/zebra': '1.2.3', '@example/ångstrom': '1.2.3' };
+  await json(path.join(root, 'package.json'), rootManifest);
+  await json(path.join(snapshot, 'package.json'), snapshotManifest);
+
+  await rm(path.join(root, 'packages/plain-addon'), { recursive: true, force: true });
+  await rm(path.join(root, 'packages/feature'), { recursive: true, force: true });
+  await rm(path.join(snapshot, 'packages/plain-addon'), { recursive: true, force: true });
+  await rm(path.join(snapshot, 'packages/feature'), { recursive: true, force: true });
+
+  for (const base of [root, snapshot]) {
+    await json(path.join(base, 'packages/zebra/package.json'), {
+      name: '@example/zebra',
+      version: '1.2.3',
+      files: ['index.js', 'README.md'],
+      publishConfig: { access: 'public' },
+    });
+    await text(path.join(base, 'packages/zebra/index.js'), 'export default "zebra";\n');
+    await text(path.join(base, 'packages/zebra/README.md'), '# zebra\n');
+    await json(path.join(base, 'packages/angstrom/package.json'), {
+      name: '@example/ångstrom',
+      version: '1.2.3',
+      files: ['index.js', 'README.md'],
+      publishConfig: { access: 'public' },
+    });
+    await text(path.join(base, 'packages/angstrom/index.js'), 'export default "angstrom";\n');
+    await text(path.join(base, 'packages/angstrom/README.md'), '# angstrom\n');
+  }
+
+  const evidence = [['@example/zebra', '1.2.3'], ['@example/ångstrom', '1.2.3'], ['@example/umbrella', '1.2.3']];
+  await text(
+    path.join(root, 'docs/github-release-v1.2.3.md'),
+    `Code-point order release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`,
+  );
+
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({ root, snapshot }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.deepEqual(result.planned.map(({ name }) => name), ['@example/zebra', '@example/ångstrom', '@example/umbrella']);
+});
+
+test('live mode prompts once, skips exact published versions, and publishes root last', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const calls = [];
+  let confirmCalls = 0;
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    run: mockRunner({ root, snapshot, publishedSpecs: new Set(['plain-addon@1.2.3']), calls }),
+    confirm: async ({ version, planned, skipped }) => {
+      confirmCalls += 1;
+      assert.equal(version, 'v1.2.3');
+      assert.equal(planned, 2);
+      assert.equal(skipped, 1);
+      return true;
+    },
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.equal(confirmCalls, 1);
+  assert.deepEqual(result.published, ['@example/feature@1.2.3', '@example/umbrella@1.2.3']);
+  const publishCalls = calls.filter(({ file, args }) => file === 'npm' && args[0] === 'publish');
+  assert.deepEqual(publishCalls.map(({ cwd }) => path.relative(root, cwd) || '.'), ['packages/feature', '.']);
+});
+
+test('unsafe evidence order and dirty publishable paths hard-fail before publish', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  await text(
+    path.join(root, 'docs/github-release-v1.2.3.md'),
+    'Bad order\n\n<!-- prepare-release:packages [["@example/feature","1.2.3"],["plain-addon","1.2.3"],["@example/umbrella","1.2.3"]] -->\n',
+  );
+  await assert.rejects(
+    publishRelease({ cwd: root, version: 'v1.2.3', dryRun: true, run: mockRunner({ root, snapshot }), createTagSnapshot: async () => cloneSnapshot(snapshot) }),
+    /unsafe publish order/,
+  );
+
+  const { root: cleanRoot, snapshot: cleanSnapshot } = await fixture(t);
+  await assert.rejects(
+    publishRelease({
+      cwd: cleanRoot,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root: cleanRoot, snapshot: cleanSnapshot, dirtyByPackage: { '@example/feature': ' M packages/feature/index.js\n' } }),
+      createTagSnapshot: async () => cloneSnapshot(cleanSnapshot),
+    }),
+    /Publishable paths are dirty for @example\/feature/,
+  );
+});
+
+test('content mismatches and auth failures abort safely', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root, snapshot, packOverrides: { 'current:@example/feature': 'feature-current', 'snapshot:@example/feature': 'feature-tag' } }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /does not match v1\.2\.3/,
+  );
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root, snapshot, whoami: new Error('npm error code E401\nnot logged in') }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /authentication check failed.*E401/s,
+  );
+});
+
+test('missing or malformed managed evidence fails before registry or publishing commands', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const calls = [];
+  await rm(path.join(root, 'docs/github-release-v1.2.3.md'));
+  await assert.rejects(
+    publishRelease({ cwd: root, version: 'v1.2.3', dryRun: true, run: mockRunner({ root, snapshot, calls }), createTagSnapshot: async () => cloneSnapshot(snapshot) }),
+    /Missing release document/,
+  );
+  assert.equal(calls.length, 0);
+
+  const { root: malformedRoot, snapshot: malformedSnapshot } = await fixture(t);
+  const malformedCalls = [];
+  await text(path.join(malformedRoot, 'docs/github-release-v1.2.3.md'), 'Release body\n\n<!-- prepare-release:packages [["plain-addon"]] -->\n');
+  await assert.rejects(
+    publishRelease({ cwd: malformedRoot, version: 'v1.2.3', dryRun: true, run: mockRunner({ root: malformedRoot, snapshot: malformedSnapshot, calls: malformedCalls }), createTagSnapshot: async () => cloneSnapshot(malformedSnapshot) }),
+    /evidence entry 1 is invalid/,
+  );
+  assert.equal(malformedCalls.length, 0);
+});
+
+test('current and tagged manifest version mismatches fail closed', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const currentManifestPath = path.join(root, 'packages/feature/package.json');
+  const currentManifest = JSON.parse(await readFile(currentManifestPath, 'utf8'));
+  currentManifest.version = '1.2.4';
+  await json(currentManifestPath, currentManifest);
+  await assert.rejects(
+    publishRelease({ cwd: root, version: 'v1.2.3', dryRun: true, run: mockRunner({ root, snapshot }), createTagSnapshot: async () => cloneSnapshot(snapshot) }),
+    /Current manifest version mismatch for @example\/feature: expected 1\.2\.3, found 1\.2\.4/,
+  );
+
+  const { root: taggedRoot, snapshot: taggedSnapshot } = await fixture(t);
+  const taggedManifestPath = path.join(taggedSnapshot, 'packages/feature/package.json');
+  const taggedManifest = JSON.parse(await readFile(taggedManifestPath, 'utf8'));
+  taggedManifest.version = '1.2.2';
+  await json(taggedManifestPath, taggedManifest);
+  await assert.rejects(
+    publishRelease({ cwd: taggedRoot, version: 'v1.2.3', dryRun: true, run: mockRunner({ root: taggedRoot, snapshot: taggedSnapshot }), createTagSnapshot: async () => cloneSnapshot(taggedSnapshot) }),
+    /Release tag v1\.2\.3 version mismatch for @example\/feature: expected 1\.2\.3, found 1\.2\.2/,
+  );
+});
+
+test('ambiguous registry failures and rejected confirmation never publish', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const registryCalls = [];
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root, snapshot, registryError: 'npm error code E404\nnpm error code E500\n404 Not Found', calls: registryCalls }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /registry target check.*E404.*E500/s,
+  );
+  assert.equal(registryCalls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
+
+  const rejectedCalls = [];
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      run: mockRunner({ root, snapshot, calls: rejectedCalls }),
+      confirm: async () => false,
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /Publish cancelled for v1\.2\.3/,
+  );
+  assert.equal(rejectedCalls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
+});
+
+test('defaultCreateTagSnapshot removes its temp directory when archive or extract fails', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'publish-release-default-snapshot-root-'));
+  try {
+    let archiveOutputPath;
+    const archiveFailure = async (_file, args) => {
+      if (args[0] === 'archive') {
+        archiveOutputPath = args.find((arg) => arg.startsWith('--output='))?.slice('--output='.length);
+        return { code: 1, stdout: '', stderr: 'archive failed' };
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    };
+    await assert.rejects(defaultCreateTagSnapshot(root, 'v1.2.3', archiveFailure), /git archive for v1\.2\.3 failed/);
+    await assert.rejects(stat(path.dirname(archiveOutputPath)), /ENOENT/);
+
+    let extractOutputPath;
+    const extractFailure = async (_file, args) => {
+      if (args[0] === 'archive') {
+        extractOutputPath = args.find((arg) => arg.startsWith('--output='))?.slice('--output='.length);
+        await writeFile(extractOutputPath, 'tar');
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (args[0] === '-xf') return { code: 1, stdout: '', stderr: 'tar failed' };
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    };
+    await assert.rejects(defaultCreateTagSnapshot(root, 'v1.2.3', extractFailure), /extract tag snapshot for v1\.2\.3 failed/);
+    await assert.rejects(stat(path.dirname(extractOutputPath)), /ENOENT/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('interactive confirmation requires the exact v-prefixed release version', async () => {
+  async function answer(value) {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    stdin.isTTY = true;
+    stdout.isTTY = true;
+    stdin.end(`${value}\n`);
+    return defaultConfirm({ version: 'v1.2.3', planned: 2, skipped: 1, stdin, stdout });
+  }
+
+  assert.equal(await answer('publish'), false);
+  assert.equal(await answer('v1.2.3'), true);
+});
