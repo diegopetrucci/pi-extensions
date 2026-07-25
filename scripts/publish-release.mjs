@@ -229,18 +229,34 @@ function isExactNotFound(result) {
   return (hasOnly404Codes || hasOnlyTargetCodes) && !/\b(?!404\b)[45]\d\d\b/.test(stderr);
 }
 
-async function checkPublishedVersion(pkg, version, run, root) {
-  const spec = `${pkg.name}@${version}`;
-  const result = await run('npm', ['view', spec, 'version', '--json', `--registry=${PUBLIC_REGISTRY}`], { cwd: root });
-  if (isExactNotFound(result)) return false;
-  if (result.code !== 0) throw new Error(`registry target check for ${spec} failed (${result.code}): ${result.stderr.trim() || result.stdout.trim()}`);
+function parsePublishedDist(spec, stdout) {
   let parsed;
   try {
-    parsed = JSON.parse(result.stdout);
+    parsed = JSON.parse(stdout);
   } catch {
-    throw new Error(`registry target check for ${spec} returned invalid JSON`);
+    throw new Error(`registry dist check for ${spec} returned invalid JSON`);
   }
-  if (parsed !== version) throw new Error(`registry target check for ${spec} returned unexpected version data`);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`registry dist check for ${spec} returned invalid metadata`);
+  }
+  if (typeof parsed.shasum !== 'string' || parsed.shasum.length === 0) {
+    throw new Error(`registry dist check for ${spec} is missing dist.shasum`);
+  }
+  if (typeof parsed.integrity !== 'string' || parsed.integrity.length === 0) {
+    throw new Error(`registry dist check for ${spec} is missing dist.integrity`);
+  }
+  return { shasum: parsed.shasum, integrity: parsed.integrity };
+}
+
+async function checkPublishedVersion(pkg, version, expectedPack, run, root) {
+  const spec = `${pkg.name}@${version}`;
+  const result = await run('npm', ['view', spec, 'dist', '--json', `--registry=${PUBLIC_REGISTRY}`], { cwd: root });
+  if (isExactNotFound(result)) return false;
+  if (result.code !== 0) throw new Error(`registry dist check for ${spec} failed (${result.code}): ${result.stderr.trim() || result.stdout.trim()}`);
+  const publishedDist = parsePublishedDist(spec, result.stdout);
+  if (publishedDist.shasum !== expectedPack.shasum || publishedDist.integrity !== expectedPack.integrity) {
+    throw new Error(`registry dist metadata mismatch for ${spec}: expected tagged pack hashes for ${version}`);
+  }
   return true;
 }
 
@@ -289,20 +305,29 @@ export async function publishRelease({
   const root = await findRoot(cwd);
   const evidencePath = path.join(root, 'docs', `github-release-${version}.md`);
   if (!(await exists(evidencePath))) throw new Error(`Missing release document: ${path.relative(root, evidencePath)}`);
-  const evidence = parseEvidence(await readFile(evidencePath, 'utf8'), path.relative(root, evidencePath));
+  const currentEvidenceContent = await readFile(evidencePath);
   await checked(run, 'git', ['rev-parse', '--verify', `${version}^{commit}`], { cwd: root }, `verify release tag ${version}`);
 
   let snapshotRoot;
   try {
     snapshotRoot = await createTagSnapshot(root, version, run);
+    const snapshotEvidencePath = path.join(snapshotRoot, 'docs', `github-release-${version}.md`);
+    if (!(await exists(snapshotEvidencePath))) throw new Error(`Release tag ${version} is missing release document: docs/github-release-${version}.md`);
+    const snapshotEvidenceContent = await readFile(snapshotEvidencePath);
+    const snapshotEvidence = parseEvidence(snapshotEvidenceContent.toString('utf8'), path.relative(snapshotRoot, snapshotEvidencePath));
+    if (!currentEvidenceContent.equals(snapshotEvidenceContent)) {
+      throw new Error(`Checkout release document does not match release tag ${version}`);
+    }
+
     const currentPackages = await discoverPackages(root);
     const snapshotPackages = await discoverPackages(snapshotRoot);
     const currentByName = new Map(currentPackages.map((pkg) => [pkg.name, pkg]));
     const snapshotByName = new Map(snapshotPackages.map((pkg) => [pkg.name, pkg]));
-    const selected = evidenceOrder(currentByName, evidence);
-    assertEvidenceOrder(selected, evidence);
+    const selected = evidenceOrder(currentByName, snapshotEvidence);
+    assertEvidenceOrder(selected, snapshotEvidence);
 
-    for (const { name, version: expectedVersion } of evidence) {
+    const snapshotPacks = new Map();
+    for (const { name, version: expectedVersion } of snapshotEvidence) {
       const current = currentByName.get(name);
       const snapshot = snapshotByName.get(name);
       if (!snapshot) throw new Error(`Release tag ${version} is missing package ${name}`);
@@ -311,14 +336,15 @@ export async function publishRelease({
       const currentPack = await packSummary(current, run);
       await assertCleanPublishablePaths(root, current, currentPack, run);
       const snapshotPack = await packSummary(snapshot, run);
+      snapshotPacks.set(name, snapshotPack);
       if (!packEqual(currentPack, snapshotPack)) throw new Error(`Current publishable content for ${name}@${expectedVersion} does not match ${version}`);
     }
 
     const authUser = await checkPublicAuth(root, run);
     const plan = [];
-    for (const { name, version: expectedVersion } of evidence) {
+    for (const { name, version: expectedVersion } of snapshotEvidence) {
       const pkg = currentByName.get(name);
-      const alreadyPublished = await checkPublishedVersion(pkg, expectedVersion, run, root);
+      const alreadyPublished = await checkPublishedVersion(pkg, expectedVersion, snapshotPacks.get(name), run, root);
       plan.push({ name, version: expectedVersion, relative: pkg.relative, umbrella: pkg.umbrella, action: alreadyPublished ? 'skip' : 'publish' });
     }
 

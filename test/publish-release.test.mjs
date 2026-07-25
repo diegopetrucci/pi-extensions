@@ -60,11 +60,12 @@ async function fixture(t) {
   }
 
   await text(path.join(root, 'docs/github-release-v1.2.3.md'), releaseDoc);
+  await text(path.join(snapshot, 'docs/github-release-v1.2.3.md'), releaseDoc);
   return { root, snapshot };
 }
 
-function packResponse(name, shasum, files) {
-  return JSON.stringify([{ name, shasum, size: 100 + name.length, unpackedSize: 200 + name.length, files }]);
+function packResponse(name, shasum, integrity, files) {
+  return JSON.stringify([{ name, shasum, integrity, size: 100 + name.length, unpackedSize: 200 + name.length, files }]);
 }
 
 async function cloneSnapshot(snapshot) {
@@ -73,7 +74,7 @@ async function cloneSnapshot(snapshot) {
   return target;
 }
 
-function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, packOverrides = {}, whoami = 'tlh-user', calls = [] }) {
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, packOverrides = {}, whoami = 'tlh-user', calls = [] }) {
   return async (file, args, options = {}) => {
     calls.push({ file, args: [...args], cwd: options.cwd });
     if (file === 'git') {
@@ -92,7 +93,13 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
     if (args[0] === 'view') {
       const spec = args[1];
       if (registryError) return { code: 1, stdout: '', stderr: registryError };
-      if (publishedSpecs.has(spec)) return { code: 0, stdout: JSON.stringify(spec.split('@').at(-1)), stderr: '' };
+      if (publishedSpecs.has(spec)) {
+        const dist = registryDistOverrides[spec] ?? (() => {
+          const version = spec.slice(spec.lastIndexOf('@') + 1);
+          return { shasum: `${spec.replace(`@${version}`, '')}:same`, integrity: `sha512-${spec.replace(`@${version}`, '')}:same` };
+        })();
+        return { code: 0, stdout: JSON.stringify(dist), stderr: '' };
+      }
       return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
     }
     if (args[0] === 'publish') {
@@ -111,8 +118,9 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
       '@example/zebra': [{ path: 'README.md', size: 8 }, { path: 'index.js', size: 24 }, { path: 'package.json', size: 88 }],
       '@example/ångstrom': [{ path: 'README.md', size: 11 }, { path: 'index.js', size: 27 }, { path: 'package.json', size: 92 }],
     };
-    const shasum = packOverrides[`${scope}:${manifest.name}`] ?? `${manifest.name}:${scope === 'snapshot' ? 'same' : 'same'}`;
-    return { code: 0, stdout: packResponse(manifest.name, shasum, fileMap[manifest.name]), stderr: '' };
+    const shasum = packOverrides[`${scope}:${manifest.name}`]?.shasum ?? `${manifest.name}:same`;
+    const integrity = packOverrides[`${scope}:${manifest.name}`]?.integrity ?? `sha512-${manifest.name}:same`;
+    return { code: 0, stdout: packResponse(manifest.name, shasum, integrity, fileMap[manifest.name]), stderr: '' };
   };
 }
 
@@ -142,10 +150,9 @@ test('dry-run verifies evidence against the tag, checks auth, and never executes
 test('workspace-only evidence is allowed when it preserves dependency order', async (t) => {
   const { root, snapshot } = await fixture(t);
   const evidence = [['plain-addon', '1.2.3'], ['@example/feature', '1.2.3']];
-  await text(
-    path.join(root, 'docs/github-release-v1.2.3.md'),
-    `Workspace-only release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`,
-  );
+  const releaseDoc = `Workspace-only release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`;
+  await text(path.join(root, 'docs/github-release-v1.2.3.md'), releaseDoc);
+  await text(path.join(snapshot, 'docs/github-release-v1.2.3.md'), releaseDoc);
   const calls = [];
   const result = await publishRelease({
     cwd: root,
@@ -194,10 +201,9 @@ test('workspace publish ordering uses raw code-point sorting like prepare-releas
   }
 
   const evidence = [['@example/zebra', '1.2.3'], ['@example/ångstrom', '1.2.3'], ['@example/umbrella', '1.2.3']];
-  await text(
-    path.join(root, 'docs/github-release-v1.2.3.md'),
-    `Code-point order release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`,
-  );
+  const releaseDoc = `Code-point order release.\n\n<!-- prepare-release:packages ${JSON.stringify(evidence)} -->\n`;
+  await text(path.join(root, 'docs/github-release-v1.2.3.md'), releaseDoc);
+  await text(path.join(snapshot, 'docs/github-release-v1.2.3.md'), releaseDoc);
 
   const result = await publishRelease({
     cwd: root,
@@ -236,10 +242,9 @@ test('live mode prompts once, skips exact published versions, and publishes root
 
 test('unsafe evidence order and dirty publishable paths hard-fail before publish', async (t) => {
   const { root, snapshot } = await fixture(t);
-  await text(
-    path.join(root, 'docs/github-release-v1.2.3.md'),
-    'Bad order\n\n<!-- prepare-release:packages [["@example/feature","1.2.3"],["plain-addon","1.2.3"],["@example/umbrella","1.2.3"]] -->\n',
-  );
+  const badOrderDoc = 'Bad order\n\n<!-- prepare-release:packages [["@example/feature","1.2.3"],["plain-addon","1.2.3"],["@example/umbrella","1.2.3"]] -->\n';
+  await text(path.join(root, 'docs/github-release-v1.2.3.md'), badOrderDoc);
+  await text(path.join(snapshot, 'docs/github-release-v1.2.3.md'), badOrderDoc);
   await assert.rejects(
     publishRelease({ cwd: root, version: 'v1.2.3', dryRun: true, run: mockRunner({ root, snapshot }), createTagSnapshot: async () => cloneSnapshot(snapshot) }),
     /unsafe publish order/,
@@ -265,7 +270,14 @@ test('content mismatches and auth failures abort safely', async (t) => {
       cwd: root,
       version: 'v1.2.3',
       dryRun: true,
-      run: mockRunner({ root, snapshot, packOverrides: { 'current:@example/feature': 'feature-current', 'snapshot:@example/feature': 'feature-tag' } }),
+      run: mockRunner({
+        root,
+        snapshot,
+        packOverrides: {
+          'current:@example/feature': { shasum: 'feature-current', integrity: 'sha512-feature-current' },
+          'snapshot:@example/feature': { shasum: 'feature-tag', integrity: 'sha512-feature-tag' },
+        },
+      }),
       createTagSnapshot: async () => cloneSnapshot(snapshot),
     }),
     /does not match v1\.2\.3/,
@@ -297,9 +309,93 @@ test('missing or malformed managed evidence fails before registry or publishing 
   await text(path.join(malformedRoot, 'docs/github-release-v1.2.3.md'), 'Release body\n\n<!-- prepare-release:packages [["plain-addon"]] -->\n');
   await assert.rejects(
     publishRelease({ cwd: malformedRoot, version: 'v1.2.3', dryRun: true, run: mockRunner({ root: malformedRoot, snapshot: malformedSnapshot, calls: malformedCalls }), createTagSnapshot: async () => cloneSnapshot(malformedSnapshot) }),
-    /evidence entry 1 is invalid/,
+    /Checkout release document does not match release tag v1\.2\.3/,
   );
-  assert.equal(malformedCalls.length, 0);
+  assert.equal(malformedCalls.some(({ file }) => file === 'npm'), false);
+});
+
+test('changed narrative, changed evidence, or omitted checkout evidence fails closed against the tagged release document', async (t) => {
+  const { root: narrativeRoot, snapshot: narrativeSnapshot } = await fixture(t);
+  const narrativePath = path.join(narrativeRoot, 'docs/github-release-v1.2.3.md');
+  const unchangedEvidence = await readFile(narrativePath, 'utf8');
+  await text(narrativePath, unchangedEvidence.replace('Release v1.2.3 helper coverage.', 'Edited release narrative.'));
+  await assert.rejects(
+    publishRelease({
+      cwd: narrativeRoot,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root: narrativeRoot, snapshot: narrativeSnapshot }),
+      createTagSnapshot: async () => cloneSnapshot(narrativeSnapshot),
+    }),
+    /Checkout release document does not match release tag v1\.2\.3/,
+  );
+
+  const { root, snapshot } = await fixture(t);
+  await text(
+    path.join(root, 'docs/github-release-v1.2.3.md'),
+    'Changed checkout evidence\n\n<!-- prepare-release:packages [["plain-addon","1.2.3"],["@example/umbrella","1.2.3"]] -->\n',
+  );
+  await assert.rejects(
+    publishRelease({ cwd: root, version: 'v1.2.3', dryRun: true, run: mockRunner({ root, snapshot }), createTagSnapshot: async () => cloneSnapshot(snapshot) }),
+    /Checkout release document does not match release tag v1\.2\.3/,
+  );
+
+  const { root: missingEvidenceRoot, snapshot: missingEvidenceSnapshot } = await fixture(t);
+  await text(path.join(missingEvidenceRoot, 'docs/github-release-v1.2.3.md'), 'Checkout prose without marker\n');
+  await assert.rejects(
+    publishRelease({
+      cwd: missingEvidenceRoot,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root: missingEvidenceRoot, snapshot: missingEvidenceSnapshot }),
+      createTagSnapshot: async () => cloneSnapshot(missingEvidenceSnapshot),
+    }),
+    /Checkout release document does not match release tag v1\.2\.3/,
+  );
+});
+
+test('matching published hashes skip exact versions, while missing or mismatched dist metadata fails closed', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const skipped = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({ root, snapshot, publishedSpecs: new Set(['plain-addon@1.2.3']) }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+  assert.deepEqual(skipped.skipped, ['plain-addon@1.2.3']);
+
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({
+        root,
+        snapshot,
+        publishedSpecs: new Set(['plain-addon@1.2.3']),
+        registryDistOverrides: { 'plain-addon@1.2.3': { shasum: 'plain-addon:same' } },
+      }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /missing dist\.integrity/,
+  );
+
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({
+        root,
+        snapshot,
+        publishedSpecs: new Set(['plain-addon@1.2.3']),
+        registryDistOverrides: { 'plain-addon@1.2.3': { shasum: 'plain-addon:other', integrity: 'sha512-plain-addon:other' } },
+      }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /registry dist metadata mismatch for plain-addon@1\.2\.3/,
+  );
 });
 
 test('current and tagged manifest version mismatches fail closed', async (t) => {
@@ -335,7 +431,7 @@ test('ambiguous registry failures and rejected confirmation never publish', asyn
       run: mockRunner({ root, snapshot, registryError: 'npm error code E404\nnpm error code E500\n404 Not Found', calls: registryCalls }),
       createTagSnapshot: async () => cloneSnapshot(snapshot),
     }),
-    /registry target check.*E404.*E500/s,
+    /registry dist check.*E404.*E500/s,
   );
   assert.equal(registryCalls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
 
