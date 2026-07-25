@@ -178,14 +178,14 @@ test('agent-workflow-audit message renderer collapses long reports and preserves
         endedAt: 2500,
       },
     },
-    { expanded: false },
+    { expanded: false, outputPad: 1 },
     theme,
-  ).render(200).join('\n');
+  ).render(200);
 
-  assert.match(rendered, /<success>✓<\/success>/);
-  assert.match(rendered, /execute · 2 turns · 9 tools · 2\.5s/);
-  assert.match(rendered, /line 1/);
-  assert.match(rendered, /… \(2 more lines; expand to view\)/);
+  assert.match(rendered[0], /^ <success>✓<\/success>/);
+  assert.match(rendered.join('\n'), /execute · 2 turns · 9 tools · 2\.5s/);
+  assert.match(rendered.join('\n'), /\n <toolOutput>line 1/);
+  assert.match(rendered.join('\n'), /… \(2 more lines; expand to view\)/);
 });
 
 test('agent-workflow-audit message renderer expands details and covers status fallbacks', () => {
@@ -207,15 +207,15 @@ test('agent-workflow-audit message renderer expands details and covers status fa
         endedAt: 305,
       },
     },
-    { expanded: true },
+    { expanded: true, outputPad: 1 },
     theme,
-  ).render(200).join('\n');
+  ).render(200);
 
-  assert.match(expanded, /<error>✗<\/error>/);
-  assert.match(expanded, /plan-only · 1 turns · 0 tools · 300ms/);
-  assert.match(expanded, /cwd: \/tmp\/repo/);
-  assert.match(expanded, /focus: release docs/);
-  assert.match(expanded, /Audit complete\./);
+  assert.match(expanded[0], /^ <error>✗<\/error>/);
+  assert.match(expanded.join('\n'), /plan-only · 1 turns · 0 tools · 300ms/);
+  assert.match(expanded.join('\n'), /\n <dim>cwd: \/tmp\/repo<\/dim>/);
+  assert.match(expanded.join('\n'), /\n <dim>focus: release docs<\/dim>/);
+  assert.match(expanded.join('\n'), /\n Audit complete\./);
 
   const fallback = renderer({ content: [], details: undefined }, { expanded: false }, theme).render(200).join('\n');
   assert.match(fallback, /final report/);

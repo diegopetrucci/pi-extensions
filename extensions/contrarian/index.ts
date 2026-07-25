@@ -84,6 +84,7 @@ const CONTRARIAN_MODEL_PREFERENCES = [
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 	"gpt-5.5",
+	"claude-opus-5",
 	"claude-opus-4-8",
 	"claude-opus-4.8",
 	"claude-sonnet-5",
@@ -98,6 +99,7 @@ const CONTRARIAN_MODEL_PREFERENCES = [
 
 const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"amazon-bedrock": [
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
@@ -117,6 +119,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"zai.glm-5",
 	],
 	anthropic: [
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
@@ -141,13 +144,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5-chat-latest",
 		"gpt-5.2-pro",
 		"gpt-5.2",
-		"gpt-5.2-codex",
-		"gpt-5.1-codex-max",
-		"gpt-5.1-codex",
 		"gpt-5.1",
-		"gpt-5.1-chat-latest",
 		"o3-pro",
-		"o3-deep-research",
 		"o1-pro",
 		"gpt-5.4-mini",
 		"gpt-5-mini",
@@ -193,6 +191,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"accounts/fireworks/models/gpt-oss-20b",
 	],
 	"github-copilot": [
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-opus-4.8",
 		"claude-opus-4.7",
@@ -282,13 +281,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5-chat-latest",
 		"gpt-5.2-pro",
 		"gpt-5.2",
-		"gpt-5.2-codex",
-		"gpt-5.1-codex-max",
-		"gpt-5.1-codex",
 		"gpt-5.1",
-		"gpt-5.1-chat-latest",
 		"o3-pro",
-		"o3-deep-research",
 		"o1-pro",
 		"gpt-5.4-mini",
 		"gpt-5-mini",
@@ -303,6 +297,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5.3-codex-spark",
 	],
 	opencode: [
+		"claude-opus-5",
 		"claude-fable-5",
 		"gpt-5.5-pro",
 		"gpt-5.5",
@@ -344,6 +339,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"kimi-k2.6",
 	],
 	openrouter: [
+		"anthropic/claude-opus-5",
 		"anthropic/claude-fable-5",
 		"~anthropic/claude-fable-latest",
 		"anthropic/claude-opus-4.8",
@@ -417,6 +413,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"google/gemma-4-31B-it",
 	],
 	"vercel-ai-gateway": [
+		"anthropic/claude-opus-5",
 		"anthropic/claude-fable-5",
 		"anthropic/claude-opus-4.8",
 		"anthropic/claude-opus-4.7",
