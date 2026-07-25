@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-contrarian",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A read-only contrarian subagent extension for pi that stress-tests plans, designs, assumptions, and conclusions.",
   "keywords": [
     "pi-package",

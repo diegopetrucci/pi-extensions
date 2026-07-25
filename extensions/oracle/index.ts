@@ -455,7 +455,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"moonshotai/kimi-k2.6",
 		"z-ai/glm-5.2",
 		"minimaxai/minimax-m3",
-		"mistralai/mistral-large-3-675b-instruct-2512",
 		"openai/gpt-oss-120b",
 		"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
 		"nvidia/nemotron-3-nano-30b-a3b",
