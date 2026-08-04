@@ -232,9 +232,12 @@ Notes:
 
 - `thresholds.minCharsSaved` is a minimum-size floor enforced against fresh
   **automatic** strategy proposals only, before the net-benefit gate runs: a
-  candidate whose character savings (original content chars minus placeholder
-  chars) fall below this value is dropped up front and never reaches gate or
-  batch consideration. Manual prunes (`/prune`) and already-persisted/replayed
+  text-only candidate whose raw character savings (original text chars minus
+  placeholder chars) fall below this value is dropped up front and never
+  reaches gate or batch consideration. A tool-result candidate containing one
+  or more image blocks bypasses this raw-text floor (images do not receive
+  synthetic character counts) and is evaluated by the existing token-based
+  net-benefit gate. Manual prunes (`/prune`) and already-persisted/replayed
   decisions always bypass this floor, same as the gate. Set to `0` to disable
   filtering entirely. This is independent of the net-benefit gate's
   break-even math (`gate.*`), which is a separate, later check on whatever

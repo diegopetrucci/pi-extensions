@@ -10,15 +10,17 @@ const dcp = await import(pathToFileURL(modulePath).href);
 const {
   defaultConfig,
   runDynamicContextPruningPipeline,
+  estimateDecisionCharsSaved,
   proposalToDecisionRecord,
   buildManualPruneProposal,
 } = dcp;
 
 // ---------------------------------------------------------------------------
 // thresholds.minCharsSaved enforcement (pe-qdzb): fresh AUTOMATIC proposals
-// whose char savings (original content chars minus placeholder chars) fall
+// whose raw text savings (original text chars minus placeholder chars) fall
 // below the configured floor are dropped BEFORE the net-benefit gate runs.
-// Manual and already-persisted/replayed decisions always bypass the floor.
+// Image-bearing tool-result candidates, manual decisions, and already-
+// persisted/replayed decisions bypass the floor.
 // ---------------------------------------------------------------------------
 
 function userMsg(text, timestamp) {
@@ -35,6 +37,17 @@ function assistantText(text, timestamp) {
 
 function toolResultMsg(toolCallId, toolName, text, isError, timestamp) {
   return { role: 'toolResult', toolCallId, toolName, content: [{ type: 'text', text }], isError, timestamp };
+}
+
+function imageToolResultMsg(toolCallId, toolName, timestamp) {
+  return {
+    role: 'toolResult',
+    toolCallId,
+    toolName,
+    content: [{ type: 'image', data: 'encoded-image', mimeType: 'image/png' }],
+    isError: false,
+    timestamp,
+  };
 }
 
 let ts = 0;
@@ -118,6 +131,45 @@ test('minCharsSaved: a fresh automatic proposal at/above the floor is kept and a
 
   assert.equal(result.newlyAppliedDecisions.length, 1, 'at/above-floor candidate must survive the floor and be applied');
   assert.equal(result.newlyAppliedDecisions[0].correlation.toolCallId, 'call_1');
+  const c1Result = result.messages.find((m) => m.role === 'toolResult' && m.toolCallId === 'call_1');
+  assert.ok(c1Result.content[0].text.includes('pruned by'));
+});
+
+test('minCharsSaved: an image-only tool-result candidate bypasses the raw-text floor and reaches the gate', (t) => {
+  const messages = [
+    userMsg('turn for call_1', nextTs()),
+    assistantToolCall('call_1', 'bash', { cmd: 'screenshot' }, nextTs()),
+    imageToolResultMsg('call_1', 'bash', nextTs()),
+    ...plainTurn('after'),
+  ];
+  const proposal = {
+    strategyId: 'test-strategy',
+    toolCallId: 'call_1',
+    kind: 'tool_result_content',
+    reason: 'stale image output',
+  };
+  withFakeStrategy(t, [proposal]);
+
+  const decision = proposalToDecisionRecord(proposal);
+  assert.equal(estimateDecisionCharsSaved(messages, decision), 0, 'images must not receive synthetic character savings');
+
+  const config = {
+    ...defaultConfig(),
+    protections: { ...defaultConfig().protections, recentTurns: 0 },
+    thresholds: { ...defaultConfig().thresholds, minCharsSaved: 1 },
+    // Exercise the token gate without making this floor regression depend on
+    // its current break-even threshold or provider-price tuning.
+    gate: { ...defaultConfig().gate, mode: 'always-apply' },
+  };
+
+  const result = runDynamicContextPruningPipeline({ messages, config, persistedDecisions: [], knownIdempotencyKeys: new Set() });
+
+  assert.equal(result.gate.mode, 'always-apply');
+  assert.ok(result.gate.cost, 'a computed gate cost proves the candidate reached token-gate evaluation');
+  assert.ok(result.gate.totalTokensRemoved > 0, 'the existing token estimator must account for the image');
+  assert.equal(result.gate.accepted.length, 1);
+  assert.equal(result.gate.accepted[0].correlation.toolCallId, 'call_1');
+  assert.equal(result.newlyAppliedDecisions.length, 1);
   const c1Result = result.messages.find((m) => m.role === 'toolResult' && m.toolCallId === 'call_1');
   assert.ok(c1Result.content[0].text.includes('pruned by'));
 });

@@ -165,14 +165,16 @@ export interface PruneProtections {
 
 export interface PruneThresholds {
 	/**
-	 * Minimum characters a fresh AUTOMATIC prune proposal must remove (original
-	 * content chars minus placeholder chars) to be considered at all (pe-qdzb).
-	 * Enforced by `runDynamicContextPruningPipeline` BEFORE the net-benefit
-	 * gate (see `PruneGateConfig`/`gate`, which uses break-even token math and
-	 * is a separate, later check): candidates below this floor are dropped
-	 * up front and never reach gate/batch consideration. Manual prunes and
-	 * already-persisted/replayed decisions always bypass this floor, same as
-	 * the gate. A value of 0 disables the floor (no filtering).
+	 * Minimum raw text characters a fresh AUTOMATIC prune proposal must remove
+	 * (original text chars minus placeholder chars) to be considered at all
+	 * (pe-qdzb). Enforced by `runDynamicContextPruningPipeline` BEFORE the
+	 * net-benefit gate (see `PruneGateConfig`/`gate`, which uses break-even token
+	 * math and is a separate, later check): text-only candidates below this floor
+	 * are dropped up front and never reach gate/batch consideration. Image-bearing
+	 * tool-result candidates bypass this raw-text floor (images receive no
+	 * synthetic character count) and proceed to the token-based gate. Manual
+	 * prunes and already-persisted/replayed decisions always bypass this floor,
+	 * same as the gate. A value of 0 disables the floor (no filtering).
 	 */
 	minCharsSaved: number;
 }
@@ -952,6 +954,20 @@ export function buildPlaceholderText(reason: string, charsRemoved: number): stri
 
 function contentTextLength(content: (MinimalTextContent | MinimalImageContent)[]): number {
 	return content.reduce((sum, block) => (block.type === "text" ? sum + block.text.length : sum), 0);
+}
+
+/** Return true when a decision targets a tool result containing one or more images. */
+function isImageBearingToolResultTarget(
+	messages: MinimalMessage[],
+	decision: PruneDecisionRecord,
+	pairIndex?: Map<string, ToolCallPairIndices>,
+): boolean {
+	if (decision.kind !== "tool_result_content" || decision.correlation.type !== "toolCallId") return false;
+	const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
+	if (pair.resultIndex === undefined) return false;
+	const target = messages[pair.resultIndex];
+	if (target?.role !== "toolResult") return false;
+	return (target as MinimalToolResultMessage).content.some((block) => block.type === "image");
 }
 
 export interface ApplyResult {
@@ -1996,14 +2012,18 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	// candidates never consume batch/earliest-position gate consideration.
 	// Applies to automatic proposals only; manual (`freshManual` above) and
 	// already-persisted decisions (`input.persistedDecisions`, applied later)
-	// bypass this floor entirely, same as the net-benefit gate. A floor of 0
-	// (the config default before pe-c5n9's DEFAULT_MIN_CHARS_SAVED constant was
-	// introduced) is a no-op: every non-negative delta clears it.
+	// bypass this floor entirely, same as the net-benefit gate. Tool-result
+	// candidates containing images also bypass this raw-text floor because
+	// images have no character count; their token savings still go through the
+	// existing net-benefit gate. A floor of 0 (the config default before
+	// pe-c5n9's DEFAULT_MIN_CHARS_SAVED constant was introduced) is a no-op:
+	// every non-negative delta clears it.
 	const minCharsSaved = input.config.thresholds.minCharsSaved;
 	const freshAutomatic =
 		minCharsSaved <= 0
 			? freshAutomaticUnfiltered
 			: freshAutomaticUnfiltered.filter((decision) => {
+					if (isImageBearingToolResultTarget(messages, decision, pairIndex)) return true;
 					const charsSaved = estimateDecisionCharsSaved(messages, decision, pairIndex);
 					return charsSaved !== undefined && charsSaved >= minCharsSaved;
 				});
