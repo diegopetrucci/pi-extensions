@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import { cp, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { defaultConfirm, defaultCreateTagSnapshot, PUBLIC_REGISTRY, publishRelease } from '../scripts/publish-release.mjs';
+import { defaultCreateTagSnapshot, PUBLIC_REGISTRY, publishRelease } from '../scripts/publish-release.mjs';
 
 async function json(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -65,7 +64,8 @@ async function fixture(t) {
 }
 
 function packResponse(name, shasum, integrity, files) {
-  return JSON.stringify([{ name, shasum, integrity, size: 100 + name.length, unpackedSize: 200 + name.length, files }]);
+  const filename = `${name.replace(/^@/, '').replaceAll('/', '-')}-1.2.3.tgz`;
+  return JSON.stringify([{ name, filename, shasum, integrity, size: 100 + name.length, unpackedSize: 200 + name.length, files }]);
 }
 
 async function cloneSnapshot(snapshot) {
@@ -74,24 +74,53 @@ async function cloneSnapshot(snapshot) {
   return target;
 }
 
-function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, packOverrides = {}, whoami = 'tlh-user', calls = [] }) {
+function githubEnv(overrides = {}) {
+  return {
+    GITHUB_ACTIONS: 'true',
+    GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_REPOSITORY: 'diegopetrucci/pi-extensions',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_WORKFLOW_REF: 'diegopetrucci/pi-extensions/.github/workflows/publish.yml@refs/heads/main',
+    GITHUB_SHA: 'deadbeef',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    NPM_RELEASE_ENVIRONMENT: 'npm-release',
+    RELEASE_TAG: 'v1.2.3',
+    RELEASE_CONFIRMATION: 'v1.2.3',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://actions.example/oidc',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-request-token',
+    ...overrides,
+  };
+}
+
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
+  const artifacts = new Map();
   return async (file, args, options = {}) => {
-    calls.push({ file, args: [...args], cwd: options.cwd });
+    calls.push({ file, args: [...args], cwd: options.cwd, env: options.env, replaceEnv: options.replaceEnv });
     if (file === 'git') {
       if (args[0] === 'rev-parse') return { code: 0, stdout: 'deadbeef\n', stderr: '' };
+      if (args[0] === 'ls-remote') return { code: 0, stdout: `${remoteTag}\trefs/tags/v1.2.3^{}\n`, stderr: '' };
+      if (args[0] === 'merge-base') return { code: 0, stdout: '', stderr: '' };
       if (args[0] === 'status') {
         const packagePath = args.at(-1).includes('packages/feature') ? '@example/feature' : args.at(-1).includes('packages/plain-addon') ? 'plain-addon' : '@example/umbrella';
         return { code: 0, stdout: dirtyByPackage[packagePath] ?? '', stderr: '' };
       }
       throw new Error(`Unexpected git command: ${args.join(' ')}`);
     }
-    if (file !== 'npm') throw new Error(`Unexpected command: ${file}`);
-    if (args[0] === 'whoami') {
-      if (whoami instanceof Error) return { code: 1, stdout: '', stderr: whoami.message };
-      return { code: 0, stdout: `${whoami}\n`, stderr: '' };
+    if (file === 'gh') {
+      const body = await readFile(path.join(root, 'docs/github-release-v1.2.3.md'), 'utf8');
+      return {
+        code: 0,
+        stdout: JSON.stringify({ tagName: 'v1.2.3', isDraft: false, isPrerelease: false, publishedAt: '2026-01-01T00:00:00Z', url: 'https://example.test/releases/v1.2.3', body, ...releaseOverrides }),
+        stderr: '',
+      };
     }
+    if (file !== 'npm') throw new Error(`Unexpected command: ${file}`);
     if (args[0] === 'view') {
       const spec = args[1];
+      if (args[2] === 'dist-tags.latest') {
+        const published = [...publishedSpecs].find((candidate) => candidate.startsWith(`${spec}@`));
+        return { code: 0, stdout: JSON.stringify(published?.slice(published.lastIndexOf('@') + 1) ?? '1.2.3'), stderr: '' };
+      }
       if (registryError) return { code: 1, stdout: '', stderr: registryError };
       if (publishedSpecs.has(spec)) {
         const dist = registryDistOverrides[spec] ?? (() => {
@@ -103,11 +132,16 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
       return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
     }
     if (args[0] === 'publish') {
-      assert.deepEqual(args, ['publish', '--ignore-scripts', '--access', 'public', `--registry=${PUBLIC_REGISTRY}`]);
+      const spec = artifacts.get(args[1]);
+      assert.ok(spec, `unknown packed artifact ${args[1]}`);
+      assert.deepEqual(args.slice(2), ['--ignore-scripts', '--access', 'public', '--tag', 'latest', `--registry=${PUBLIC_REGISTRY}`]);
+      publishedSpecs.add(spec);
       return { code: 0, stdout: 'published\n', stderr: '' };
     }
     assert.equal(args[0], 'pack');
-    assert.deepEqual(args, ['pack', '--dry-run', '--json', '--ignore-scripts', `--registry=${PUBLIC_REGISTRY}`]);
+    assert.deepEqual(args.slice(0, 3), ['pack', '--json', '--ignore-scripts']);
+    assert.equal(args[3], '--pack-destination');
+    assert.equal(args[5], `--registry=${PUBLIC_REGISTRY}`);
     const manifest = JSON.parse(await readFile(path.join(options.cwd, 'package.json'), 'utf8'));
     const packageRoot = path.resolve(options.cwd);
     const scope = packageRoot.startsWith(path.resolve(root)) ? 'current' : 'snapshot';
@@ -120,11 +154,17 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
     };
     const shasum = packOverrides[`${scope}:${manifest.name}`]?.shasum ?? `${manifest.name}:same`;
     const integrity = packOverrides[`${scope}:${manifest.name}`]?.integrity ?? `sha512-${manifest.name}:same`;
-    return { code: 0, stdout: packResponse(manifest.name, shasum, integrity, fileMap[manifest.name]), stderr: '' };
+    const response = packResponse(manifest.name, shasum, integrity, fileMap[manifest.name]);
+    const filename = JSON.parse(response)[0].filename;
+    await mkdir(args[4], { recursive: true });
+    const artifactPath = path.join(args[4], filename);
+    await writeFile(artifactPath, `${manifest.name}\n`);
+    artifacts.set(artifactPath, `${manifest.name}@${manifest.version}`);
+    return { code: 0, stdout: response, stderr: '' };
   };
 }
 
-test('dry-run verifies evidence against the tag, checks auth, and never executes npm publish', async (t) => {
+test('dry-run verifies evidence against the tag without npm auth and never executes npm publish', async (t) => {
   const { root, snapshot } = await fixture(t);
   const calls = [];
   const result = await publishRelease({
@@ -136,7 +176,8 @@ test('dry-run verifies evidence against the tag, checks auth, and never executes
   });
 
   assert.equal(result.mode, 'dry-run');
-  assert.equal(result.authUser, 'tlh-user');
+  assert.equal(result.authMode, 'none');
+  assert.equal(result.tagCommit, 'deadbeef');
   assert.deepEqual(result.planned.map(({ name, action }) => `${name}:${action}`), [
     'plain-addon:skip',
     '@example/feature:publish',
@@ -216,28 +257,27 @@ test('workspace publish ordering uses raw code-point sorting like prepare-releas
   assert.deepEqual(result.planned.map(({ name }) => name), ['@example/zebra', '@example/ångstrom', '@example/umbrella']);
 });
 
-test('live mode prompts once, skips exact published versions, and publishes root last', async (t) => {
+test('GitHub OIDC live mode skips exact published versions, publishes verified tarballs root-last, and isolates npm config', async (t) => {
   const { root, snapshot } = await fixture(t);
   const calls = [];
-  let confirmCalls = 0;
   const result = await publishRelease({
     cwd: root,
     version: 'v1.2.3',
+    githubActions: true,
+    env: githubEnv(),
     run: mockRunner({ root, snapshot, publishedSpecs: new Set(['plain-addon@1.2.3']), calls }),
-    confirm: async ({ version, planned, skipped }) => {
-      confirmCalls += 1;
-      assert.equal(version, 'v1.2.3');
-      assert.equal(planned, 2);
-      assert.equal(skipped, 1);
-      return true;
-    },
+    sleep: async () => {},
     createTagSnapshot: async () => cloneSnapshot(snapshot),
   });
 
-  assert.equal(confirmCalls, 1);
+  assert.equal(result.authMode, 'github-oidc');
   assert.deepEqual(result.published, ['@example/feature@1.2.3', '@example/umbrella@1.2.3']);
   const publishCalls = calls.filter(({ file, args }) => file === 'npm' && args[0] === 'publish');
-  assert.deepEqual(publishCalls.map(({ cwd }) => path.relative(root, cwd) || '.'), ['packages/feature', '.']);
+  assert.equal(publishCalls.length, 2);
+  assert.ok(publishCalls.every(({ args }) => args[1].endsWith('.tgz')));
+  assert.ok(publishCalls.every(({ cwd }) => cwd === root));
+  assert.ok(publishCalls.every(({ env, replaceEnv }) => replaceEnv && env.NPM_CONFIG_USERCONFIG && env.NPM_CONFIG_GLOBALCONFIG));
+  assert.ok(publishCalls.every(({ env }) => !env.NPM_TOKEN && !env.NODE_AUTH_TOKEN));
 });
 
 test('unsafe evidence order and dirty publishable paths hard-fail before publish', async (t) => {
@@ -263,7 +303,7 @@ test('unsafe evidence order and dirty publishable paths hard-fail before publish
   );
 });
 
-test('content mismatches and auth failures abort safely', async (t) => {
+test('content mismatches and legacy GitHub Actions npm credentials abort safely', async (t) => {
   const { root, snapshot } = await fixture(t);
   await assert.rejects(
     publishRelease({
@@ -287,10 +327,12 @@ test('content mismatches and auth failures abort safely', async (t) => {
       cwd: root,
       version: 'v1.2.3',
       dryRun: true,
-      run: mockRunner({ root, snapshot, whoami: new Error('npm error code E401\nnot logged in') }),
+      githubActions: true,
+      env: githubEnv({ NPM_TOKEN: 'forbidden' }),
+      run: mockRunner({ root, snapshot }),
       createTagSnapshot: async () => cloneSnapshot(snapshot),
     }),
-    /authentication check failed.*E401/s,
+    /refuses legacy npm credential variables: NPM_TOKEN/,
   );
 });
 
@@ -420,7 +462,7 @@ test('current and tagged manifest version mismatches fail closed', async (t) => 
   );
 });
 
-test('ambiguous registry failures and rejected confirmation never publish', async (t) => {
+test('ambiguous registry failures and local live mode never publish', async (t) => {
   const { root, snapshot } = await fixture(t);
   const registryCalls = [];
   await assert.rejects(
@@ -435,18 +477,91 @@ test('ambiguous registry failures and rejected confirmation never publish', asyn
   );
   assert.equal(registryCalls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
 
-  const rejectedCalls = [];
+  const localCalls = [];
   await assert.rejects(
     publishRelease({
       cwd: root,
       version: 'v1.2.3',
-      run: mockRunner({ root, snapshot, calls: rejectedCalls }),
-      confirm: async () => false,
+      run: mockRunner({ root, snapshot, calls: localCalls }),
       createTagSnapshot: async () => cloneSnapshot(snapshot),
     }),
-    /Publish cancelled for v1\.2\.3/,
+    /Live publishing is allowed only through the trusted GitHub Actions workflow/,
   );
-  assert.equal(rejectedCalls.some(({ file, args }) => file === 'npm' && args[0] === 'publish'), false);
+  assert.equal(localCalls.length, 0);
+});
+
+test('GitHub Actions mode requires the trusted main workflow and live OIDC permission', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      githubActions: true,
+      env: githubEnv({ GITHUB_REF: 'refs/heads/feature' }),
+      run: mockRunner({ root, snapshot }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /requires GITHUB_REF=refs\/heads\/main/,
+  );
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      githubActions: true,
+      env: githubEnv({ ACTIONS_ID_TOKEN_REQUEST_TOKEN: '' }),
+      run: mockRunner({ root, snapshot }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /requires id-token: write/,
+  );
+});
+
+test('remote tag, public GitHub release body, and repository npm config are fail-closed', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root, snapshot, remoteTag: 'different' }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /Local and origin release tags disagree/,
+  );
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      run: mockRunner({ root, snapshot, releaseOverrides: { body: 'edited release body' } }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /GitHub release body does not match/,
+  );
+  await text(path.join(root, '.npmrc'), '//registry.npmjs.org/:_authToken=forbidden\n');
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      dryRun: true,
+      githubActions: true,
+      env: githubEnv(),
+      run: mockRunner({ root, snapshot }),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /refuses repository npm configuration: \.npmrc/,
+  );
+});
+
+test('trusted publish workflow keeps verification unprivileged and gates serialized OIDC publishing', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/publish.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /concurrency:\n  group: npm-release\n  cancel-in-progress: false/);
+  assert.match(workflow, /verify:[\s\S]*?permissions:\n      contents: read[\s\S]*?--dry-run --github-actions/);
+  assert.doesNotMatch(workflow.match(/verify:[\s\S]*?\n  publish:/)?.[0] ?? '', /id-token: write/);
+  assert.match(workflow, /publish:[\s\S]*?environment:\n      name: npm-release[\s\S]*?id-token: write[\s\S]*?--github-actions/);
+  assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN|registry-url:/);
 });
 
 test('defaultCreateTagSnapshot removes its temp directory when archive or extract fails', async () => {
@@ -478,18 +593,4 @@ test('defaultCreateTagSnapshot removes its temp directory when archive or extrac
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-
-test('interactive confirmation requires the exact v-prefixed release version', async () => {
-  async function answer(value) {
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    stdin.isTTY = true;
-    stdout.isTTY = true;
-    stdin.end(`${value}\n`);
-    return defaultConfirm({ version: 'v1.2.3', planned: 2, skipped: 1, stdin, stdout });
-  }
-
-  assert.equal(await answer('publish'), false);
-  assert.equal(await answer('v1.2.3'), true);
 });

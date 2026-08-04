@@ -1,0 +1,120 @@
+name: Publish npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact published GitHub release tag (for example, v0.1.62)
+        required: true
+        type: string
+      confirmation:
+        description: Type the same v-prefixed release tag to confirm the publish plan
+        required: true
+        type: string
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.release_tag }} publish plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NPM_RELEASE_ENVIRONMENT: npm-release
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+
+    steps:
+      - name: Checkout the dispatch commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.11.1
+          package-manager-cache: false
+
+      - name: Pin the audited npm CLI
+        run: |
+          user_config=$(mktemp)
+          global_config=$(mktemp)
+          trap 'rm -f "$user_config" "$global_config"' EXIT
+          printf '%s\n' 'registry=https://registry.npmjs.org' >"$user_config"
+          NPM_CONFIG_USERCONFIG="$user_config" NPM_CONFIG_GLOBALCONFIG="$global_config" \
+            npm install --global npm@11.17.0 --ignore-scripts
+          NPM_CONFIG_USERCONFIG="$user_config" NPM_CONFIG_GLOBALCONFIG="$global_config" \
+            test "$(npm --version)" = 11.17.0
+
+      - name: Verify release evidence and tarballs
+        run: |
+          set -euo pipefail
+          scripts/publish-release.mjs "$RELEASE_TAG" --dry-run --github-actions | tee release-plan.json
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const result = JSON.parse(readFileSync('release-plan.json', 'utf8'));
+          const lines = [
+            `# ${result.version} npm publish plan`,
+            '',
+            `Tag commit: \`${result.tagCommit}\``,
+            '',
+            '| Package | Version | Action | SHA-1 |',
+            '| --- | --- | --- | --- |',
+            ...result.planned.map((entry) => `| \`${entry.name}\` | \`${entry.version}\` | **${entry.action}** | \`${entry.shasum}\` |`),
+            '',
+            `Publish: **${result.planned.filter((entry) => entry.action === 'publish').length}** · Skip: **${result.planned.filter((entry) => entry.action === 'skip').length}**`,
+            '',
+          ];
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          NODE
+
+  publish:
+    name: Publish ${{ inputs.release_tag }} through npm OIDC
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: npm-release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NPM_RELEASE_ENVIRONMENT: npm-release
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+
+    steps:
+      - name: Checkout the verified dispatch commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.11.1
+          package-manager-cache: false
+
+      - name: Pin the audited npm CLI
+        run: |
+          user_config=$(mktemp)
+          global_config=$(mktemp)
+          trap 'rm -f "$user_config" "$global_config"' EXIT
+          printf '%s\n' 'registry=https://registry.npmjs.org' >"$user_config"
+          NPM_CONFIG_USERCONFIG="$user_config" NPM_CONFIG_GLOBALCONFIG="$global_config" \
+            npm install --global npm@11.17.0 --ignore-scripts
+          NPM_CONFIG_USERCONFIG="$user_config" NPM_CONFIG_GLOBALCONFIG="$global_config" \
+            test "$(npm --version)" = 11.17.0
+
+      - name: Reverify and publish exact tarballs
+        run: scripts/publish-release.mjs "$RELEASE_TAG" --github-actions

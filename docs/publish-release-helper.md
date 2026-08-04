@@ -1,18 +1,50 @@
-# Publish release helper
+# Trusted npm release publishing
 
-Human-only usage:
+npm releases are published by the manually dispatched [Publish npm release](../.github/workflows/publish.yml) workflow. The workflow uses npm trusted publishing with GitHub Actions OIDC, so it does not store or consume a long-lived npm token.
+
+## One-time configuration
+
+Create a protected GitHub environment named `npm-release` with:
+
+- deployment branches restricted to `main`
+- required reviewer approval
+- administrator bypass disabled when operationally practical
+
+Configure every existing npm package with the same trusted publisher. This requires npm CLI 11.15 or newer and interactive 2FA:
 
 ```bash
-scripts/publish-release.mjs v0.1.60 --dry-run
-scripts/publish-release.mjs v0.1.60
+npm trust github PACKAGE \
+  --file publish.yml \
+  --repository diegopetrucci/pi-extensions \
+  --environment npm-release \
+  --allow-publish \
+  --yes
 ```
 
-The helper verifies the `v0.1.60` tag exists, reads the managed package evidence from that tagged `docs/github-release-v0.1.60.md`, and requires the checkout document to match the tagged copy byte-for-byte before continuing. It then checks each selected package's current publishable tarball content against the tagged snapshot, confirms public npm auth with `npm whoami --registry=https://registry.npmjs.org`, and publishes only after the human types the exact `v0.1.60` release version at the interactive confirmation. If an exact version is already on public npm, the helper skips it only when npm reports `dist.shasum` and `dist.integrity` that match the verified tagged pack; missing, malformed, or mismatched registry metadata aborts safely. It never reads, writes, or exposes credentials.
+Run `npm trust list PACKAGE` afterward and verify the repository, workflow, environment, and `npm publish` permission. npm supports one trusted publisher per package. A new package must already exist on npm before trusted publishing can be configured, so bootstrap a brand-new package interactively before adding it to this workflow.
 
-For non-interactive npm authentication, prefer a granular npm access token that can bypass 2FA for publish operations when your npm account policy allows it. Export credentials through npm's standard environment or config mechanisms. The helper buffers npm subprocesses and cannot itself service an npm OTP prompt. If write authentication requires an OTP, securely set or export `NPM_CONFIG_OTP` before invoking the helper. Do not pass the OTP as a CLI argument.
+After one complete OIDC release succeeds and its registry hashes and provenance are verified, set each package's publishing access to **Require two-factor authentication and disallow tokens**, then revoke obsolete publishing tokens.
 
-`--dry-run` performs every safety check and prints the publish plan without running `npm publish`.
+## Release operation
 
-A successful npm publication is persistent registry state and is not undone by deleting this helper. To correct a published release, follow npm's [deprecation guidance](https://docs.npmjs.com/deprecating-and-undeprecating-packages-or-package-versions/) or, only when eligible, its [unpublish policy](https://docs.npmjs.com/policies/unpublish/).
+Before dispatching, the release tag and non-draft GitHub release must exist and `docs/github-release-<tag>.md` must match the public release body.
 
-To remove the helper from the repository, delete `scripts/publish-release.mjs`, `test/publish-release.test.mjs`, and this document (or revert the commit that added them). The helper itself does not modify the checkout.
+1. Open **Actions → Publish npm release → Run workflow** on `main`.
+2. Enter the exact release tag in both fields, for example `v0.1.62`.
+3. Inspect the verification job summary. It lists every package, version, action, and tarball hash without OIDC permission.
+4. Approve the `npm-release` environment deployment.
+5. Let the publish job reverify and publish the exact tarballs.
+
+Only one publish run can execute at a time. A rerun safely skips an exact version only when its registry `shasum` and `integrity` match the verified tag tarball. The root umbrella package remains last.
+
+For local, non-publishing verification:
+
+```bash
+scripts/publish-release.mjs v0.1.62 --dry-run
+```
+
+Local live publishing is intentionally rejected. The helper isolates npm's user/global configuration in every mode. In GitHub Actions mode it also rejects legacy npm token/OTP variables and repository `.npmrc` files, checks the workflow identity and `main` checkout, verifies the remote tag and published GitHub release, and confirms registry hashes plus the `latest` dist-tag after each publish.
+
+## npm CLI policy
+
+The workflow pins Node and npm versions and runs no project dependency installation in the OIDC-enabled job. Upgrade the pinned npm version deliberately, with focused helper tests and a complete dry-run, rather than following `latest` implicitly.
