@@ -46,6 +46,31 @@ type PiModel = {
 	thinkingLevelMap?: ThinkingLevelMap;
 };
 
+type ModelSelectionContext = {
+	model?: any;
+	modelRegistry: { getAvailable(): any[] | Promise<any[]> };
+	scopedModels?: ReadonlyArray<{ model: any; thinkingLevel?: ThinkingLevel }>;
+};
+
+function modelKey(model: any): string {
+	return `${model.provider}/${model.id}`.toLowerCase();
+}
+
+function hasModelScope(ctx: ModelSelectionContext): boolean {
+	return Array.isArray(ctx.scopedModels) && ctx.scopedModels.length > 0;
+}
+
+function isModelInScope(ctx: ModelSelectionContext, model: any): boolean {
+	if (!hasModelScope(ctx)) return true;
+	const key = modelKey(model);
+	return ctx.scopedModels!.some((entry) => modelKey(entry.model) === key);
+}
+
+async function getAutoSelectableModels(ctx: ModelSelectionContext): Promise<any[]> {
+	const available = await ctx.modelRegistry.getAvailable();
+	return hasModelScope(ctx) ? available.filter((model) => isModelInScope(ctx, model)) : available;
+}
+
 type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
 
 function getModelRuntimeOption(ctx: { modelRegistry?: unknown }): Pick<CreateAgentSessionOptions, "modelRuntime"> {
@@ -677,7 +702,7 @@ function rankPreferredFastLibrarianModel(model: any): number {
 }
 
 async function findAvailableModel(
-	ctx: { model?: any; modelRegistry: { getAvailable(): any[] | Promise<any[]> } },
+	ctx: ModelSelectionContext,
 	modelPreference: string,
 ): Promise<any | undefined> {
 	const available = await ctx.modelRegistry.getAvailable();
@@ -732,7 +757,7 @@ function withLibrarianFallbackReason(candidate: LibrarianCandidate, previous: Li
 // these in order and skip ones that fail with a model-availability error,
 // ultimately falling back to the known-good current session model.
 async function buildLibrarianCandidates(
-	ctx: { model?: any; modelRegistry: { getAvailable(): any[] | Promise<any[]> } },
+	ctx: ModelSelectionContext,
 	modelPreference: string | undefined,
 	thinkingLevel: ThinkingLevel,
 ): Promise<LibrarianCandidate[]> {
@@ -762,7 +787,7 @@ async function buildLibrarianCandidates(
 		}
 	}
 
-	const available = await ctx.modelRegistry.getAvailable();
+	const available = await getAutoSelectableModels(ctx);
 	const preferred = available.filter(isPreferredFastLibrarianModel);
 	const ranked = preferred.length > 0
 		? [...preferred].sort((a, b) => rankPreferredFastLibrarianModel(a) - rankPreferredFastLibrarianModel(b))
@@ -785,7 +810,7 @@ async function buildLibrarianCandidates(
 	});
 
 	// Final fallback: the active session model is known to be servable.
-	if (ctx.model) {
+	if (ctx.model && isModelInScope(ctx, ctx.model)) {
 		push(ctx.model, {
 			modelRef: modelRef(ctx.model),
 			provider: ctx.model.provider,
@@ -797,7 +822,11 @@ async function buildLibrarianCandidates(
 	}
 
 	if (candidates.length === 0) {
-		throw new Error("No authenticated models are available for Librarian. Log in or configure an API key first.");
+		throw new Error(
+			hasModelScope(ctx)
+				? "No authenticated models are available for Librarian in the current session model scope. Adjust the scope, log in, or configure an API key."
+				: "No authenticated models are available for Librarian. Log in or configure an API key first.",
+		);
 	}
 
 	return candidates;

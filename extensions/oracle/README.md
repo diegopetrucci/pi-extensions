@@ -106,6 +106,8 @@ Tool-call parameters still win over these defaults. `auto` clears the configured
 - `thinkingLevel` - optional reasoning/thinking override; falls back to the `/oracle thinking` default, then built-in defaults
 - `cwd` - optional working directory override
 
+When the current Pi session has a non-empty model scope, Oracle limits automatic model selection and automatic fallbacks to that scope. An explicit tool or `/oracle model` override remains authoritative even when it is outside the session scope.
+
 ## Notes
 
 - The oracle is intentionally **read-only by default**.

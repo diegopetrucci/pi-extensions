@@ -20,6 +20,31 @@ type PiModel = {
 	thinkingLevelMap?: ThinkingLevelMap;
 };
 
+type ModelSelectionContext = {
+	model?: PiModel;
+	modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> };
+	scopedModels?: ReadonlyArray<{ model: PiModel; thinkingLevel?: ThinkingLevel }>;
+};
+
+function modelKey(model: PiModel): string {
+	return `${model.provider}/${model.id}`.toLowerCase();
+}
+
+function hasModelScope(ctx: ModelSelectionContext): boolean {
+	return Array.isArray(ctx.scopedModels) && ctx.scopedModels.length > 0;
+}
+
+function isModelInScope(ctx: ModelSelectionContext, model: PiModel): boolean {
+	if (!hasModelScope(ctx)) return true;
+	const key = modelKey(model);
+	return ctx.scopedModels!.some((entry) => modelKey(entry.model) === key);
+}
+
+async function getAutoSelectableModels(ctx: ModelSelectionContext): Promise<PiModel[]> {
+	const available = await ctx.modelRegistry.getAvailable();
+	return hasModelScope(ctx) ? available.filter((model) => isModelInScope(ctx, model)) : available;
+}
+
 interface UsageStats {
 	input: number;
 	output: number;
@@ -180,8 +205,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"accounts/fireworks/models/glm-5p2",
 		"accounts/fireworks/routers/glm-5p2-fast",
 		"accounts/fireworks/models/minimax-m3",
-		"accounts/fireworks/models/glm-5p1",
-		"accounts/fireworks/routers/glm-5p1-fast",
 		"accounts/fireworks/models/kimi-k2p6",
 		"accounts/fireworks/routers/kimi-k2p6-turbo",
 		"accounts/fireworks/routers/kimi-k2p6-fast",
@@ -918,7 +941,7 @@ function appendThinkingLevelClampReason(
 }
 
 async function findAvailableModel(
-	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
+	ctx: ModelSelectionContext,
 	modelRef: string,
 ): Promise<PiModel | undefined> {
 	const available = await ctx.modelRegistry.getAvailable();
@@ -964,11 +987,11 @@ function toContrarianSelection(
 }
 
 function buildSessionFallbackSelection(
-	ctx: { model?: PiModel },
+	ctx: ModelSelectionContext,
 	thinkingLevelOverride: ThinkingLevel | undefined,
 ): ContrarianSelection | undefined {
 	const model = ctx.model;
-	if (!model) return undefined;
+	if (!model || !isModelInScope(ctx, model)) return undefined;
 	return toContrarianSelection(
 		model,
 		thinkingLevelOverride,
@@ -984,14 +1007,16 @@ function withFallbackReason(selection: ContrarianSelection, previous: Contrarian
 }
 
 async function selectContrarianModel(
-	ctx: { model?: PiModel; modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> } },
+	ctx: ModelSelectionContext,
 	thinkingLevelOverride?: ThinkingLevel,
 ): Promise<{ ok: true; selection: ContrarianSelection; ordered: ContrarianSelection[] } | { ok: false; error: string }> {
-	const available = await ctx.modelRegistry.getAvailable();
+	const available = await getAutoSelectableModels(ctx);
 	if (available.length === 0) {
 		return {
 			ok: false,
-			error: "No authenticated models are available. Log in or configure an API key first.",
+			error: hasModelScope(ctx)
+				? "No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key."
+				: "No authenticated models are available. Log in or configure an API key first.",
 		};
 	}
 
@@ -1340,6 +1365,7 @@ type ContrarianExtensionDeps = {
 };
 
 export const __test__ = {
+	buildSessionFallbackSelection,
 	createContrarianExtension,
 	findAvailableModel,
 	isModelAvailabilityError,

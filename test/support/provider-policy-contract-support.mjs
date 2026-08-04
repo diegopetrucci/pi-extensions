@@ -16,9 +16,10 @@ const roleModulePaths = {
   librarian: 'extensions/librarian/index.ts',
 };
 
-export function createModelSelectionContext({ model, available = [] } = {}) {
+export function createModelSelectionContext({ model, available = [], scopedModels } = {}) {
   return {
     model,
+    ...(scopedModels === undefined ? {} : { scopedModels }),
     modelRegistry: {
       async getAvailable() {
         return available;
@@ -83,6 +84,7 @@ export const PROVIDER_POLICY_CONTRACT = {
       description: 'Oracle stays on the current provider, prefers the latest frontier tier, and defaults gpt-5.6-sol to high thinking',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.4', reasoning: true },
+        scopedModels: [],
         available: [
           { provider: 'openai', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
@@ -108,6 +110,7 @@ export const PROVIDER_POLICY_CONTRACT = {
       description: 'Oracle prefers Claude Opus 5 over older Claude frontier models on providers that expose it',
       ctx: {
         model: { provider: 'anthropic', id: 'claude-sonnet-5', reasoning: true },
+        scopedModels: [],
         available: [
           { provider: 'anthropic', id: 'claude-fable-5', reasoning: true },
           { provider: 'anthropic', id: 'claude-opus-4-8', reasoning: true },
@@ -127,6 +130,7 @@ export const PROVIDER_POLICY_CONTRACT = {
       description: 'Contrarian stops at the first non-empty opposite-provider reasoning frontier tier and prefers Claude Opus 5',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        scopedModels: [],
         available: [
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
           { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
@@ -147,6 +151,7 @@ export const PROVIDER_POLICY_CONTRACT = {
       description: 'Code Reviewer keeps exhaustive fallback tiers after preferring Claude Opus 5 as its contrarian frontier candidate',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        scopedModels: [],
         available: [
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
           { provider: 'openai', id: 'gpt-5.5-mini', reasoning: false },
@@ -171,6 +176,7 @@ export const PROVIDER_POLICY_CONTRACT = {
           cost: { input: 5, output: 15 },
           contextWindow: 200000,
         },
+        scopedModels: [],
         available: [
           {
             provider: 'anthropic',
@@ -192,6 +198,102 @@ export const PROVIDER_POLICY_CONTRACT = {
           /Used the current session model openai\/gpt-5\.5-pro as a final fallback\./i,
         ],
       },
+    },
+  ],
+  scopedModelSelectionCases: [
+    {
+      role: 'oracle',
+      method: 'selectOracleModel',
+      ctx: {
+        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        available: [
+          { provider: 'custom', id: 'small', reasoning: false },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+        ],
+        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+      },
+      expectedModelRefs: ['custom/small'],
+    },
+    {
+      role: 'contrarian',
+      method: 'selectContrarianModel',
+      ctx: {
+        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        available: [
+          { provider: 'custom', id: 'small', reasoning: false },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+        ],
+        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+      },
+      expectedModelRefs: ['custom/small'],
+    },
+    {
+      role: 'code-reviewer',
+      method: 'selectCodeReviewerModel',
+      ctx: {
+        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        available: [
+          { provider: 'custom', id: 'small', reasoning: false },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+        ],
+        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+      },
+      expectedModelRefs: ['custom/small'],
+    },
+    {
+      role: 'librarian',
+      method: 'buildLibrarianCandidates',
+      args: [undefined, 'low'],
+      ctx: {
+        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        available: [
+          { provider: 'custom', id: 'small', reasoning: false, cost: { input: 1, output: 1 } },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true, cost: { input: 5, output: 10 } },
+        ],
+        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+      },
+      expectedModelRefs: ['custom/small'],
+    },
+    {
+      role: 'librarian',
+      method: 'buildLibrarianCandidates',
+      args: ['anthropic/claude-opus-5', 'low'],
+      ctx: {
+        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        available: [
+          { provider: 'custom', id: 'small', reasoning: false, cost: { input: 1, output: 1 } },
+          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true, cost: { input: 5, output: 10 } },
+        ],
+        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+      },
+      expectedModelRefs: ['anthropic/claude-opus-5', 'custom/small'],
+    },
+  ],
+  emptyScopedModelSelectionCases: [
+    {
+      role: 'oracle',
+      type: 'result',
+      method: 'selectOracleModel',
+      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+    },
+    {
+      role: 'contrarian',
+      type: 'result',
+      method: 'selectContrarianModel',
+      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+    },
+    {
+      role: 'code-reviewer',
+      type: 'result',
+      method: 'selectCodeReviewerModel',
+      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+    },
+    {
+      role: 'librarian',
+      type: 'throws',
+      method: 'buildLibrarianCandidates',
+      args: [undefined, 'low'],
+      expectedMessage: 'No authenticated models are available for Librarian in the current session model scope. Adjust the scope, log in, or configure an API key.',
     },
   ],
   parseModelPreferenceCases: [
@@ -227,6 +329,7 @@ export const PROVIDER_POLICY_CONTRACT = {
           { provider: 'anthropic', id: 'claude-opus-4.8-fast', reasoning: true },
           { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
         ],
+        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5', reasoning: true } }],
       },
       expectedModelRef: 'anthropic/claude-opus-4.8',
     },
@@ -239,6 +342,7 @@ export const PROVIDER_POLICY_CONTRACT = {
           { provider: 'anthropic', id: 'claude-opus-4.8-fast', reasoning: true },
           { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
         ],
+        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5', reasoning: true } }],
       },
       expectedModelRef: 'anthropic/claude-opus-4.8',
     },
@@ -251,6 +355,7 @@ export const PROVIDER_POLICY_CONTRACT = {
           { provider: 'anthropic', id: 'claude-haiku-4-5-fast', reasoning: false },
           { provider: 'anthropic', id: 'claude-haiku-4-5', reasoning: false },
         ],
+        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true } }],
       },
       expectedModelRef: 'anthropic/claude-haiku-4-5',
     },

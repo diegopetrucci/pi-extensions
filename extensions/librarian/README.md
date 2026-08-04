@@ -4,7 +4,7 @@ A pi GitHub research scout inspired by `pi-librarian`, with a local checkout cac
 
 When the `librarian` tool runs, it can cache/reuse repository checkouts locally. Use `/librarian-cache off` to force GitHub API/search and temporary fetched files only, or `/librarian-cache on` to re-enable cached local checkouts.
 
-The internal librarian subagent uses a fast auto-selected model by default, requests `low` thinking, and prompts its scout to batch independent GitHub probes in parallel. Use `/librarian-config` to set a persistent internal model or thinking-level preference.
+The internal librarian subagent uses a fast auto-selected model by default, requests `low` thinking, and prompts its scout to batch independent GitHub probes in parallel. Automatic candidates and fallbacks stay within the current Pi session's model scope when that scope is non-empty; an explicit tool or `/librarian-config` model remains authoritative. Use `/librarian-config` to set a persistent internal model or thinking-level preference.
 
 ## Install
 
