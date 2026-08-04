@@ -198,7 +198,7 @@ test('changed inputs cannot reuse stale managed document evidence or mutate mani
   assert.doesNotMatch(generatedBody, /^<!--/);
   const checklist = await readFile(path.join(root, 'docs/publish-checklist-v1.1.0.md'), 'utf8');
   assert.match(checklist, /## Agent-safe follow-up actions\n\n- \[ \] commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/);
-  assert.match(checklist, /## Human-only release actions\n\n- \[ \] publish selected packages manually \(this tool cannot publish\)/);
+  assert.match(checklist, /## Human-only release actions\n\n- \[ \] dispatch the trusted `publish\.yml` workflow from `main` with the exact release tag in both confirmation fields\n- \[ \] inspect the verified package plan and approve the `npm-release` environment deployment/);
   assert.doesNotMatch(checklist, /Human-only release actions[\s\S]*commit, tag, push, and create the GitHub release/s);
   const manifestPath = path.join(root, 'packages/a/package.json');
   const before = await readFile(manifestPath);
