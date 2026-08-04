@@ -48,9 +48,9 @@
 
 ## Agent-safe follow-up actions
 
-- [ ] commit the prepared release changes on `compat/pi-0.83-scoped-models`
-- [ ] push the release branch
-- [ ] open a pull request targeting `main`
+- [x] commit the prepared release changes on `compat/pi-0.83-scoped-models`
+- [x] push the release branch
+- [x] open pull request [#65](https://github.com/diegopetrucci/pi-extensions/pull/65) targeting `main`
 - [ ] after the pull request merges, tag `v0.1.62` on `main`
 - [ ] push tag `v0.1.62`
 - [ ] create the GitHub release using `docs/github-release-v0.1.62.md`
