@@ -224,7 +224,27 @@ type PiModel = {
 type ModelRegistryContext = {
 	model?: PiModel;
 	modelRegistry: { getAvailable(): PiModel[] | Promise<PiModel[]> };
+	scopedModels?: ReadonlyArray<{ model: PiModel; thinkingLevel?: ThinkingLevel }>;
 };
+
+function modelKey(model: PiModel): string {
+	return `${model.provider}/${model.id}`.toLowerCase();
+}
+
+function hasModelScope(ctx: ModelRegistryContext): boolean {
+	return Array.isArray(ctx.scopedModels) && ctx.scopedModels.length > 0;
+}
+
+function isModelInScope(ctx: ModelRegistryContext, model: PiModel): boolean {
+	if (!hasModelScope(ctx)) return true;
+	const key = modelKey(model);
+	return ctx.scopedModels!.some((entry) => modelKey(entry.model) === key);
+}
+
+async function getAutoSelectableModels(ctx: ModelRegistryContext): Promise<PiModel[]> {
+	const available = await ctx.modelRegistry.getAvailable();
+	return hasModelScope(ctx) ? available.filter((model) => isModelInScope(ctx, model)) : available;
+}
 
 type CreateAgentSessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
 type CreateAgentSessionModel = CreateAgentSessionOptions["model"];
@@ -354,11 +374,13 @@ function appendOrderedCandidates(
 async function selectCodeReviewerModel(
 	ctx: ModelRegistryContext,
 ): Promise<{ ok: true; selection: PiModel; ordered: PiModel[] } | { ok: false; error: string }> {
-	const available = await ctx.modelRegistry.getAvailable();
+	const available = await getAutoSelectableModels(ctx);
 	if (available.length === 0) {
 		return {
 			ok: false,
-			error: "No authenticated models are available. Log in or configure an API key first.",
+			error: hasModelScope(ctx)
+				? "No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key."
+				: "No authenticated models are available. Log in or configure an API key first.",
 		};
 	}
 

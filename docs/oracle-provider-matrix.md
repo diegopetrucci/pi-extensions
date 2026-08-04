@@ -14,7 +14,7 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `cloudflare-ai-gateway` | `claude-fable-5` | Then newer Claude Opus, GPT-5.x, and Workers AI reasoning models. |
 | `cloudflare-workers-ai` | `@cf/moonshotai/kimi-k2.7-code` | Then GLM 5.2, Kimi K2.6, Nemotron, GPT OSS, and GLM fallbacks. |
 | `deepseek` | `deepseek-v4-pro` | Then DeepSeek V4 Flash. |
-| `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | Then Kimi K2.7 Code, GLM 5.2/5.1 model and router aliases, MiniMax M3, Qwen, and GPT OSS. |
+| `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | Then Kimi K2.7 Code, GLM 5.2 model and router aliases, MiniMax M3, Qwen, and GPT OSS. |
 | `github-copilot` | `claude-opus-5` | Then Claude Fable, older Opus models, GPT-5.x, Gemini 3.1/3.5/3 Flash, then Claude Sonnet 5 before Claude Sonnet 4. |
 | `google` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.1/3 Pro, Gemini 3.5 Flash, and Gemini 2.5/2.0 Flash variants. |
 | `google-vertex` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.5 Flash, Gemini 3 Flash, and Gemini 2.5 Flash variants. |

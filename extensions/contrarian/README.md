@@ -77,6 +77,8 @@ Tool-call parameters still win over these defaults. `auto` clears the configured
 - `thinkingLevel` - optional reasoning/thinking override; falls back to the `/contrarian thinking` default, then built-in defaults
 - `cwd` - optional working directory override
 
+When the current Pi session has a non-empty model scope, Contrarian limits automatic model selection and automatic fallbacks to that scope. An explicit tool or `/contrarian model` override remains authoritative even when it is outside the session scope.
+
 ## Notes
 
 - The contrarian is intentionally **read-only**.

@@ -50,6 +50,60 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
   });
 }
 
+for (const fixture of PROVIDER_POLICY_CONTRACT.scopedModelSelectionCases) {
+  test(`${fixture.role} contract: automatic model candidates honor the current session scope`, async () => {
+    const utils = await loadRoleTestUtils(fixture.role);
+    const result = await utils[fixture.method](createModelSelectionContext(fixture.ctx), ...(fixture.args ?? []));
+    const actualModelRefs = fixture.role === 'librarian'
+      ? result.map((candidate) => candidate.details.modelRef)
+      : result.ordered.map((candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`);
+
+    assert.deepEqual(actualModelRefs, fixture.expectedModelRefs);
+  });
+}
+
+for (const fixture of PROVIDER_POLICY_CONTRACT.emptyScopedModelSelectionCases) {
+  test(`${fixture.role} contract: reports when the current session scope has no authenticated models`, async () => {
+    const utils = await loadRoleTestUtils(fixture.role);
+    const ctx = createModelSelectionContext({
+      model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+      available: [{ provider: 'openai', id: 'gpt-5.5', reasoning: true }],
+      scopedModels: [{ model: { provider: 'custom', id: 'missing', reasoning: true } }],
+    });
+    const invoke = () => utils[fixture.method](ctx, ...(fixture.args ?? []));
+
+    if (fixture.type === 'throws') {
+      await assert.rejects(invoke, new Error(fixture.expectedMessage));
+      return;
+    }
+
+    assert.deepEqual(await invoke(), fixture.expected);
+  });
+}
+
+for (const role of ['oracle', 'contrarian']) {
+  test(`${role} contract: current-session fallback cannot escape a non-empty model scope`, async () => {
+    const utils = await loadRoleTestUtils(role);
+    const outOfScope = { provider: 'openai', id: 'gpt-5.5', reasoning: true };
+    const scoped = { provider: 'custom', id: 'small', reasoning: false };
+
+    assert.equal(
+      utils.buildSessionFallbackSelection(
+        createModelSelectionContext({ model: outOfScope, available: [outOfScope, scoped], scopedModels: [{ model: scoped }] }),
+        'high',
+      ),
+      undefined,
+    );
+    assert.equal(
+      utils.buildSessionFallbackSelection(
+        createModelSelectionContext({ model: scoped, available: [outOfScope, scoped], scopedModels: [{ model: scoped }] }),
+        'high',
+      ).modelRef,
+      'custom/small',
+    );
+  });
+}
+
 for (const fixture of PROVIDER_POLICY_CONTRACT.parseModelPreferenceCases) {
   for (const role of fixture.roles) {
     test(`${role} contract: shared model preference parsing preserves model refs and thinking suffixes`, async () => {
