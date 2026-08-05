@@ -14,6 +14,7 @@ const {
   proposalToDecisionRecord,
   findToolCallPairIndices,
   buildIdempotencyKey,
+  classifyAgentStateFromMessages,
 } = dcp;
 
 function toolCallMessages({ toolCallId = 'call_1', toolName = 'bash', isError = false, resultText = 'a'.repeat(500) } = {}) {
@@ -399,6 +400,10 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
   const config = {
     ...defaultConfig(),
     protections: { ...defaultConfig().protections, recentTurns: 0 },
+    // Disabled here (pe-qdzb's minCharsSaved floor is irrelevant to what this
+    // test isolates: the gate's double-count exclusion, not the floor).
+    // call_2's small candidate would otherwise be dropped before the gate.
+    thresholds: { ...defaultConfig().thresholds, minCharsSaved: 0 },
     gate: {
       ...defaultConfig().gate,
       mode: 'on',
@@ -506,4 +511,48 @@ test('pipeline over a large synthetic session completes well under a second (coa
 
   assert.ok(Array.isArray(result.messages));
   assert.ok(elapsedMs < 1000, `expected the pipeline to complete in well under a second, took ${elapsedMs}ms`);
+});
+
+// ---------------------------------------------------------------------------
+// pe-zy4s: agent-state detection actually reaches the gate
+// ---------------------------------------------------------------------------
+
+test('runDynamicContextPruningPipeline: agentState classified from the message payload reaches the net-benefit gate threshold', () => {
+  // This mirrors exactly what the `context` event handler does: classify the
+  // agent state from the message payload, then pass it through to the
+  // pipeline. Using a distinct per-state threshold config makes it directly
+  // observable that the classified state -- not a hardcoded default -- is
+  // what determines `result.gate.threshold`.
+  const config = {
+    ...defaultConfig(),
+    gate: { ...defaultConfig().gate, breakEvenThresholdByState: { idle: 5, mid_loop: 40 } },
+  };
+
+  const idleMessages = [
+    { role: 'user', content: 'do the thing', timestamp: 1 },
+  ];
+  assert.equal(classifyAgentStateFromMessages(idleMessages), 'idle');
+  const idleResult = runDynamicContextPruningPipeline({
+    messages: idleMessages,
+    config,
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+    agentState: classifyAgentStateFromMessages(idleMessages),
+  });
+  assert.equal(idleResult.gate.threshold, 5);
+
+  const midLoopMessages = [
+    { role: 'user', content: 'do the thing', timestamp: 1 },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'ls' } }], timestamp: 2 },
+    { role: 'toolResult', toolCallId: 'call_1', toolName: 'bash', content: [{ type: 'text', text: 'ok' }], isError: false, timestamp: 3 },
+  ];
+  assert.equal(classifyAgentStateFromMessages(midLoopMessages), 'mid_loop');
+  const midLoopResult = runDynamicContextPruningPipeline({
+    messages: midLoopMessages,
+    config,
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+    agentState: classifyAgentStateFromMessages(midLoopMessages),
+  });
+  assert.equal(midLoopResult.gate.threshold, 40);
 });

@@ -245,18 +245,79 @@ test('resolveBreakEvenThreshold falls back to breakEvenThreshold by default (bot
 });
 
 test('default gate config uses the pe-c5n9 recalibrated threshold (T=22 at r=0.1) with idle/mid_loop kept at parity', () => {
-  // The representative-corpus benchmark shows mid_loop candidates carry ~all
-  // realized net benefit and idle candidates carry ~none at r=0.1. Defaulting
-  // idle stricter than mid_loop was intentionally deferred (pe-c5n9): the only
-  // live runtime caller does not yet perform real mid-loop/idle detection and
-  // always evaluates as "idle", so an idle-specific default would silently
-  // disable most automatic pruning today. This test locks the current,
-  // deliberate parity so a future change to it is a visible, reviewed diff.
+  // pe-zy4s (2026-07-08): real runtime mid_loop/idle detection is now wired
+  // through the `context` event handler, and the offline benchmark's
+  // candidate labeling was aligned to that same runtime-observable
+  // (turn-START) definition and re-derived on the representative corpus.
+  // The re-derived split REVERSES the earlier turn-END-based pe-c5n9 finding:
+  // at r=0.1, "idle" now carries essentially all the realized net benefit
+  // (T=22, ~20.6k) and "mid_loop" carries essentially none (T=1, ~0). Since
+  // idle is not the worthless state under this definition, parity is kept
+  // rather than forcing a stricter default in either direction. This test
+  // locks that deliberate parity so a future change to it is a visible,
+  // reviewed diff.
   const gateConfig = defaultConfig().gate;
   assert.equal(gateConfig.breakEvenThreshold, 22);
   assert.equal(gateConfig.breakEvenThresholdByState.idle, 22);
   assert.equal(gateConfig.breakEvenThresholdByState.mid_loop, 22);
   assert.equal(resolveBreakEvenThreshold(gateConfig, 'idle'), resolveBreakEvenThreshold(gateConfig, 'mid_loop'));
+});
+
+// ---------------------------------------------------------------------------
+// classifyAgentStateFromMessages: runtime-observable agent-state detection
+// ---------------------------------------------------------------------------
+
+test('classifyAgentStateFromMessages: user-message-last => idle (first call of a turn)', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  const messages = [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: [{ type: 'text', text: 'ack' }] },
+    { role: 'user', content: 'do a thing' },
+  ];
+  assert.equal(classifyAgentStateFromMessages(messages), 'idle');
+});
+
+test('classifyAgentStateFromMessages: toolResult-last => mid_loop', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  const messages = [
+    { role: 'user', content: 'do a thing' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false },
+  ];
+  assert.equal(classifyAgentStateFromMessages(messages), 'mid_loop');
+});
+
+test('classifyAgentStateFromMessages: assistant-message-last (mid-chain) => mid_loop', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  const messages = [
+    { role: 'user', content: 'do a thing' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c2', name: 'bash', arguments: {} }] },
+  ];
+  assert.equal(classifyAgentStateFromMessages(messages), 'mid_loop');
+});
+
+test('classifyAgentStateFromMessages: empty history => idle', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  assert.equal(classifyAgentStateFromMessages([]), 'idle');
+});
+
+test('classifyAgentStateFromMessages: system-only history => idle (skips non-user/assistant/toolResult roles)', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  const messages = [{ role: 'system', content: 'you are a helpful agent' }];
+  assert.equal(classifyAgentStateFromMessages(messages), 'idle');
+});
+
+test('classifyAgentStateFromMessages: skips trailing system messages to find the real last relevant message', () => {
+  const { classifyAgentStateFromMessages } = dcp;
+  const messages = [
+    { role: 'user', content: 'do a thing' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false },
+    { role: 'system', content: 'a compaction notice or similar bookkeeping entry' },
+  ];
+  assert.equal(classifyAgentStateFromMessages(messages), 'mid_loop');
 });
 
 // ---------------------------------------------------------------------------

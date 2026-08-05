@@ -20,6 +20,10 @@ const {
   sweepThresholdWithAutoExpand,
   computeAggregate,
   runBenchmark,
+  computeSimulatedRangeExclusions,
+  identifySimulatedRanges,
+  buildSimulatedCandidate,
+  computeSimulatedAggregate,
 } = bench;
 
 const fixturesDir = path.join(repoRoot, 'test/fixtures/dynamic-context-pruning');
@@ -115,17 +119,17 @@ test('resolveActiveBranch returns entries as-is for v1 (linear, no id/parentId) 
 // Turn-state classification
 // ---------------------------------------------------------------------------
 
-test('classifyTurnState distinguishes mid-loop (more assistant calls before next user msg) from idle (turn end)', () => {
+test('classifyTurnState uses the runtime-observable turn-START definition (pe-zy4s): idle iff the preceding relevant message is a user message', () => {
   const messages = [
     { role: 'user', content: 'go' },
-    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] }, // index 1: mid-loop
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] }, // index 1: preceded by user -> idle (first call of turn)
     { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: false },
-    { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, // index 3: idle (turn end)
+    { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, // index 3: preceded by toolResult -> mid_loop
     { role: 'user', content: 'next' },
-    { role: 'assistant', content: [{ type: 'text', text: 'ack' }] }, // index 5: idle (only assistant call this turn)
+    { role: 'assistant', content: [{ type: 'text', text: 'ack' }] }, // index 5: preceded by user -> idle (first call of turn)
   ];
-  assert.equal(classifyTurnState(messages, 1), 'mid_loop');
-  assert.equal(classifyTurnState(messages, 3), 'idle');
+  assert.equal(classifyTurnState(messages, 1), 'idle');
+  assert.equal(classifyTurnState(messages, 3), 'mid_loop');
   assert.equal(classifyTurnState(messages, 5), 'idle');
 });
 
@@ -160,7 +164,12 @@ test('replaySession finds the dedupe candidate on duplicate-reads.jsonl with cor
 
 test('replaySession finds the error-purge candidate on errored-call.jsonl', async () => {
   const messages = await loadFixtureMessages('errored-call.jsonl');
-  const result = replaySession('errored-call.jsonl', messages, { ratios: [0.1] });
+  // Explicit zero floor (pe-qdzb): this fixture's redacted-args saving is
+  // small (well under the real default minCharsSaved=200), and this test is
+  // about the error-purge strategy/pipeline wiring, not about the default
+  // floor value, so isolate it from that floor here.
+  const config = { ...dcp.normalizeConfig(undefined), thresholds: { minCharsSaved: 0 } };
+  const result = replaySession('errored-call.jsonl', messages, { ratios: [0.1], config });
   const candidates = result.candidates.filter((c) => c.strategyId === 'error-purge');
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].toolCallId, 'call_err1');
@@ -352,8 +361,8 @@ test('runBenchmark processes all fixture sessions and produces the documented JS
     paths: [fixturesDir],
     ratios: [0.1],
   });
-  assert.equal(sessionFiles.length, 4);
-  assert.equal(sessionResults.length, 4);
+  assert.equal(sessionFiles.length, 5);
+  assert.equal(sessionResults.length, 5);
   assert.deepEqual(ratios, [0.1]);
 
   for (const session of sessionResults) {
@@ -371,7 +380,15 @@ test('runBenchmark processes all fixture sessions and produces the documented JS
   const payload = { generatedAt: new Date().toISOString(), ratios, sessionFiles, sessions: sessionResults, aggregate };
   const json = JSON.stringify(payload);
   const parsed = JSON.parse(json);
-  assert.equal(parsed.sessions.length, 4);
+  assert.equal(parsed.sessions.length, 5);
+});
+
+test('runBenchmark leaves existing top-level keys byte-stable when --simulate-compression is absent', async () => {
+  const withoutSim = await runBenchmark({ paths: [fixturesDir], ratios: [0.1] });
+  assert.equal('simulated' in withoutSim, false);
+  for (const session of withoutSim.sessionResults) {
+    assert.equal('simulatedRanges' in session, false);
+  }
 });
 
 test('runBenchmark respects --limit', async () => {
@@ -387,7 +404,7 @@ test('runBenchmark threads sweepMax through to the aggregate threshold sweep', a
 test('runBenchmark is read-only: fixture files are byte-for-byte unchanged after a run', async () => {
   const fs = await import('node:fs/promises');
   const before = new Map();
-  for (const name of ['duplicate-reads.jsonl', 'errored-call.jsonl', 'read-edit-read.jsonl', 'multi-turn.jsonl']) {
+  for (const name of ['duplicate-reads.jsonl', 'errored-call.jsonl', 'read-edit-read.jsonl', 'multi-turn.jsonl', 'range-compression.jsonl']) {
     before.set(name, await fs.readFile(fixture(name), 'utf8'));
   }
   await runBenchmark({ paths: [fixturesDir], ratios: [0.1] });
@@ -395,4 +412,332 @@ test('runBenchmark is read-only: fixture files are byte-for-byte unchanged after
     const contentAfter = await fs.readFile(fixture(name), 'utf8');
     assert.equal(contentAfter, contentBefore, `${name} must not be modified by the read-only benchmark harness`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Compression-simulation mode (pe-ckbd)
+// ---------------------------------------------------------------------------
+
+test('parseArgs parses --simulate-compression and --sim-* knobs, with sane defaults', () => {
+  const defaults = parseArgs([]);
+  assert.equal(defaults.simulateCompression, false);
+  assert.deepEqual(defaults.simSummaryFractions, [0.15]);
+  assert.equal(defaults.simSummaryMinTokens, undefined);
+  assert.equal(defaults.simSummarizerCostMult, undefined);
+  assert.equal(defaults.simMinRangeTokens, undefined);
+
+  const args = parseArgs([
+    '--simulate-compression',
+    '--sim-summary-fraction', '0.1,0.15',
+    '--sim-summary-fraction', '0.3',
+    '--sim-summary-min-tokens', '150',
+    '--sim-summarizer-cost-mult', '2',
+    '--sim-min-range-tokens', '500',
+  ]);
+  assert.equal(args.simulateCompression, true);
+  assert.deepEqual(args.simSummaryFractions, [0.1, 0.15, 0.3]);
+  assert.equal(args.simSummaryMinTokens, 150);
+  assert.equal(args.simSummarizerCostMult, 2);
+  assert.equal(args.simMinRangeTokens, 500);
+});
+
+test('parseArgs rejects invalid --sim-* option values', () => {
+  assert.throws(() => parseArgs(['--sim-summary-fraction', '0']));
+  assert.throws(() => parseArgs(['--sim-summary-fraction', '1.5']));
+  assert.throws(() => parseArgs(['--sim-summary-min-tokens', '-1']));
+  assert.throws(() => parseArgs(['--sim-summarizer-cost-mult', 'nope']));
+  assert.throws(() => parseArgs(['--sim-min-range-tokens', '-5']));
+});
+
+// --- Synthetic message builders (mirror the fixture-file message shapes) ---
+
+function userMsg(text) {
+  return { role: 'user', content: text };
+}
+function toolCallMsg(id, name, args) {
+  return { role: 'assistant', content: [{ type: 'toolCall', id, name, arguments: args }] };
+}
+function toolResultMsg(id, name, text, isError = false) {
+  return { role: 'toolResult', toolCallId: id, toolName: name, content: [{ type: 'text', text }], isError };
+}
+function assistantTextMsg(text) {
+  return { role: 'assistant', content: [{ type: 'text', text }] };
+}
+/** ~4 chars/token estimator (matches estimateTokensForText); returns text of the given approx token size. */
+function tokensOfText(tokens) {
+  return 'x'.repeat(tokens * 4);
+}
+
+test('computeSimulatedRangeExclusions excludes a protected-tool-name toolResult (and its paired toolCall)', () => {
+  const messages = [
+    userMsg('go'),
+    toolCallMsg('c1', 'todo', { items: [] }), // "todo" is a default-protected tool name
+    toolResultMsg('c1', 'todo', 'ok'),
+    assistantTextMsg('done'),
+  ];
+  const pairIndex = dcp.buildToolCallPairIndex(messages);
+  const protections = dcp.normalizeConfig(undefined).protections;
+  const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
+  assert.deepEqual(excluded, [false, true, true, false]);
+});
+
+test('computeSimulatedRangeExclusions excludes a protected-path toolResult (and its paired toolCall)', () => {
+  const messages = [
+    userMsg('go'),
+    toolCallMsg('c1', 'read', { path: '.env' }),
+    toolResultMsg('c1', 'read', 'SECRET=1'),
+    assistantTextMsg('done'),
+  ];
+  const pairIndex = dcp.buildToolCallPairIndex(messages);
+  const protections = dcp.normalizeConfig(undefined).protections;
+  const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
+  assert.deepEqual(excluded, [false, true, true, false]);
+});
+
+test('computeSimulatedRangeExclusions never splits a toolCall/toolResult pair: an unprotected call whose result is protected excludes both halves', () => {
+  // The toolCall's own args are not protected, but its result comes from a protected tool name --
+  // pair-integrity fixup must still exclude the assistant (toolCall) message too.
+  const messages = [userMsg('go'), toolCallMsg('c1', 'bash', { command: 'cat .env' }), toolResultMsg('c1', 'bash', 'SECRET=1')];
+  const pairIndex = dcp.buildToolCallPairIndex(messages);
+  // Use a config whose protected path globs match nothing in the args (command is a plain string,
+  // not matched against pathGlobs) but whose protected tool name list includes "bash", isolating
+  // the "result side is protected" -> "call side also excluded" pair-integrity path.
+  const protections = { toolNames: ['bash'], pathGlobs: [], recentTurns: 4 };
+  const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
+  assert.deepEqual(excluded, [false, true, true]);
+});
+
+test('computeSimulatedRangeExclusions leaves unprotected messages untouched', () => {
+  const messages = [userMsg('go'), toolCallMsg('c1', 'read', { path: 'a.txt' }), toolResultMsg('c1', 'read', 'hi'), assistantTextMsg('done')];
+  const pairIndex = dcp.buildToolCallPairIndex(messages);
+  const protections = dcp.normalizeConfig(undefined).protections;
+  const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
+  assert.deepEqual(excluded, [false, false, false, false]);
+});
+
+/** Build a session: N "old" turns each with a sizeable tool read, then `fillerTurns` small trailing turns. */
+function buildRangeFixtureMessages({ turns, fillerTurns = 4, protectedTurnIndex, tokensPerTurn = 300 }) {
+  const messages = [];
+  for (let t = 0; t < turns; t++) {
+    if (t === protectedTurnIndex) {
+      messages.push(userMsg(`turn${t}`));
+      messages.push(toolCallMsg(`c${t}`, 'read', { path: '.env' }));
+      messages.push(toolResultMsg(`c${t}`, 'read', 'SECRET=1'));
+      messages.push(assistantTextMsg(`done${t}`));
+    } else {
+      messages.push(userMsg(`turn${t}`));
+      messages.push(toolCallMsg(`c${t}`, 'read', { path: `f${t}.txt` }));
+      messages.push(toolResultMsg(`c${t}`, 'read', tokensOfText(tokensPerTurn)));
+      messages.push(assistantTextMsg(`done${t}`));
+    }
+  }
+  for (let f = 0; f < fillerTurns; f++) {
+    messages.push(userMsg(`filler${f}`));
+    messages.push(assistantTextMsg(`ack${f}`));
+  }
+  return messages;
+}
+
+test('identifySimulatedRanges respects recency: nothing is ever proposed inside the last recentTurns turns', () => {
+  // 2 old turns + 4 filler turns (recentTurns default is 4) => the 2 old turns are exactly the
+  // recency boundary; with a low floor they should be identified, but no filler-turn content ever is.
+  const messages = buildRangeFixtureMessages({ turns: 2, fillerTurns: 4, tokensPerTurn: 300 });
+  const config = dcp.normalizeConfig(undefined);
+  const ranges = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 100 });
+  assert.ok(ranges.length > 0);
+  for (const range of ranges) {
+    assert.ok(range.rangeEnd <= 8, 'ranges must never reach into the 4 filler (recent) turns (indices 8+)');
+  }
+});
+
+test('identifySimulatedRanges: a protected message splits a range into two non-overlapping halves', () => {
+  const messages = buildRangeFixtureMessages({ turns: 5, fillerTurns: 4, protectedTurnIndex: 2, tokensPerTurn: 200 });
+  const config = dcp.normalizeConfig(undefined);
+  const ranges = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 100 });
+  // Turn 2's toolCall (index 9) + toolResult (index 10) target a protected path (.env) and must
+  // never appear inside any range -- only those two messages are excluded (the turn's own
+  // user/assistant-text messages at 8 and 11 contain no protected content, so they remain
+  // eligible), so no recorded range may span across (or into) indices 9-10.
+  for (const range of ranges) {
+    assert.ok(range.rangeEnd <= 9 || range.rangeStart >= 11, 'no range may include the protected toolCall/toolResult pair (messages 9-10)');
+  }
+  assert.ok(ranges.length >= 2, 'the protected pair must force at least two distinct ranges');
+  // Non-overlap across all recorded ranges.
+  const sorted = [...ranges].sort((a, b) => a.rangeStart - b.rangeStart);
+  for (let i = 1; i < sorted.length; i++) {
+    assert.ok(sorted[i].rangeStart >= sorted[i - 1].rangeEnd, 'ranges must never overlap');
+  }
+});
+
+test('identifySimulatedRanges never splits a toolCall/toolResult pair even when only the result is protected', () => {
+  const messages = [
+    userMsg('t0'),
+    toolCallMsg('c0', 'bash', { command: 'cat .env' }), // args don't match a path glob directly
+    toolResultMsg('c0', 'bash', tokensOfText(200)),
+    assistantTextMsg('done0'),
+  ];
+  for (let f = 0; f < 4; f++) {
+    messages.push(userMsg(`filler${f}`));
+    messages.push(assistantTextMsg(`ack${f}`));
+  }
+  const config = { ...dcp.normalizeConfig(undefined), protections: { toolNames: ['bash'], pathGlobs: [], recentTurns: 4 } };
+  const ranges = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 50 });
+  // The whole first turn's toolCall+toolResult pair is excluded (protected tool name); the only
+  // remaining content in the old region (the plain user/assistant text messages) is far below the
+  // floor, so no range should ever be recorded here.
+  assert.equal(ranges.length, 0);
+});
+
+test('identifySimulatedRanges: a run bounded by an excluded message below the floor is never recorded, even as later turns are added', () => {
+  // Turn 0 is small (below floor) and immediately followed by a protected turn -- this run can
+  // never grow (it's capped on the right by the exclusion), so it must never be recorded.
+  const messages = buildRangeFixtureMessages({ turns: 6, fillerTurns: 4, protectedTurnIndex: 1, tokensPerTurn: 10 });
+  const config = dcp.normalizeConfig(undefined);
+  // Turn 0 alone is far under this floor and is capped by the protected turn 1 right after it.
+  const ranges = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 5000 });
+  for (const range of ranges) {
+    assert.ok(range.rangeStart !== 0, 'the tiny turn-0-only run (capped by the protected turn 1) must never be recorded');
+  }
+});
+
+test('identifySimulatedRanges: each distinct range is recorded exactly once (no duplicate keys) across all call boundaries', () => {
+  const messages = buildRangeFixtureMessages({ turns: 6, fillerTurns: 4, tokensPerTurn: 200 });
+  const config = dcp.normalizeConfig(undefined);
+  const ranges = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 100 });
+  const keys = new Set();
+  for (const range of ranges) {
+    const key = `${range.rangeStart}:${range.rangeEnd}`;
+    assert.ok(!keys.has(key), `range ${key} must only be recorded once`);
+    keys.add(key);
+  }
+  assert.ok(ranges.length > 0);
+});
+
+test('identifySimulatedRanges is deterministic across repeated runs', () => {
+  const messages = buildRangeFixtureMessages({ turns: 6, fillerTurns: 4, protectedTurnIndex: 3, tokensPerTurn: 200 });
+  const config = dcp.normalizeConfig(undefined);
+  const a = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 100 });
+  const b = identifySimulatedRanges('fixture', messages, { config, minRangeTokens: 100 });
+  assert.deepEqual(a, b);
+});
+
+// --- Summary-size / cost / realized-benefit math ---
+
+test('buildSimulatedCandidate: summaryTokens uses fraction * rangeTokens, floored at summaryMinTokens', () => {
+  const range = { sessionFile: 'f', rangeStart: 0, rangeEnd: 4, rangeTokens: 1000, boundaryMessageIndex: 4, tailTokensAfterEarliestChange: 1000, actualRemainingCalls: 5 };
+  const above = buildSimulatedCandidate(range, { fraction: 0.15, summaryMinTokens: 100, ratios: [0.1] });
+  assert.equal(above.summaryTokens, 150, '0.15 * 1000 = 150 > floor of 100');
+
+  const belowFloor = buildSimulatedCandidate(range, { fraction: 0.05, summaryMinTokens: 200, ratios: [0.1] });
+  assert.equal(belowFloor.summaryTokens, 200, '0.05 * 1000 = 50 < floor of 200 -> floor wins');
+});
+
+test('buildSimulatedCandidate: cost model matches oneTimeCost/recurringSaving/realizedNetBenefit formulas exactly, incl. summarizer cost multiplier', () => {
+  const range = {
+    sessionFile: 'f',
+    rangeStart: 2,
+    rangeEnd: 6,
+    rangeTokens: 1000,
+    boundaryMessageIndex: 6,
+    tailTokensAfterEarliestChange: 4000,
+    actualRemainingCalls: 3,
+  };
+  const ratio = 0.1;
+  const summarizerCostMult = 2.5;
+  const candidate = buildSimulatedCandidate(range, { fraction: 0.2, summaryMinTokens: 50, summarizerCostMult, ratios: [ratio] });
+  const summaryTokens = 200; // 0.2 * 1000
+  assert.equal(candidate.summaryTokens, summaryTokens);
+
+  const r = candidate.byRatio[ratio];
+  const expectedCacheBustPenalty = (1 - ratio) * range.tailTokensAfterEarliestChange;
+  const expectedRecurringSaving = ratio * (range.rangeTokens - summaryTokens);
+  const expectedSummarizerCost = summarizerCostMult * (range.rangeTokens + summaryTokens);
+  const expectedOneTimeCost = expectedCacheBustPenalty + expectedSummarizerCost;
+  const expectedRealized = range.actualRemainingCalls * expectedRecurringSaving - expectedOneTimeCost;
+
+  assert.ok(Math.abs(r.cacheBustPenalty - expectedCacheBustPenalty) < 1e-9);
+  assert.ok(Math.abs(r.recurringSaving - expectedRecurringSaving) < 1e-9);
+  assert.ok(Math.abs(r.summarizerCost - expectedSummarizerCost) < 1e-9);
+  assert.ok(Math.abs(r.oneTimeCost - expectedOneTimeCost) < 1e-9);
+  assert.ok(Math.abs(r.realizedNetBenefit - expectedRealized) < 1e-9);
+  assert.equal(r.breakEvenCalls, expectedOneTimeCost / expectedRecurringSaving);
+});
+
+test('buildSimulatedCandidate: a higher summarizer cost multiplier strictly increases oneTimeCost and decreases realizedNetBenefit', () => {
+  const range = { sessionFile: 'f', rangeStart: 0, rangeEnd: 4, rangeTokens: 1000, boundaryMessageIndex: 4, tailTokensAfterEarliestChange: 500, actualRemainingCalls: 10 };
+  const cheap = buildSimulatedCandidate(range, { fraction: 0.15, summarizerCostMult: 0.5, ratios: [0.1] }).byRatio[0.1];
+  const expensive = buildSimulatedCandidate(range, { fraction: 0.15, summarizerCostMult: 5, ratios: [0.1] }).byRatio[0.1];
+  assert.ok(expensive.oneTimeCost > cheap.oneTimeCost);
+  assert.ok(expensive.realizedNetBenefit < cheap.realizedNetBenefit);
+});
+
+test('computeSimulatedAggregate: distinct --sim-summary-fraction values produce distinct populations/totals', () => {
+  const ranges = [
+    { sessionFile: 'f', rangeStart: 0, rangeEnd: 4, rangeTokens: 4000, boundaryMessageIndex: 4, tailTokensAfterEarliestChange: 500, actualRemainingCalls: 20 },
+    { sessionFile: 'f', rangeStart: 8, rangeEnd: 12, rangeTokens: 3000, boundaryMessageIndex: 12, tailTokensAfterEarliestChange: 300, actualRemainingCalls: 15 },
+  ];
+  const aggregate = computeSimulatedAggregate(ranges, {
+    fractions: [0.1, 0.15, 0.3],
+    ratios: [0.1],
+    summaryMinTokens: 200,
+    summarizerCostMult: 1,
+  });
+  assert.equal(aggregate.rangeCount, 2);
+  assert.equal(aggregate.rangeSizeDistribution.count, 2);
+
+  const totals = [0.1, 0.15, 0.3].map((f) => aggregate.byFraction[f].byRatio[0.1].sweep.totalAtRecommended);
+  // A larger summary fraction means a bigger (more expensive-to-produce, less-saving) summary,
+  // so total realized net benefit at each population's own optimal T must strictly decrease.
+  assert.ok(totals[0] > totals[1], `fraction=0.1 (${totals[0]}) should beat fraction=0.15 (${totals[1]})`);
+  assert.ok(totals[1] > totals[2], `fraction=0.15 (${totals[1]}) should beat fraction=0.3 (${totals[2]})`);
+  // All three must be genuinely distinct populations, not accidentally identical.
+  assert.equal(new Set(totals).size, 3);
+});
+
+// --- runBenchmark / JSON shape (--simulate-compression) ---
+
+test('runBenchmark with --simulate-compression adds a new top-level `simulated` section without disturbing existing keys', async () => {
+  const result = await runBenchmark({
+    paths: [fixturesDir],
+    ratios: [0.1, 0.25],
+    simulateCompression: true,
+    simSummaryFractions: [0.1, 0.15, 0.3],
+    simMinRangeTokens: 100,
+  });
+  assert.ok(result.simulated, 'a `simulated` top-level section must be present');
+  assert.equal(typeof result.simulated.rangeCount, 'number');
+  assert.equal(typeof result.simulated.rangeSizeDistribution, 'object');
+  assert.deepEqual(Object.keys(result.simulated.byFraction).sort(), ['0.1', '0.15', '0.3']);
+  for (const fraction of [0.1, 0.15, 0.3]) {
+    const byFraction = result.simulated.byFraction[fraction];
+    assert.equal(typeof byFraction.candidateCount, 'number');
+    assert.ok(byFraction.byRatio[0.1]);
+    assert.ok(byFraction.byRatio[0.25]);
+    assert.ok(byFraction.byRatio[0.1].sweep);
+  }
+
+  for (const session of result.sessionResults) {
+    assert.ok(Array.isArray(session.simulatedRanges));
+  }
+
+  // Existing shape is fully preserved (byte-stable) alongside the new section.
+  assert.equal(typeof result.aggregate.candidateCount, 'number');
+  assert.equal(typeof result.aggregate.byStrategy, 'object');
+
+  // Full payload remains JSON-serializable.
+  const json = JSON.stringify(result);
+  const parsed = JSON.parse(json);
+  assert.ok(parsed.simulated);
+});
+
+test('runBenchmark --simulate-compression finds simulated ranges on the range-compression fixture with a low floor, respecting the protected .env turn', async () => {
+  const result = await runBenchmark({
+    paths: [fixture('range-compression.jsonl')],
+    ratios: [0.1],
+    simulateCompression: true,
+    simMinRangeTokens: 500,
+  });
+  const session = result.sessionResults.find((s) => s.sessionFile.endsWith('range-compression.jsonl'));
+  assert.ok(session.simulatedRanges.length > 0);
+  assert.ok(result.simulated.rangeCount === session.simulatedRanges.length);
 });

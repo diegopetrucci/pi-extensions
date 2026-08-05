@@ -18,8 +18,8 @@ const packageBudgets = [
     args: ['pack', '--dry-run', '--json'],
     limits: {
       size: 1_350_000,
-      // Bounded headroom for the approved subagent runtime audit and Pi 0.83 model-scope fixes.
-      unpackedSize: 2_135_000,
+      // Bounded headroom for intentional DCP runtime and configuration documentation growth measured in PR #49.
+      unpackedSize: 2_150_000,
     },
   },
   {

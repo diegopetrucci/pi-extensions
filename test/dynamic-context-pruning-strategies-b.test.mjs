@@ -407,6 +407,10 @@ test('gate rejects a low-value superseded-read proposal when the cache-bust tail
   const config = {
     ...defaultConfig(),
     protections: { ...defaultConfig().protections, recentTurns: 0 },
+    // Explicit zero floor (pe-qdzb): this test is exercising the net-benefit
+    // gate's own rejection, not the minCharsSaved pre-gate filter, so the
+    // small (but positive) saving here must reach the gate unfiltered.
+    thresholds: { ...defaultConfig().thresholds, minCharsSaved: 0 },
     gate: { ...defaultConfig().gate, mode: 'on', breakEvenThreshold: 5 },
     // Identical full reads of the same path with identical output are also a
     // `dedupe` match; disable it here so this test isolates the
