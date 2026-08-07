@@ -13,9 +13,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 ### Providers
 
-- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models.
 - [`fast`](./extensions/fast): Adds one `/fast` toggle that enables the provider-specific Fast mode for the currently selected supported OpenAI Codex or Anthropic Claude model.
-- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants.
 
 ### UI
 
@@ -52,7 +50,10 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.
 - [`todo`](./extensions/todo): Adds a branch-aware `todo` tool for the agent and a `/todos` viewer for users..
 
-(For the full list of pi extensions I use, [check out my dotfiles](https://github.com/diegopetrucci/dot/blob/main/.pi/agent/settings.json).)
+### Deprecated
+
+- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models.
+- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants.
 
 ## Install
 
