@@ -3,7 +3,8 @@ import { cp, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { defaultCreateTagSnapshot, PUBLIC_REGISTRY, publishRelease } from '../scripts/publish-release.mjs';
+import { gzipSync } from 'node:zlib';
+import { defaultCreateTagSnapshot, gzipPayloadEqual, PUBLIC_REGISTRY, publishRelease } from '../scripts/publish-release.mjs';
 
 async function json(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -92,7 +93,7 @@ function githubEnv(overrides = {}) {
   };
 }
 
-function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, registryPackPayloadOverrides = {}, registryPackDirectories = [], packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
   const artifacts = new Map();
   return async (file, args, options = {}) => {
     calls.push({ file, args: [...args], cwd: options.cwd, env: options.env, replaceEnv: options.replaceEnv });
@@ -138,6 +139,24 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
       publishedSpecs.add(spec);
       return { code: 0, stdout: 'published\n', stderr: '' };
     }
+    if (args[0] === 'pack' && !args[1].startsWith('-')) {
+      const spec = args[1];
+      assert.deepEqual(args.slice(2), ['--json', '--ignore-scripts', '--pack-destination', args[5], `--registry=${PUBLIC_REGISTRY}`]);
+      assert.equal(options.cwd, root);
+      assert.equal(options.replaceEnv, true);
+      assert.equal(options.env.NPM_CONFIG_USERCONFIG.endsWith('user.npmrc'), true);
+      assert.equal(options.env.NPM_CONFIG_GLOBALCONFIG.endsWith('global.npmrc'), true);
+      const versionSeparator = spec.lastIndexOf('@');
+      const name = spec.slice(0, versionSeparator);
+      const destination = args[args.indexOf('--pack-destination') + 1];
+      registryPackDirectories.push(destination);
+      const response = packResponse(name, 'registry:other', 'sha512-registry:other', []);
+      const filename = JSON.parse(response)[0].filename;
+      await mkdir(destination, { recursive: true });
+      const payload = registryPackPayloadOverrides[spec] ?? `${name}\n`;
+      await writeFile(path.join(destination, filename), gzipSync(payload, { level: 1 }));
+      return { code: 0, stdout: response, stderr: '' };
+    }
     assert.equal(args[0], 'pack');
     assert.deepEqual(args.slice(0, 3), ['pack', '--json', '--ignore-scripts']);
     assert.equal(args[3], '--pack-destination');
@@ -158,7 +177,7 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
     const filename = JSON.parse(response)[0].filename;
     await mkdir(args[4], { recursive: true });
     const artifactPath = path.join(args[4], filename);
-    await writeFile(artifactPath, `${manifest.name}\n`);
+    await writeFile(artifactPath, gzipSync(`${manifest.name}\n`, { level: 9 }));
     artifacts.set(artifactPath, `${manifest.name}@${manifest.version}`);
     return { code: 0, stdout: response, stderr: '' };
   };
@@ -396,7 +415,7 @@ test('changed narrative, changed evidence, or omitted checkout evidence fails cl
   );
 });
 
-test('matching published hashes skip exact versions, while missing or mismatched dist metadata fails closed', async (t) => {
+test('matching hashes or canonical tar payloads skip exact versions, while missing or mismatched content fails closed', async (t) => {
   const { root, snapshot } = await fixture(t);
   const skipped = await publishRelease({
     cwd: root,
@@ -423,6 +442,24 @@ test('matching published hashes skip exact versions, while missing or mismatched
     /missing dist\.integrity/,
   );
 
+  const registryPackDirectories = [];
+  const recompressed = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({
+      root,
+      snapshot,
+      publishedSpecs: new Set(['plain-addon@1.2.3']),
+      registryDistOverrides: { 'plain-addon@1.2.3': { shasum: 'plain-addon:other', integrity: 'sha512-plain-addon:other' } },
+      registryPackDirectories,
+    }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+  assert.deepEqual(recompressed.skipped, ['plain-addon@1.2.3']);
+  assert.equal(registryPackDirectories.length, 1);
+  await assert.rejects(stat(registryPackDirectories[0]), /ENOENT/);
+
   await assert.rejects(
     publishRelease({
       cwd: root,
@@ -433,11 +470,31 @@ test('matching published hashes skip exact versions, while missing or mismatched
         snapshot,
         publishedSpecs: new Set(['plain-addon@1.2.3']),
         registryDistOverrides: { 'plain-addon@1.2.3': { shasum: 'plain-addon:other', integrity: 'sha512-plain-addon:other' } },
+        registryPackPayloadOverrides: { 'plain-addon@1.2.3': 'tampered\n' },
       }),
       createTagSnapshot: async () => cloneSnapshot(snapshot),
     }),
     /registry dist metadata mismatch for plain-addon@1\.2\.3/,
   );
+});
+
+test('gzipPayloadEqual ignores gzip encoding differences but rejects different or malformed payloads', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'publish-release-gzip-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const expected = path.join(directory, 'expected.tgz');
+  const recompressed = path.join(directory, 'recompressed.tgz');
+  const different = path.join(directory, 'different.tgz');
+  const malformed = path.join(directory, 'malformed.tgz');
+  const oversized = path.join(directory, 'oversized.tgz');
+  await writeFile(expected, gzipSync('same payload', { level: 9 }));
+  await writeFile(recompressed, gzipSync('same payload', { level: 1 }));
+  await writeFile(different, gzipSync('different payload', { level: 9 }));
+  await writeFile(malformed, 'not gzip');
+  await writeFile(oversized, Buffer.alloc(8 * 1024 * 1024 + 1));
+  assert.equal(await gzipPayloadEqual(expected, recompressed), true);
+  assert.equal(await gzipPayloadEqual(expected, different), false);
+  assert.equal(await gzipPayloadEqual(expected, malformed), false);
+  assert.equal(await gzipPayloadEqual(expected, oversized), false);
 });
 
 test('current and tagged manifest version mismatches fail closed', async (t) => {

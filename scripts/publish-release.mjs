@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = 'https://registry.npmjs.org';
@@ -14,6 +15,8 @@ export const TRUSTED_ENVIRONMENT = 'npm-release';
 const DEPENDENCY_SECTIONS = ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies'];
 const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const RELEASE_VERSION_RE = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const MAX_TARBALL_BYTES = 8 * 1024 * 1024;
+const MAX_TAR_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 function compareByCodePoint(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -302,6 +305,38 @@ function parsePublishedDist(spec, stdout) {
   return { shasum: parsed.shasum, integrity: parsed.integrity };
 }
 
+export async function gzipPayloadEqual(leftPath, rightPath) {
+  try {
+    const [leftStat, rightStat] = await Promise.all([stat(leftPath), stat(rightPath)]);
+    if (leftStat.size > MAX_TARBALL_BYTES || rightStat.size > MAX_TARBALL_BYTES) return false;
+    const [left, right] = await Promise.all([readFile(leftPath), readFile(rightPath)]);
+    const options = { maxOutputLength: MAX_TAR_PAYLOAD_BYTES };
+    return gunzipSync(left, options).equals(gunzipSync(right, options));
+  } catch {
+    return false;
+  }
+}
+
+async function publishedPayloadMatches(spec, expectedPack, run, root) {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'publish-release-registry-pack-'));
+  try {
+    const result = await checked(
+      run,
+      'npm',
+      ['pack', spec, '--json', '--ignore-scripts', '--pack-destination', tempRoot, `--registry=${PUBLIC_REGISTRY}`],
+      { cwd: root },
+      `download published tarball for ${spec}`,
+    );
+    const publishedPack = parsePack(result.stdout, spec);
+    if (!publishedPack.filename) return false;
+    const publishedPath = path.join(tempRoot, publishedPack.filename);
+    if (!(await exists(publishedPath))) return false;
+    return gzipPayloadEqual(expectedPack.artifactPath, publishedPath);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function checkPublishedVersion(pkg, version, expectedPack, run, root) {
   const spec = `${pkg.name}@${version}`;
   const result = await run('npm', ['view', spec, 'dist', '--json', `--registry=${PUBLIC_REGISTRY}`], { cwd: root });
@@ -309,6 +344,8 @@ async function checkPublishedVersion(pkg, version, expectedPack, run, root) {
   if (result.code !== 0) throw new Error(`registry dist check for ${spec} failed (${result.code}): ${result.stderr.trim() || result.stdout.trim()}`);
   const publishedDist = parsePublishedDist(spec, result.stdout);
   if (publishedDist.shasum !== expectedPack.shasum || publishedDist.integrity !== expectedPack.integrity) {
+    // npm can wrap identical tar bytes in different gzip encodings across Node runtimes.
+    if (await publishedPayloadMatches(spec, expectedPack, run, root)) return true;
     throw new Error(`registry dist metadata mismatch for ${spec}: expected tagged pack hashes for ${version}`);
   }
   return true;
