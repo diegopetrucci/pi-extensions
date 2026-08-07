@@ -2,6 +2,8 @@
 
 A pi extension that enables Anthropic Claude Fast mode for supported Claude Opus models.
 
+This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package. The collection uses the unified [`fast`](../fast) extension instead.
+
 When active, the extension injects this into eligible Anthropic request payloads:
 
 ```json

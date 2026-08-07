@@ -13,8 +13,9 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 ### Providers
 
-- [`claude-fast`](./extensions/claude-fast): Adds `/claude-fast` to enable Anthropic Claude Fast mode for supported Claude Opus models by injecting `speed: "fast"`.
-- [`openai-fast`](./extensions/openai-fast): Adds `/fast` to enable OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants by injecting the priority service tier.
+- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models.
+- [`fast`](./extensions/fast): Adds one `/fast` toggle that enables the provider-specific Fast mode for the currently selected supported OpenAI Codex or Anthropic Claude model.
+- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants.
 
 ### UI
 
