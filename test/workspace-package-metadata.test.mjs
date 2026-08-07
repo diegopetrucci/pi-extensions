@@ -24,6 +24,7 @@ const explicitEsmLowRiskCohort = new Set([
   'confirm-destructive',
   'context-cap',
   'dirty-repo-guard',
+  'fast',
   'gnosis',
   'inline-bash',
   'notify',
@@ -72,7 +73,7 @@ function getRootCollectionRuntimeDeclarations() {
     .sort();
 }
 
-const standaloneOnlyWorkspacePackages = new Set(['git-footer']);
+const standaloneOnlyWorkspacePackages = new Set(['claude-fast', 'git-footer', 'openai-fast']);
 
 function isStandaloneOnlyWorkspacePackage(packageDef) {
   return standaloneOnlyWorkspacePackages.has(path.basename(packageDef.packageRoot));
