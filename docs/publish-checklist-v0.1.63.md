@@ -26,8 +26,8 @@
 
 ## Agent-safe follow-up actions
 
-- [ ] commit release prep changes on `feat/unified-fast`
-- [ ] push the release branch and open a pull request targeting `main`
+- [x] commit release prep changes on `feat/unified-fast`
+- [x] push the release branch and open pull request [#67](https://github.com/diegopetrucci/pi-extensions/pull/67) targeting `main`
 - [ ] after the pull request merges, tag `v0.1.63` on `main`
 - [ ] push tag `v0.1.63`
 - [ ] create the GitHub release using `docs/github-release-v0.1.63.md`
