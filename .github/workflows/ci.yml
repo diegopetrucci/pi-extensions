@@ -19,6 +19,7 @@ jobs:
         node-version:
           - 22.19.0
           - 24
+          - 26
 
     steps:
       - name: Checkout

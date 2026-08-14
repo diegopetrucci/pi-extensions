@@ -18,6 +18,7 @@ function toPosix(filePath) {
 }
 
 const expectedNodeEngine = '>=22.19.0';
+const expectedCiNodeVersions = ['22.19.0', '24', '26'];
 const explicitEsmLowRiskCohort = new Set([
   'brrr',
   'claude-fast',
@@ -180,10 +181,19 @@ test('root package uses the tracked strict tsconfig and the shared Node minimum'
   assert.ok(Array.isArray(tsconfig.exclude) && tsconfig.exclude.includes('.tickets'));
 });
 
-test('CI validates the exact minimum Node release and current supported LTS', () => {
+test('CI validates the minimum runtime, supported LTS, and current Node release', () => {
   const workflow = readText('.github/workflows/ci.yml');
+  const nodeVersionMatrix = workflow.match(
+    /node-version:[ \t]*\r?\n((?:[ \t]+-[ \t]*[^\r\n]*(?:\r?\n|$))+)/u,
+  );
 
-  assert.match(workflow, /node-version:\s*\n\s*- 22\.19\.0\s*\n\s*- 24/);
+  assert.ok(nodeVersionMatrix, 'CI workflow should declare a Node version matrix');
+  const actualCiNodeVersions = nodeVersionMatrix[1]
+    .split(/\r?\n/)
+    .filter((line) => line.trim().startsWith('-'))
+    .map((line) => line.trim().slice(1).trim());
+
+  assert.deepEqual(actualCiNodeVersions, expectedCiNodeVersions);
   assert.match(workflow, /name: Validate \(Node \$\{\{ matrix\.node-version \}\}\)/);
 });
 
