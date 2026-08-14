@@ -2,7 +2,7 @@
 
 [![Total npm downloads](https://img.shields.io/npm/dt/%40diegopetrucci%2Fpi-extensions?label=total%20npm%20downloads)](https://www.npmjs.com/package/@diegopetrucci/pi-extensions)
 
-A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also building my own harness on top of pi](https://github.com/diegopetrucci/the-last-harness). have a look!)
+A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also building my own harness on top of pi](https://github.com/diegopetrucci/the-last-harness). Have a look if that sounds interesting!)
 
 ### Subagents
 
@@ -52,8 +52,8 @@ A collection of [pi](https://pi.dev) agent extensions I made. (btw, [I am also b
 
 ### Deprecated
 
-- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models.
-- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants.
+- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models. [Deprecated, please use [`fast`](https://github.com/diegopetrucci/pi-extensions/blob/main/extensions/fast) instead.]
+- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants. [Deprecated, please use [`fast`](https://github.com/diegopetrucci/pi-extensions/blob/main/extensions/fast) instead.]
 
 ## Install
 
