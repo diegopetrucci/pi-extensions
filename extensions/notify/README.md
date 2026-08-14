@@ -11,6 +11,9 @@ This started from the original `notify.ts` example in [`earendil-works/pi`](http
 - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
 - OSC 99: Kitty
 
+Both are wrapped in tmux's DCS passthrough automatically when `$TMUX` is set;
+see [Running inside tmux](#running-inside-tmux).
+
 ### Desktop notifications
 
 - macOS Notification Center via `osascript`
@@ -86,7 +89,8 @@ Example:
     "sound": false
   },
   "terminal": {
-    "backend": "auto"
+    "backend": "auto",
+    "tmuxPassthrough": "auto"
   },
   "desktop": {
     "backend": "auto"
@@ -101,6 +105,39 @@ Example:
   }
 }
 ```
+
+### Running inside tmux
+
+Under tmux, terminal notifications need one line in your `tmux.conf`:
+
+```tmux
+set -g allow-passthrough all
+```
+
+Without it, notifications never reach your terminal. tmux is the terminal
+emulator for the pane, so the escape sequence is delivered to tmux rather than
+to the terminal that can act on it. tmux has no OSC 777 or OSC 99 handler
+(checked in 3.7b, whose OSC dispatch covers 4/7/8/9;4/10/11/12/52/104/133) and
+does not forward OSC codes it does not recognise, so the notification is parsed
+and silently dropped. Desktop, bell, and sound channels are unaffected.
+
+This extension therefore wraps terminal notifications in tmux's DCS passthrough
+(`ESC P tmux ; … ESC \`), which asks tmux to forward the payload to the outer
+terminal verbatim — but tmux only honours that when `allow-passthrough` is on.
+
+Use `all` rather than `on`: under `on`, tmux only honours passthrough from panes
+that are currently *visible*, which discards exactly the notification you want —
+the one fired while you are looking at another window. The trade-off is that
+`all` lets a program in any pane write bytes straight to the attached terminal;
+notification sequences render nothing, but a malformed passthrough from a
+background pane can garble the display, since those bytes bypass tmux's screen
+model.
+
+Set `terminal.tmuxPassthrough` to `never` to opt out of wrapping (for example if
+your multiplexer forwards these codes itself), or `always` to force it when
+`$TMUX` is not visible in the environment. Wrapping is safe to leave on `auto`:
+with passthrough disabled in tmux, a wrapped sequence is dropped exactly like a
+bare one, so nothing regresses.
 
 ### Enable sound
 
@@ -127,6 +164,7 @@ You can also customize the sound backend and options if needed.
 - `channels.bell`: enable terminal bell
 - `channels.sound`: enable sound playback
 - `terminal.backend`: `auto`, `osc777`, `osc99`, `none`
+- `terminal.tmuxPassthrough`: `auto` (wrap when `$TMUX` is set), `always`, `never`
 - `desktop.backend`: `auto`, `macos`, `linux`, `windows-toast`, `none`
 - `sound.backend`: `auto`, `macos`, `linux`, `windows-beep`, `command`, `none`
 - `sound.name`: macOS system sound name, like `Glass` or `Hero`
@@ -138,6 +176,7 @@ You can also customize the sound backend and options if needed.
 ## Notes
 
 - Hooks the `agent_settled` event so automatic retries, compaction retries, and queued follow-ups do not trigger intermediate notifications.
+- Terminal notifications are wrapped for tmux when `$TMUX` is set, which also requires `set -g allow-passthrough all` in `tmux.conf`.
 - Default message is `Pi` / `Ready for input`.
 - Terminal, desktop, bell, and sound channels can be enabled independently.
 - To opt into sound playback, set `channels.sound` to `true`.

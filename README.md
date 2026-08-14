@@ -47,7 +47,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 - [`gnosis`](./extensions/gnosis): Exposes the `gn` repo-local knowledge base CLI as an agent tool for searching and recording durable project decisions, constraints, and intent.
 - [`illustrations-to-explain-things`](./extensions/illustrations-to-explain-things): Adds a skill for generating clean, absurd Xiaohei-style article illustrations, shot lists, image edits, and visual metaphors.
 - [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
-- [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input.
+- [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input, including tmux-aware terminal notifications.
 - [`todo`](./extensions/todo): Adds a branch-aware `todo` tool for the agent and a `/todos` viewer for users..
 
 ### Deprecated
