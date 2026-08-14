@@ -478,23 +478,43 @@ test('matching hashes or canonical tar payloads skip exact versions, while missi
   );
 });
 
-test('gzipPayloadEqual ignores gzip encoding differences but rejects different or malformed payloads', async (t) => {
+test('gzipPayloadEqual ignores encoding differences but rejects different, malformed, or bounded-overflow payloads', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'publish-release-gzip-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const mib = 1024 * 1024;
+  const compressedLimit = 8 * mib;
+  const payloadLimit = 16 * mib;
   const expected = path.join(directory, 'expected.tgz');
   const recompressed = path.join(directory, 'recompressed.tgz');
   const different = path.join(directory, 'different.tgz');
   const malformed = path.join(directory, 'malformed.tgz');
-  const oversized = path.join(directory, 'oversized.tgz');
+  const compressedLimitExpected = path.join(directory, 'compressed-limit-expected.tgz');
+  const compressedLimitExceeded = path.join(directory, 'compressed-limit-exceeded.tgz');
+  const payloadLimitLeft = path.join(directory, 'payload-limit-left.tgz');
+  const payloadLimitRight = path.join(directory, 'payload-limit-right.tgz');
   await writeFile(expected, gzipSync('same payload', { level: 9 }));
   await writeFile(recompressed, gzipSync('same payload', { level: 1 }));
   await writeFile(different, gzipSync('different payload', { level: 9 }));
   await writeFile(malformed, 'not gzip');
-  await writeFile(oversized, Buffer.alloc(8 * 1024 * 1024 + 1));
+
+  const compressedLimitPayload = Buffer.alloc(compressedLimit + 1);
+  const smallEncoding = gzipSync(compressedLimitPayload, { level: 9 });
+  const oversizedEncoding = gzipSync(compressedLimitPayload, { level: 0 });
+  assert.ok(smallEncoding.length < compressedLimit);
+  assert.ok(oversizedEncoding.length > compressedLimit);
+  await writeFile(compressedLimitExpected, smallEncoding);
+  await writeFile(compressedLimitExceeded, oversizedEncoding);
+
+  const expandedPayload = gzipSync(Buffer.alloc(payloadLimit + 1), { level: 1 });
+  assert.ok(expandedPayload.length < compressedLimit);
+  await writeFile(payloadLimitLeft, expandedPayload);
+  await writeFile(payloadLimitRight, expandedPayload);
+
   assert.equal(await gzipPayloadEqual(expected, recompressed), true);
   assert.equal(await gzipPayloadEqual(expected, different), false);
   assert.equal(await gzipPayloadEqual(expected, malformed), false);
-  assert.equal(await gzipPayloadEqual(expected, oversized), false);
+  assert.equal(await gzipPayloadEqual(compressedLimitExpected, compressedLimitExceeded), false);
+  assert.equal(await gzipPayloadEqual(payloadLimitLeft, payloadLimitRight), false);
 });
 
 test('current and tagged manifest version mismatches fail closed', async (t) => {
