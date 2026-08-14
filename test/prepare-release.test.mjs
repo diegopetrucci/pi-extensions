@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { gzipSync } from 'node:zlib';
 import { prepareRelease, PUBLIC_REGISTRY } from '../scripts/prepare-release.mjs';
 
 async function json(filePath, value) {
@@ -22,7 +23,19 @@ async function fixture(t) {
   return { root, input };
 }
 
-function mockRunner(root, { local = {}, baseline = {}, target = {}, registryError, installError, staleTopLevel = false, calls = [] } = {}) {
+function mockRunner(root, {
+  local = {},
+  baseline = {},
+  localPayloads = {},
+  baselinePayloads = {},
+  artifactOverrides = {},
+  artifactDirectories = [],
+  target = {},
+  registryError,
+  installError,
+  staleTopLevel = false,
+  calls = [],
+} = {}) {
   return async (file, args, options = {}) => {
     calls.push({ file, args: [...args], cwd: options.cwd });
     assert.equal(file, 'npm');
@@ -48,12 +61,16 @@ function mockRunner(root, { local = {}, baseline = {}, target = {}, registryErro
       return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
     }
     assert.equal(args[0], 'pack');
-    assert.ok(args.includes('--dry-run') && args.includes('--json') && args.includes('--ignore-scripts'));
-    const spec = args.find((arg) => !arg.startsWith('-') && arg !== 'pack');
+    const dryRun = args.includes('--dry-run');
+    assert.ok(args.includes('--json') && args.includes('--ignore-scripts'));
+    if (!dryRun) assert.ok(args.includes('--pack-destination'));
+    const destinationIndex = args.indexOf('--pack-destination');
+    const spec = args.slice(1, destinationIndex === -1 ? args.length : destinationIndex)
+      .filter((arg) => !arg.startsWith('-')).at(-1);
     let name;
     let shasum;
     if (spec) {
-      name = spec.startsWith('@') ? spec.slice(0, spec.lastIndexOf('@')) : spec.slice(0, spec.lastIndexOf('@'));
+      name = spec.slice(0, spec.lastIndexOf('@'));
       if (baseline[name] === 'absent') return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
       shasum = baseline[name] ?? `same:${name}`;
     } else {
@@ -61,7 +78,30 @@ function mockRunner(root, { local = {}, baseline = {}, target = {}, registryErro
       name = manifest.name;
       shasum = local[name] ?? `same:${name}`;
     }
-    return { code: 0, stdout: JSON.stringify([{ name, shasum, size: 100 + name.length, unpackedSize: 200 + name.length, files: [{ path: 'package.json' }, { path: 'index.js' }] }]), stderr: '' };
+    const filename = `${name.replace(/^@/, '').replaceAll('/', '-')}-1.0.0.tgz`;
+    if (!dryRun) {
+      const destination = args[destinationIndex + 1];
+      artifactDirectories.push(destination);
+      const key = `${spec ? 'baseline' : 'local'}:${name}`;
+      if (Object.prototype.hasOwnProperty.call(artifactOverrides, key)) {
+        const artifact = artifactOverrides[key];
+        if (artifact !== null) {
+          await mkdir(destination, { recursive: true });
+          await writeFile(path.join(destination, filename), artifact);
+        }
+      } else {
+        await mkdir(destination, { recursive: true });
+        const payload = spec
+          ? baselinePayloads[name] ?? `${shasum}\n`
+          : localPayloads[name] ?? `${shasum}\n`;
+        await writeFile(path.join(destination, filename), gzipSync(payload, { level: spec ? 1 : 9 }));
+      }
+    }
+    return {
+      code: 0,
+      stdout: JSON.stringify([{ name, filename, shasum, size: 100 + name.length, unpackedSize: 200 + name.length, files: [{ path: 'package.json' }, { path: 'index.js' }] }]),
+      stderr: '',
+    };
   };
 }
 
@@ -85,6 +125,85 @@ test('dry-run selects packages by pack artifacts, includes root overlap, orders 
   assert.ok(first.documents.every(({ action }) => action === 'would-create'));
   assert.equal(await readFile(path.join(root, 'package.json'), 'utf8'), before);
   assert.ok(calls.every(({ args }) => !args.includes('publish') && !args.some((arg) => /token|commit|tag|push|release/.test(arg))));
+});
+
+test('canonical tar payloads ignore recompression and select only genuinely changed packages', async (t) => {
+  const { root } = await fixture(t);
+  const artifactDirectories = [];
+  const summary = await prepareRelease({
+    cwd: root,
+    inputPath: 'release.json',
+    run: mockRunner(root, {
+      local: { '@example/a': 'local-a', 'plain-addon': 'local-addon' },
+      baseline: { '@example/a': 'registry-a', 'plain-addon': 'registry-addon' },
+      localPayloads: { '@example/a': 'same tar payload', 'plain-addon': 'local tar payload' },
+      baselinePayloads: { '@example/a': 'same tar payload', 'plain-addon': 'registry tar payload' },
+      artifactDirectories,
+    }),
+  });
+  assert.deepEqual(summary.packages.map(({ name }) => name), ['plain-addon']);
+  assert.equal(artifactDirectories.length, 4);
+  for (const directory of artifactDirectories) await assert.rejects(stat(directory), { code: 'ENOENT' });
+});
+
+test('canonical registry tarball download failure aborts with a useful error', async (t) => {
+  const { root } = await fixture(t);
+  const artifactDirectories = [];
+  const baseRun = mockRunner(root, {
+    local: { '@example/a': 'local-a' },
+    baseline: { '@example/a': 'registry-a' },
+    artifactDirectories,
+  });
+  await assert.rejects(
+    prepareRelease({
+      cwd: root,
+      inputPath: 'release.json',
+      run: async (file, args, options) => {
+        if (args[0] === 'pack' && !args.includes('--dry-run') && args.includes('@example/a@1.0.0')) {
+          return { code: 1, stdout: '', stderr: 'npm error code E503\nnpm error fetch failed: registry unavailable' };
+        }
+        return baseRun(file, args, options);
+      },
+    }),
+    /registry pack for @example\/a failed \(1\): npm error code E503\nnpm error fetch failed: registry unavailable/,
+  );
+  for (const directory of artifactDirectories) await assert.rejects(stat(directory), { code: 'ENOENT' });
+});
+
+test('malformed, bounded-overflow, or missing tar payloads remain changed', async (t) => {
+  const mib = 1024 * 1024;
+  const compressedLimit = 8 * mib;
+  const payloadLimit = 16 * mib;
+  const cases = [
+    ['malformed', () => ({ 'baseline:@example/a': Buffer.from('not gzip') })],
+    ['compressed-size', () => {
+      const payload = Buffer.alloc(compressedLimit + 1);
+      const localArtifact = gzipSync(payload, { level: 9 });
+      const baselineArtifact = gzipSync(payload, { level: 0 });
+      assert.ok(localArtifact.length < compressedLimit);
+      assert.ok(baselineArtifact.length > compressedLimit);
+      return { 'local:@example/a': localArtifact, 'baseline:@example/a': baselineArtifact };
+    }],
+    ['decompressed-size', () => {
+      const artifact = gzipSync(Buffer.alloc(payloadLimit + 1), { level: 1 });
+      assert.ok(artifact.length < compressedLimit);
+      return { 'local:@example/a': artifact, 'baseline:@example/a': artifact };
+    }],
+    ['missing', () => ({ 'baseline:@example/a': null })],
+  ];
+  for (const [label, artifacts] of cases) {
+    const { root } = await fixture(t);
+    const summary = await prepareRelease({
+      cwd: root,
+      inputPath: 'release.json',
+      run: mockRunner(root, {
+        local: { '@example/a': `local-${label}` },
+        baseline: { '@example/a': `registry-${label}` },
+        artifactOverrides: artifacts(),
+      }),
+    });
+    assert.deepEqual(summary.packages.map(({ name }) => name), ['@example/a']);
+  }
 });
 
 test('registry target collisions and non-404 errors hard-fail', async (t) => {

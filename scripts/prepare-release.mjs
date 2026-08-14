@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { gzipPayloadEqual } from './gzip-payload.mjs';
 
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = 'https://registry.npmjs.org';
@@ -94,7 +96,13 @@ function parsePack(stdout, label) {
   try { parsed = JSON.parse(stdout); } catch { throw new Error(`Invalid npm pack JSON for ${label}`); }
   if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error(`Expected one npm pack result for ${label}`);
   const pack = parsed[0];
-  return { shasum: pack.shasum, size: pack.size, unpackedSize: pack.unpackedSize, fileCount: pack.entryCount ?? pack.files?.length ?? 0 };
+  return {
+    filename: typeof pack.filename === 'string' ? pack.filename : null,
+    shasum: pack.shasum,
+    size: pack.size,
+    unpackedSize: pack.unpackedSize,
+    fileCount: pack.entryCount ?? pack.files?.length ?? 0,
+  };
 }
 
 function isExactNotFound(result) {
@@ -111,6 +119,30 @@ async function checked(run, file, args, options, label) {
   return result;
 }
 
+async function packArtifact(pkg, run, destination, spec) {
+  await mkdir(destination, { recursive: true });
+  const args = ['pack'];
+  if (spec) args.push(spec);
+  args.push('--json', '--ignore-scripts', '--pack-destination', destination, `--registry=${PUBLIC_REGISTRY}`);
+  const result = await checked(run, 'npm', args, { cwd: pkg.root }, `${spec ? 'registry' : 'local'} pack for ${pkg.name}`);
+  const pack = parsePack(result.stdout, spec ?? pkg.name);
+  if (!pack.filename) return { ...pack, artifactPath: null };
+  const artifactPath = path.join(destination, pack.filename);
+  return { ...pack, artifactPath: await exists(artifactPath) ? artifactPath : null };
+}
+
+async function canonicalPackEqual(pkg, run) {
+  const artifactRoot = await mkdtemp(path.join(os.tmpdir(), 'prepare-pack-artifacts-'));
+  try {
+    const local = await packArtifact(pkg, run, path.join(artifactRoot, 'local'));
+    const baseline = await packArtifact(pkg, run, path.join(artifactRoot, 'baseline'), `${pkg.name}@${pkg.manifest.version}`);
+    if (!local.artifactPath || !baseline.artifactPath) return false;
+    return await gzipPayloadEqual(local.artifactPath, baseline.artifactPath);
+  } finally {
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+}
+
 async function inspectPackage(pkg, run) {
   const args = ['pack', '--dry-run', '--json', '--ignore-scripts', `--registry=${PUBLIC_REGISTRY}`];
   const localResult = await checked(run, 'npm', args, { cwd: pkg.root }, `local pack for ${pkg.name}`);
@@ -119,7 +151,9 @@ async function inspectPackage(pkg, run) {
   if (isExactNotFound(baselineResult)) return { ...pkg, originalVersion: pkg.manifest.version, changed: true, baseline: 'absent', pack: local };
   if (baselineResult.code !== 0) throw new Error(`registry baseline for ${pkg.name} failed (${baselineResult.code}): ${baselineResult.stderr.trim()}`);
   const baseline = parsePack(baselineResult.stdout, `${pkg.name}@${pkg.manifest.version}`);
-  return { ...pkg, originalVersion: pkg.manifest.version, changed: local.shasum !== baseline.shasum, baseline: baseline.shasum, pack: local };
+  const hashesMatch = typeof local.shasum === 'string' && local.shasum === baseline.shasum;
+  const changed = hashesMatch ? false : !(await canonicalPackEqual(pkg, run));
+  return { ...pkg, originalVersion: pkg.manifest.version, changed, baseline: baseline.shasum, pack: local };
 }
 
 async function assertTargetUnpublished(pkg, version, run) {
