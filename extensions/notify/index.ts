@@ -3,7 +3,7 @@
  *
  * Sends notifications when Pi agent is done and waiting for input.
  * Supports multiple channels:
- * - terminal notifications: OSC 777 and OSC 99
+ * - terminal notifications: OSC 777 and OSC 99, wrapped for tmux when needed
  * - desktop notifications: macOS Notification Center, Linux notify-send, Windows toast
  * - terminal bell
  * - sound playback
@@ -20,6 +20,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 type TerminalBackend = "auto" | "osc777" | "osc99" | "none";
+type TmuxPassthrough = "auto" | "always" | "never";
 type DesktopBackend = "auto" | "macos" | "linux" | "windows-toast" | "none";
 type SoundBackend = "auto" | "macos" | "linux" | "windows-beep" | "command" | "none";
 
@@ -41,6 +42,7 @@ interface NotifyConfig {
 	};
 	terminal: {
 		backend: TerminalBackend;
+		tmuxPassthrough: TmuxPassthrough;
 	};
 	desktop: {
 		backend: DesktopBackend;
@@ -68,6 +70,7 @@ const DEFAULT_CONFIG: NotifyConfig = {
 	},
 	terminal: {
 		backend: "auto",
+		tmuxPassthrough: "auto",
 	},
 	desktop: {
 		backend: "auto",
@@ -145,13 +148,47 @@ function windowsToastScript(title: string, body: string): string {
 	].join("; ");
 }
 
-function notifyOSC777(title: string, body: string): void {
-	process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
+/**
+ * Inside tmux, terminal notifications are written to tmux, not to the terminal
+ * that can act on them: tmux is the pane's emulator and parses the sequence
+ * itself. tmux has no OSC 777 or OSC 99 handler (checked in 3.7b, whose OSC
+ * dispatch covers 4/7/8/9;4/10/11/12/52/104/133) and does not forward OSC codes
+ * it does not recognise, so both backends are silently dropped.
+ *
+ * tmux's DCS passthrough asks it to write a payload to the outer terminal
+ * verbatim. Every ESC inside the payload must be doubled.
+ *
+ * Users must also allow passthrough in tmux.conf:
+ *
+ *   set -g allow-passthrough all
+ *
+ * `all` rather than `on`, because `on` only honours passthrough from panes that
+ * are currently visible - which drops exactly the notification that matters,
+ * the one fired while the user is looking at a different window. When
+ * passthrough is disabled entirely, the wrapped sequence is dropped just like
+ * the bare one, so wrapping is never a regression.
+ */
+function wrapForTmux(sequence: string): string {
+	return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
 }
 
-function notifyOSC99(title: string, body: string): void {
-	process.stdout.write(`\x1b]99;i=1:d=0;${title}\x1b\\`);
-	process.stdout.write(`\x1b]99;i=1:p=body;${body}\x1b\\`);
+function shouldWrapForTmux(config: NotifyConfig): boolean {
+	if (config.terminal.tmuxPassthrough === "never") return false;
+	if (config.terminal.tmuxPassthrough === "always") return true;
+	return Boolean(process.env.TMUX);
+}
+
+function writeTerminalSequence(sequence: string, wrap: boolean): void {
+	process.stdout.write(wrap ? wrapForTmux(sequence) : sequence);
+}
+
+function notifyOSC777(title: string, body: string, wrap: boolean): void {
+	writeTerminalSequence(`\x1b]777;notify;${title};${body}\x07`, wrap);
+}
+
+function notifyOSC99(title: string, body: string, wrap: boolean): void {
+	writeTerminalSequence(`\x1b]99;i=1:d=0;${title}\x1b\\`, wrap);
+	writeTerminalSequence(`\x1b]99;i=1:p=body;${body}\x1b\\`, wrap);
 }
 
 function ringBell(): void {
@@ -195,13 +232,18 @@ function detectSoundBackend(config: NotifyConfig): Exclude<SoundBackend, "auto">
 	return "none";
 }
 
-function sendTerminalNotification(title: string, body: string, backend: Exclude<TerminalBackend, "auto">): void {
+function sendTerminalNotification(
+	title: string,
+	body: string,
+	backend: Exclude<TerminalBackend, "auto">,
+	wrap: boolean,
+): void {
 	if (backend === "osc99") {
-		notifyOSC99(title, body);
+		notifyOSC99(title, body, wrap);
 		return;
 	}
 	if (backend === "osc777") {
-		notifyOSC777(title, body);
+		notifyOSC777(title, body, wrap);
 	}
 }
 
@@ -263,7 +305,12 @@ export default function notifyExtension(pi: ExtensionAPI) {
 		const tasks: Array<Promise<unknown>> = [];
 
 		if (config.channels.terminal) {
-			sendTerminalNotification(config.title, config.body, detectTerminalBackend(config));
+			sendTerminalNotification(
+				config.title,
+				config.body,
+				detectTerminalBackend(config),
+				shouldWrapForTmux(config),
+			);
 		}
 
 		if (config.channels.desktop) {

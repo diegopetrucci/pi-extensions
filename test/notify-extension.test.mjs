@@ -164,6 +164,7 @@ test('notify subscribes to settled runs instead of agent_end', async () => {
 test('notify uses trusted project config over global config and ignores untrusted project config', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', undefined);
 
   writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
     enabled: true,
@@ -359,6 +360,7 @@ test('notify skips none backends and swallows desktop and sound delivery failure
 test('notify auto-selects terminal backends and preserves OSC formatting', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', undefined);
 
   writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
     enabled: true,
@@ -408,6 +410,153 @@ test('notify auto-selects terminal backends and preserves OSC formatting', async
 
   assert.deepEqual(writes, [
     '\x1b]777;notify;Edge Title;Edge Body\x07',
+  ]);
+});
+
+test('notify wraps terminal notifications in tmux passthrough and leaves the bell bare', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: 'Tmux Title',
+    body: 'Tmux Body',
+    channels: {
+      terminal: true,
+      desktop: false,
+      bell: true,
+      sound: false,
+    },
+    terminal: {
+      backend: 'osc777',
+    },
+  });
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_settled');
+  assert.equal(typeof handler, 'function');
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, [
+    '\x1bPtmux;\x1b\x1b]777;notify;Tmux Title;Tmux Body\x07\x1b\\',
+    '\x07',
+  ]);
+});
+
+test('notify wraps both OSC 99 writes and doubles their ESC terminators inside tmux', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: 'Kitty Title',
+    body: 'Kitty Body',
+    channels: {
+      terminal: true,
+      desktop: false,
+      bell: false,
+      sound: false,
+    },
+    terminal: {
+      backend: 'osc99',
+    },
+  });
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_settled');
+  assert.equal(typeof handler, 'function');
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, [
+    '\x1bPtmux;\x1b\x1b]99;i=1:d=0;Kitty Title\x1b\x1b\\\x1b\\',
+    '\x1bPtmux;\x1b\x1b]99;i=1:p=body;Kitty Body\x1b\x1b\\\x1b\\',
+  ]);
+});
+
+test('notify honours tmuxPassthrough overrides in both directions', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  const configPath = path.join(agentDir, 'extensions', 'notify.json');
+  const baseConfig = {
+    enabled: true,
+    onlyWhenInteractive: false,
+    title: 'Override Title',
+    body: 'Override Body',
+    channels: {
+      terminal: true,
+      desktop: false,
+      bell: false,
+      sound: false,
+    },
+  };
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const handler = handlers.get('agent_settled');
+  assert.equal(typeof handler, 'function');
+
+  // never: stay bare even though tmux would swallow it, for setups that
+  // handle forwarding themselves.
+  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+  writeNotifyConfig(configPath, {
+    ...baseConfig,
+    terminal: { backend: 'osc777', tmuxPassthrough: 'never' },
+  });
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, ['\x1b]777;notify;Override Title;Override Body\x07']);
+
+  // always: wrap even without $TMUX, for multiplexers started outside the
+  // inherited environment.
+  writes.length = 0;
+  setEnvVar(t, 'TMUX', undefined);
+  writeNotifyConfig(configPath, {
+    ...baseConfig,
+    terminal: { backend: 'osc777', tmuxPassthrough: 'always' },
+  });
+
+  await handler({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  assert.deepEqual(writes, [
+    '\x1bPtmux;\x1b\x1b]777;notify;Override Title;Override Body\x07\x1b\\',
   ]);
 });
 
@@ -561,6 +710,7 @@ test('notify selects sound commands and falls back from canberra to paplay on li
 test('notify falls back to valid config and warns when project config JSON is invalid', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', undefined);
 
   writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
     enabled: true,

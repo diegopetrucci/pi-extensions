@@ -10,7 +10,8 @@
     "sound": false
   },
   "terminal": {
-    "backend": "auto"
+    "backend": "auto",
+    "tmuxPassthrough": "auto"
   },
   "desktop": {
     "backend": "auto"
