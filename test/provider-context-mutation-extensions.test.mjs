@@ -276,15 +276,15 @@ test('openai-fast injects the priority service tier only for eligible OAuth Code
     const sessionStart = getHandler(harness, 'session_start');
     const beforeProviderRequest = getHandler(harness, 'before_provider_request');
     const command = getCommand(harness, 'fast');
-    const model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' };
+    const model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' };
     const { ctx, statuses } = createFastContext({ model, isUsingOAuth: true });
 
     await sessionStart({}, ctx);
     await command.handler('', ctx);
-    const result = await beforeProviderRequest({ payload: { model: 'gpt-5.4', input: 'hello' } }, ctx);
+    const result = await beforeProviderRequest({ payload: { model: 'gpt-5.5', input: 'hello' } }, ctx);
 
     assert.deepEqual(result, {
-      model: 'gpt-5.4',
+      model: 'gpt-5.5',
       input: 'hello',
       service_tier: 'priority',
     });
@@ -420,23 +420,63 @@ test('claude-fast never overwrites an existing speed field', async () => {
     const model = {
       provider: 'anthropic',
       api: 'anthropic-messages',
-      id: 'claude-opus-4-7',
+      id: 'claude-opus-4-8',
       headers: {},
     };
     const { ctx, statuses } = createFastContext({ model, isUsingOAuth: true });
-    const payload = { model: 'claude-opus-4-7', input: 'hello', speed: 'slow' };
+    const payload = { model: 'claude-opus-4-8', input: 'hello', speed: 'slow' };
 
     await sessionStart({}, ctx);
     await command.handler('', ctx);
     const result = await beforeProviderRequest({ payload }, ctx);
 
     assert.equal(result, undefined);
-    assert.deepEqual(payload, { model: 'claude-opus-4-7', input: 'hello', speed: 'slow' });
+    assert.deepEqual(payload, { model: 'claude-opus-4-8', input: 'hello', speed: 'slow' });
     assert.deepEqual(readBetaHeader(model), [
       'claude-code-20250219',
       'oauth-2025-04-20',
       'fast-mode-2026-02-01',
     ]);
     assert.deepEqual(statuses.at(-1), { key: 'claude-fast', value: 'fast' });
+  });
+});
+
+test('openai-fast and claude-fast treat removed models as ineligible', async () => {
+  await withAgentDir(async () => {
+    const openAIFastExtension = await loadExtension('extensions/openai-fast/index.ts');
+    const openAIHarness = createExtensionHarness();
+    openAIFastExtension(openAIHarness.pi);
+    const openAISessionStart = getHandler(openAIHarness, 'session_start');
+    const openAIBeforeRequest = getHandler(openAIHarness, 'before_provider_request');
+    const openAICommand = getCommand(openAIHarness, 'fast');
+
+    const removedOpenAIModel = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' };
+    const { ctx: openAICtx } = createFastContext({ model: removedOpenAIModel, isUsingOAuth: true });
+    await openAISessionStart({}, openAICtx);
+    await openAICommand.handler('', openAICtx);
+    assert.equal(
+      await openAIBeforeRequest({ payload: { model: 'gpt-5.4', input: 'hello' } }, openAICtx),
+      undefined,
+      'gpt-5.4 must be ineligible after removal from the allowlist',
+    );
+
+    const claudeFastExtension = await loadExtension('extensions/claude-fast/index.ts');
+    const claudeHarness = createExtensionHarness();
+    claudeFastExtension(claudeHarness.pi);
+    const claudeSessionStart = getHandler(claudeHarness, 'session_start');
+    const claudeBeforeRequest = getHandler(claudeHarness, 'before_provider_request');
+    const claudeCommand = getCommand(claudeHarness, 'claude-fast');
+
+    for (const id of ['claude-opus-4-6', 'claude-opus-4-7']) {
+      const removedModel = { provider: 'anthropic', api: 'anthropic-messages', id, headers: {} };
+      const { ctx: claudeCtx } = createFastContext({ model: removedModel, isUsingOAuth: false });
+      await claudeSessionStart({}, claudeCtx);
+      await claudeCommand.handler('', claudeCtx);
+      assert.equal(
+        await claudeBeforeRequest({ payload: { model: id } }, claudeCtx),
+        undefined,
+        `${id} must be ineligible after removal from the allowlist`,
+      );
+    }
   });
 });

@@ -30,7 +30,7 @@ OpenAI Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
-- Model `gpt-5.4`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
+- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
 - ChatGPT OAuth/subscription auth, not API-key auth.
 - No existing `service_tier` field in the request payload.
 
@@ -38,7 +38,7 @@ Anthropic Fast mode requires all of the following:
 
 - Provider `anthropic`.
 - API `anthropic-messages`.
-- Model `claude-opus-4-6`, `claude-opus-4-7`, or `claude-opus-4-8`.
+- Model `claude-opus-4-8` or `claude-opus-5`.
 - No existing `speed` field in the request payload.
 
 Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.

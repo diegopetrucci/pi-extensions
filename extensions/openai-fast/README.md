@@ -1,6 +1,6 @@
 # openai-fast
 
-A pi extension that enables OpenAI Codex Fast mode for ChatGPT-auth GPT-5.4, GPT-5.5, and GPT-5.6 Codex variants (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`).
+A pi extension that enables OpenAI Codex Fast mode for ChatGPT-auth GPT-5.5 and GPT-5.6 Codex variants (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`).
 
 This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package. The collection uses the unified [`fast`](../fast) extension instead.
 
@@ -20,7 +20,7 @@ Fast mode is only injected when all of these are true:
 
 - The current provider is `openai-codex`.
 - The current API is `openai-codex-responses`.
-- The current model is `gpt-5.4`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
+- The current model is `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
 - The provider is using ChatGPT OAuth/subscription auth, not API-key auth.
 - The request payload does not already include `service_tier`.
 
