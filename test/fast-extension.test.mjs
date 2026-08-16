@@ -7,8 +7,8 @@ import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { streamSimple as streamAnthropicSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
 import { createExtensionHarness, loadExtension } from './extension-test-helpers.mjs';
 
-const OPENAI_MODELS = ['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
-const ANTHROPIC_MODELS = ['claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8'];
+const OPENAI_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5'];
 const ANTHROPIC_FAST_BETA = 'fast-mode-2026-02-01';
 
 function setupTempDirs(t) {
@@ -144,11 +144,11 @@ test('fast routes one enabled session across supported OpenAI and Anthropic mode
   assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: undefined });
   assert.equal(await beforeRequest({ payload: { model: 'gemini-test' } }, context.ctx), undefined);
 
-  context.ctx.model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' };
+  context.ctx.model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.6-sol' };
   await modelSelect({ model: context.ctx.model }, context.ctx);
   assert.deepEqual(
-    await beforeRequest({ payload: { model: 'gpt-5.4', input: 'again' } }, context.ctx),
-    { model: 'gpt-5.4', input: 'again', service_tier: 'priority' },
+    await beforeRequest({ payload: { model: 'gpt-5.6-sol', input: 'again' } }, context.ctx),
+    { model: 'gpt-5.6-sol', input: 'again', service_tier: 'priority' },
   );
 });
 
@@ -211,21 +211,21 @@ test('fast never overwrites provider fields or mutates malformed and mismatched 
   const beforeRequest = getHandler(harness, 'before_provider_request');
   const context = createContext({
     cwd: projectDir,
-    model: { provider: 'anthropic', api: 'anthropic-messages', id: 'claude-opus-4-7' },
+    model: { provider: 'anthropic', api: 'anthropic-messages', id: 'claude-opus-4-8' },
   });
   await sessionStart({}, context.ctx);
 
   assert.equal(await beforeRequest({ payload: ['bad'] }, context.ctx), undefined);
-  assert.equal(await beforeRequest({ payload: { model: 'claude-opus-4-8' } }, context.ctx), undefined);
-  const speedPayload = { model: 'claude-opus-4-7', speed: 'standard' };
+  assert.equal(await beforeRequest({ payload: { model: 'claude-opus-5' } }, context.ctx), undefined);
+  const speedPayload = { model: 'claude-opus-4-8', speed: 'standard' };
   assert.equal(await beforeRequest({ payload: speedPayload }, context.ctx), undefined);
-  assert.deepEqual(speedPayload, { model: 'claude-opus-4-7', speed: 'standard' });
+  assert.deepEqual(speedPayload, { model: 'claude-opus-4-8', speed: 'standard' });
 
-  context.ctx.model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' };
+  context.ctx.model = { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' };
   context.ctx.modelRegistry.isUsingOAuth = () => true;
-  const tierPayload = { model: 'gpt-5.4', service_tier: 'default' };
+  const tierPayload = { model: 'gpt-5.5', service_tier: 'default' };
   assert.equal(await beforeRequest({ payload: tierPayload }, context.ctx), undefined);
-  assert.deepEqual(tierPayload, { model: 'gpt-5.4', service_tier: 'default' });
+  assert.deepEqual(tierPayload, { model: 'gpt-5.5', service_tier: 'default' });
 });
 
 test('fast uses trusted project config, ignores untrusted project config, and does not read legacy configs', async (t) => {
@@ -270,7 +270,7 @@ test('fast only adds Anthropic request headers while active and merges beta valu
     model: {
       provider: 'anthropic',
       api: 'anthropic-messages',
-      id: 'claude-opus-4-6',
+      id: 'claude-opus-4-8',
       compat: { forceAdaptiveThinking: true },
     },
     oauth: false,
@@ -377,6 +377,46 @@ test('fast preserves required Anthropic provider betas in final API-key and OAut
     'oauth-2025-04-20',
     ANTHROPIC_FAST_BETA,
   ]);
+});
+
+test('fast treats removed models gpt-5.4, claude-opus-4-6, and claude-opus-4-7 as ineligible', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+  writeConfig(path.join(agentDir, 'extensions', 'fast.json'), { enabled: true });
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+
+  for (const id of ['gpt-5.4']) {
+    const context = createContext({
+      cwd: projectDir,
+      model: { provider: 'openai-codex', api: 'openai-codex-responses', id },
+      oauth: true,
+    });
+    await sessionStart({}, context.ctx);
+    assert.equal(
+      await beforeRequest({ payload: { model: id, input: 'hello' } }, context.ctx),
+      undefined,
+      `expected ${id} to be ineligible`,
+    );
+  }
+
+  for (const id of ['claude-opus-4-6', 'claude-opus-4-7']) {
+    const context = createContext({
+      cwd: projectDir,
+      model: { provider: 'anthropic', api: 'anthropic-messages', id },
+      oauth: false,
+    });
+    await sessionStart({}, context.ctx);
+    assert.equal(
+      await beforeRequest({ payload: { model: id } }, context.ctx),
+      undefined,
+      `expected ${id} to be ineligible`,
+    );
+  }
 });
 
 test('fast reports unsupported models, respects headless mode, and rejects command arguments', async (t) => {

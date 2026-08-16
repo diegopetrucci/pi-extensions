@@ -9,7 +9,7 @@ import { createExtensionHarness } from './extension-test-helpers.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLAUDE_FAST_BETA = 'fast-mode-2026-02-01';
-const SUPPORTED_OPENAI_FAST_MODELS = ['gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+const SUPPORTED_OPENAI_FAST_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 let importCounter = 0;
 
 async function loadFreshExtension(relativePath) {
@@ -478,7 +478,7 @@ test('claude-fast gates request mutation on payload shape, model match, and exis
   const model = {
     provider: 'anthropic',
     api: 'anthropic-messages',
-    id: 'claude-opus-4-7',
+    id: 'claude-opus-4-8',
     headers: { 'anthropic-beta': 'existing-beta' },
   };
   const fastContext = createFastContext({
@@ -497,19 +497,86 @@ test('claude-fast gates request mutation on payload shape, model match, and exis
   assert.deepEqual(readBetaHeader(model), ['existing-beta', CLAUDE_FAST_BETA]);
 
   assert.equal(
-    await beforeProviderRequest({ payload: { model: 'claude-opus-4-8', input: 'hello' } }, fastContext.ctx),
+    await beforeProviderRequest({ payload: { model: 'claude-opus-5', input: 'hello' } }, fastContext.ctx),
     undefined,
   );
   assert.deepEqual(fastContext.statuses.at(-1), { key: 'claude-fast', value: 'fast' });
   assert.deepEqual(readBetaHeader(model), ['existing-beta', CLAUDE_FAST_BETA]);
 
-  const existingSpeedPayload = { model: 'claude-opus-4-7', input: 'hello', speed: 'slow' };
+  const existingSpeedPayload = { model: 'claude-opus-4-8', input: 'hello', speed: 'slow' };
   assert.equal(await beforeProviderRequest({ payload: existingSpeedPayload }, fastContext.ctx), undefined);
   assert.deepEqual(existingSpeedPayload, {
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-4-8',
     input: 'hello',
     speed: 'slow',
   });
   assert.deepEqual(fastContext.statuses.at(-1), { key: 'claude-fast', value: 'fast' });
   assert.deepEqual(readBetaHeader(model), ['existing-beta', CLAUDE_FAST_BETA]);
+});
+
+test('openai-fast treats removed model gpt-5.4 as ineligible', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeConfig(path.join(agentDir, 'extensions', 'openai-fast.json'), {
+    enabled: true,
+    showStatus: true,
+  });
+
+  const openAIFastExtension = await loadFreshExtension('extensions/openai-fast/index.ts');
+  const harness = createExtensionHarness();
+  openAIFastExtension(harness.pi);
+
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeProviderRequest = getHandler(harness, 'before_provider_request');
+
+  const context = createFastContext({
+    cwd: projectDir,
+    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.4' },
+    trusted: true,
+    isUsingOAuth: true,
+  });
+
+  await sessionStart({}, context.ctx);
+  assert.deepEqual(context.statuses.at(-1), { key: 'openai-fast', value: undefined });
+  assert.equal(
+    await beforeProviderRequest({ payload: { model: 'gpt-5.4', input: 'hello' } }, context.ctx),
+    undefined,
+    'gpt-5.4 must be ineligible after removal from the allowlist',
+  );
+});
+
+test('claude-fast treats removed models claude-opus-4-6 and claude-opus-4-7 as ineligible', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeConfig(path.join(agentDir, 'extensions', 'claude-fast.json'), {
+    enabled: true,
+    showStatus: true,
+  });
+
+  const claudeFastExtension = await loadFreshExtension('extensions/claude-fast/index.ts');
+  const harness = createExtensionHarness();
+  claudeFastExtension(harness.pi);
+
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeProviderRequest = getHandler(harness, 'before_provider_request');
+
+  for (const id of ['claude-opus-4-6', 'claude-opus-4-7']) {
+    const model = { provider: 'anthropic', api: 'anthropic-messages', id, headers: {} };
+    const context = createFastContext({
+      cwd: projectDir,
+      model,
+      trusted: true,
+      isUsingOAuth: false,
+    });
+
+    await sessionStart({}, context.ctx);
+    assert.deepEqual(context.statuses.at(-1), { key: 'claude-fast', value: undefined });
+    assert.equal(
+      await beforeProviderRequest({ payload: { model: id } }, context.ctx),
+      undefined,
+      `${id} must be ineligible after removal from the allowlist`,
+    );
+  }
 });
