@@ -19,7 +19,7 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 | `github-copilot` | `claude-opus-5` | Then Claude Fable, older Opus models, GPT-5.x, Gemini 3.1 Pro Preview and Gemini 3.5 Flash, then Claude Sonnet 5 before Claude Sonnet 4, and Kimi K2.7 Code. |
 | `google` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.1 Pro, Gemini 3.5 Flash, Gemini 2.5 Pro/Flash, and Gemini 3.1/2.5 Flash Lite variants. |
 | `google-vertex` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.5 Flash, Gemini 3 Flash, and Gemini 2.5 Flash variants. |
-| `groq` | `openai/gpt-oss-120b` | Then GPT OSS 20B and Llama fallbacks. |
+| `groq` | `openai/gpt-oss-120b` | Then Llama 3.3 70B, then GPT OSS 20B. |
 | `huggingface` | `zai-org/GLM-5.1` | Then DeepSeek/Kimi/MiniMax/Qwen reasoning models. |
 | `kimi-coding` | `k3` | Then Kimi For Coding / HighSpeed. |
 | `minimax` | `MiniMax-M3` | Then MiniMax M2.7 HighSpeed / regular M2.7. |

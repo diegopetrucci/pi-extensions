@@ -36,6 +36,7 @@
 - [x] Corrected `prepare-release` dry-run selected the full 28-package set ending with `@diegopetrucci/pi-extensions@0.1.65`.
 - [x] `npm ci` completed; npm reported 0 vulnerabilities, a deprecated `node-domexception` warning, and five install scripts not yet covered by `allowScripts`.
 - [x] `npm run preflight:install-state` passed with 243 installed packages and 28 local package entries checked.
+- [ ] run the manual smoke checklist in `docs/smoke-checklist-pi-0.84.2.md` with Pi 0.84.2 after `npm run preflight:install-state`
 - [x] `npm run ci` passed with 583/583 tests (including typecheck and the full test suite). Re-confirmed after peg-jloj ladder and doc corrections; tally unchanged.
 - [x] Release-focused tests passed with 34/34 tests: `prepare-release` (13 tests), `publish-release` (16 tests), publish safety (4 tests), and tarball runtime smoke (1 test).
 - [x] Final `prepare-release` dry-run using `/tmp/release-input-v0.1.65.json` selected exactly the same 28-package set as the managed `prepare-release:packages` marker — the marker is byte-identical to the dry-run selection. All four `docs/*-v0.1.65.md` documents were preserved with their prose intact.
@@ -61,5 +62,11 @@
 
 - [ ] dispatch the trusted `publish.yml` workflow from `main` with the exact release tag in both confirmation fields
 - [ ] inspect the verified package plan and approve the `npm-release` environment deployment
+
+## Post-publish validation
+
+- [ ] after the human confirms publishing is complete, wait 5 minutes before checking npm registry/package pages or running install validation
+- [ ] verify npm registry/package pages show the expected versions for all 28 target packages
+- [ ] run install validation after npm propagation
 
 <!-- prepare-release:packages [["@diegopetrucci/pi-agent-workflow-audit","0.1.10"],["@diegopetrucci/pi-annotate-git-diff","0.1.10"],["@diegopetrucci/pi-annotate-last-message","0.1.8"],["@diegopetrucci/pi-brrr","0.1.13"],["@diegopetrucci/pi-claude-fast","0.1.14"],["@diegopetrucci/pi-code-reviewer","0.1.8"],["@diegopetrucci/pi-confirm-destructive","0.1.11"],["@diegopetrucci/pi-context-cap","0.1.10"],["@diegopetrucci/pi-context-inspector","0.1.12"],["@diegopetrucci/pi-contrarian","0.1.10"],["@diegopetrucci/pi-dirty-repo-guard","0.1.10"],["@diegopetrucci/pi-fast","0.1.1"],["@diegopetrucci/pi-git-footer","0.1.9"],["@diegopetrucci/pi-gnosis","0.1.10"],["@diegopetrucci/pi-illustrations-to-explain-things","0.1.8"],["@diegopetrucci/pi-inline-bash","0.1.10"],["@diegopetrucci/pi-librarian","0.1.15"],["@diegopetrucci/pi-minimal-footer","0.1.19"],["@diegopetrucci/pi-notify","0.1.17"],["@diegopetrucci/pi-openai-fast","0.1.16"],["@diegopetrucci/pi-oracle","0.1.25"],["@diegopetrucci/pi-permission-gate","0.1.13"],["@diegopetrucci/pi-quiet-tools","0.1.11"],["@diegopetrucci/pi-review","0.1.13"],["@diegopetrucci/pi-todo","0.1.10"],["@diegopetrucci/pi-triage-comments","0.1.11"],["pi-dynamic-context-pruning","0.1.7"],["@diegopetrucci/pi-extensions","0.1.65"]] -->
