@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-annotate-git-diff",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "A standalone pi extension that adds /annotate-git-diff, a native Glimpse UI for annotating git diffs and sending feedback to the editor.",
   "keywords": [
     "pi-package",
@@ -22,6 +22,7 @@
     "git.ts",
     "prompt.ts",
     "quiet-glimpse.ts",
+    "review-server.ts",
     "types.ts",
     "ui.ts",
     "watch.ts",
