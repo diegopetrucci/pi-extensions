@@ -38,6 +38,7 @@ const commandResolutionPowerShellCommands = new Set([
 	"sal",
 	"set-alias",
 ]);
+const commandDefinitionPowerShellKeywords = new Set(["filter", "function", "workflow"]);
 const providerMutationPowerShellCommands = new Set([
 	"ac",
 	"add-content",
@@ -156,10 +157,17 @@ try {
 	            )
 	        }, $true)
 	    ).Count
+	    $functionDefinitionCount = @(
+	        $ast.FindAll({
+	            param($node)
+	            $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+	        }, $true)
+	    ).Count
 	    $payload = [pscustomobject]@{
 	        parseErrors = @($parseErrors | ForEach-Object { $_.Message })
 	        commands = $commands
 	        dynamicInvocationCount = $dynamicInvocationCount
+	        functionDefinitionCount = $functionDefinitionCount
 	    }
     [Console]::Out.WriteLine('${POWERSHELL_AST_MARKER}' + ($payload | ConvertTo-Json -Depth 8 -Compress))
 } catch {
@@ -787,6 +795,9 @@ function analyzeLexicalSegment(tokens: PowerShellLexToken[]): PowerShellSafetyAn
 	if (commandResolutionPowerShellCommands.has(commandName)) {
 		return risky(`PowerShell command-resolution mutation through ${commandName}`);
 	}
+	if (commandDefinitionPowerShellKeywords.has(commandName)) {
+		return risky(`PowerShell command-resolution mutation through ${commandName} definition`);
+	}
 	if (
 		providerMutationPowerShellCommands.has(commandName) &&
 		(containsCommandProviderPath(tokens.slice(start.index + 1).map((token) => token.text)) ||
@@ -955,7 +966,9 @@ export function analyzePowerShellAstPayload(payload: unknown): PowerShellSafetyA
 		!Array.isArray(payload.parseErrors) ||
 		!Array.isArray(payload.commands) ||
 		!Number.isSafeInteger(payload.dynamicInvocationCount) ||
-		(payload.dynamicInvocationCount as number) < 0
+		(payload.dynamicInvocationCount as number) < 0 ||
+		!Number.isSafeInteger(payload.functionDefinitionCount) ||
+		(payload.functionDefinitionCount as number) < 0
 	) {
 		return risky("malformed PowerShell AST analyzer response");
 	}
@@ -965,6 +978,9 @@ export function analyzePowerShellAstPayload(payload: unknown): PowerShellSafetyA
 	if (payload.parseErrors.length > 0) return risky("PowerShell parser reported invalid syntax");
 	if ((payload.dynamicInvocationCount as number) > 0) {
 		return risky("dynamic PowerShell invocation requires confirmation");
+	}
+	if ((payload.functionDefinitionCount as number) > 0) {
+		return risky("PowerShell function or filter definition changes command resolution");
 	}
 
 	const commands = payload.commands.map(parseAstCommand);

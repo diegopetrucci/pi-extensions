@@ -118,23 +118,25 @@ const reviewData = {
 test('review HTML preserves replacement tokens in data and pinned runtime assets', async () => {
   const replacementTokens = "literal:$&|prefix:$`|suffix:$'";
   const escapedJsonTokens = "literal:$\\u0026|prefix:$`|suffix:$'";
+  const placeholderTokens = '__INLINE_ASSET_CONFIG__|__INLINE_TAILWIND_JS__|__INLINE_MONACO_LOADER_JS__|__INLINE_JS__';
+  const runtimeFixture = `${replacementTokens}|${placeholderTokens}`;
   const actualTailwind = await readFile(path.join(repoRoot, 'node_modules/@tailwindcss/browser/dist/index.global.js'), 'utf8');
   const actualMonacoLoader = await readFile(path.join(repoRoot, 'node_modules/monaco-editor/min/vs/loader.js'), 'utf8');
   assert.ok(actualTailwind.includes('$`'), 'the pinned Tailwind bundle should retain the replacement-token regression fixture');
 
   const html = buildReviewHtml(
-    { ...reviewData, repoRoot: `/repo/${replacementTokens}` },
+    { ...reviewData, repoRoot: `/repo/${replacementTokens}/${placeholderTokens}` },
     {
-      tailwindBrowserJs: `${replacementTokens}\n${actualTailwind}`,
-      monacoLoaderJs: `${replacementTokens}\n${actualMonacoLoader}`,
-      monacoVsBaseUrl: `http://127.0.0.1:1234/token/${replacementTokens}`,
+      tailwindBrowserJs: `${runtimeFixture}\n${actualTailwind}`,
+      monacoLoaderJs: `${runtimeFixture}\n${actualMonacoLoader}`,
+      monacoVsBaseUrl: `http://127.0.0.1:1234/token/${replacementTokens}/${placeholderTokens}`,
     },
   );
 
-  assert.ok(html.includes(`${replacementTokens}\n${actualTailwind}`));
-  assert.ok(html.includes(`${replacementTokens}\n${actualMonacoLoader}`));
-  assert.ok(html.includes(`/repo/${escapedJsonTokens}`));
-  assert.ok(html.includes(`http://127.0.0.1:1234/token/${escapedJsonTokens}`));
+  assert.ok(html.includes(`${runtimeFixture}\n${actualTailwind}`));
+  assert.ok(html.includes(`${runtimeFixture}\n${actualMonacoLoader}`));
+  assert.ok(html.includes(`/repo/${escapedJsonTokens}/${placeholderTokens}`));
+  assert.ok(html.includes(`http://127.0.0.1:1234/token/${escapedJsonTokens}/${placeholderTokens}`));
 });
 
 test('review asset discovery walks from extension packages to independently installed runtime dependencies', async () => {

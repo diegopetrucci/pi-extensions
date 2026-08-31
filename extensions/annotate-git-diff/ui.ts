@@ -30,10 +30,18 @@ export function buildReviewHtml(data: ReviewWindowData, assets: ReviewUiAssets):
 			bootstrapError: null,
 		}),
 	);
-	return templateHtml
-		.replace('"__INLINE_DATA__"', () => payload)
-		.replace("__INLINE_ASSET_CONFIG__", () => assetConfig)
-		.replace("__INLINE_TAILWIND_JS__", () => escapeInlineScriptSource(assets.tailwindBrowserJs))
-		.replace("__INLINE_MONACO_LOADER_JS__", () => escapeInlineScriptSource(assets.monacoLoaderJs))
-		.replace("__INLINE_JS__", () => appJs);
+	const replacements = new Map([
+		['"__INLINE_DATA__"', payload],
+		["__INLINE_ASSET_CONFIG__", assetConfig],
+		["__INLINE_TAILWIND_JS__", escapeInlineScriptSource(assets.tailwindBrowserJs)],
+		["__INLINE_MONACO_LOADER_JS__", escapeInlineScriptSource(assets.monacoLoaderJs)],
+		["__INLINE_JS__", appJs],
+	]);
+
+	// Replace the original template in one pass so marker-like repository data
+	// or runtime source is never scanned as another template placeholder.
+	return templateHtml.replace(
+		/"__INLINE_DATA__"|__INLINE_ASSET_CONFIG__|__INLINE_TAILWIND_JS__|__INLINE_MONACO_LOADER_JS__|__INLINE_JS__/g,
+		(marker) => replacements.get(marker) ?? marker,
+	);
 }

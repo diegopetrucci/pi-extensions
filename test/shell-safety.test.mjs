@@ -365,6 +365,8 @@ test('PowerShell fallback analysis covers native syntax and keeps quoted/comment
     "Remove-Item 'Alias:zap'; zap -Recurse -Force 'C:\\temp\\example'",
     "Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location; zap -Recurse -Force 'C:\\temp\\example'",
     "Set-Location Function:; Set-Content zap \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
+    "function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf",
+    "filter zap { Write-Output ok }; zap",
     "Remove-Module commands; zap -Recurse -Force 'C:\\temp\\example'",
     "Import-Module '.\\commands.psm1'; zap -Recurse -Force 'C:\\temp\\example'",
     "& '.\\cleanup.ps1'",
@@ -422,6 +424,7 @@ test('PowerShell AST analysis fails closed and classifies parsed command metadat
   const destructive = analyzePowerShellAstPayload({
     parseErrors: [],
     dynamicInvocationCount: 0,
+    functionDefinitionCount: 0,
     commands: [
       command('Microsoft.PowerShell.Management\\Remove-Item', [
         element('Microsoft.PowerShell.Management\\Remove-Item'),
@@ -433,6 +436,7 @@ test('PowerShell AST analysis fails closed and classifies parsed command metadat
   const whatIf = analyzePowerShellAstPayload({
     parseErrors: [],
     dynamicInvocationCount: 0,
+    functionDefinitionCount: 0,
     commands: [
       command('Remove-Item', [
         element('Remove-Item'),
@@ -445,16 +449,25 @@ test('PowerShell AST analysis fails closed and classifies parsed command metadat
   const quotedDisplay = analyzePowerShellAstPayload({
     parseErrors: [],
     dynamicInvocationCount: 0,
+    functionDefinitionCount: 0,
     commands: [command('Write-Output', [element('Write-Output'), element("'sudo chmod 777'")])],
   });
   const aliasMutation = analyzePowerShellAstPayload({
     parseErrors: [],
     dynamicInvocationCount: 0,
+    functionDefinitionCount: 0,
     commands: [command('Set-Alias', [element('Set-Alias'), element('zap'), element('Remove-Item')])],
   });
   const dynamicMemberInvocation = analyzePowerShellAstPayload({
     parseErrors: [],
     dynamicInvocationCount: 1,
+    functionDefinitionCount: 0,
+    commands: [],
+  });
+  const functionDefinition = analyzePowerShellAstPayload({
+    parseErrors: [],
+    dynamicInvocationCount: 0,
+    functionDefinitionCount: 1,
     commands: [],
   });
 
@@ -463,19 +476,22 @@ test('PowerShell AST analysis fails closed and classifies parsed command metadat
   assert.equal(quotedDisplay.risky, false);
   assert.equal(aliasMutation.risky, true);
   assert.equal(dynamicMemberInvocation.risky, true);
-  assert.equal(analyzePowerShellAstPayload({ parseErrors: ['Unexpected token'], commands: [], dynamicInvocationCount: 0 }).risky, true);
-  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [command(null, [])], dynamicInvocationCount: 0 }).risky, true);
+  assert.equal(functionDefinition.risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: ['Unexpected token'], commands: [], dynamicInvocationCount: 0, functionDefinitionCount: 0 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [command(null, [])], dynamicInvocationCount: 0, functionDefinitionCount: 0 }).risky, true);
   assert.equal(analyzePowerShellAstPayload({ analyzerError: 'parser unavailable' }).risky, true);
-  assert.equal(analyzePowerShellAstPayload({ analyzerError: true, parseErrors: [], commands: [], dynamicInvocationCount: 0 }).risky, true);
-  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [{ name: 'Get-Date' }], dynamicInvocationCount: 0 }).risky, true);
-  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [command('Get-Date', [])], dynamicInvocationCount: 0 }).risky, true);
-  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [], dynamicInvocationCount: -1 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ analyzerError: true, parseErrors: [], commands: [], dynamicInvocationCount: 0, functionDefinitionCount: 0 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [{ name: 'Get-Date' }], dynamicInvocationCount: 0, functionDefinitionCount: 0 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [command('Get-Date', [])], dynamicInvocationCount: 0, functionDefinitionCount: 0 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [], dynamicInvocationCount: -1, functionDefinitionCount: 0 }).risky, true);
+  assert.equal(analyzePowerShellAstPayload({ parseErrors: [], commands: [], dynamicInvocationCount: 0, functionDefinitionCount: -1 }).risky, true);
 });
 
 test('PowerShell AST output parsing uses the final marked payload and rejects malformed output', () => {
   const safePayload = JSON.stringify({
     parseErrors: [],
     dynamicInvocationCount: 0,
+    functionDefinitionCount: 0,
     commands: [{
       name: 'Write-Output',
       invocationOperator: 'Unknown',
@@ -517,6 +533,8 @@ test('native Windows PowerShell parsers classify AST-only and fallback-sensitive
     ["Remove-Item 'Alias:zap'", true],
     ["Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location", true],
     ["Set-Location Function:; Set-Content zap 'Write-Output ok'", true],
+    ["function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf", true],
+    ["filter zap { Write-Output ok }; zap", true],
     ["Remove-Module commands", true],
     ["start powershell.exe -ArgumentList '-Command Write-Output ok'", true],
     ["Start-ThreadJob -ScriptBlock ([scriptblock]'Write-Output ok')", true],
@@ -604,6 +622,8 @@ test('permission-gate blocks recursive forced PowerShell removals and wrappers w
     "Remove-Item 'Alias:zap'; zap -Recurse -Force 'C:\\temp\\example'",
     "Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location; zap -Recurse -Force 'C:\\temp\\example'",
     "Set-Location Function:; Set-Content zap \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
+    "function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf",
+    "filter zap { Write-Output ok }; zap",
     "Remove-Module commands; zap -Recurse -Force 'C:\\temp\\example'",
     "Import-Module '.\\commands.psm1'; zap -Recurse -Force 'C:\\temp\\example'",
     "& '.\\cleanup.ps1'",
