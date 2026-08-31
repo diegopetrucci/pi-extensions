@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-fast",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A pi extension that enables Fast mode for supported OpenAI Codex and Anthropic Claude models based on the currently selected model.",
   "keywords": [
     "pi-package",

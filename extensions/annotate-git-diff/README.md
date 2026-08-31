@@ -29,6 +29,8 @@ Run `/annotate-git-diff` inside a git repository. The command opens a native rev
 
 Submitting feedback does not auto-apply code changes. The extension appends a structured prompt to the current editor buffer so you can send that feedback back to the active agent.
 
+The review UI does not fetch assets from a CDN. While the window is open, the extension serves its packaged Monaco graph from an ephemeral, tokenized HTTP server bound only to `127.0.0.1`; closing, cancelling, submitting, startup failure, or Pi shutdown stops that server.
+
 ## Requirements
 
 - Run inside a git repository.
@@ -41,3 +43,4 @@ Submitting feedback does not auto-apply code changes. The extension appends a st
 - `Review failed: Not inside a git repository.` → change into a git repo and rerun `/annotate-git-diff`.
 - `No reviewable files found.` → make or fetch reviewable changes, then rerun.
 - `Review failed: Glimpse host not found ...` → the native window runtime is unavailable; reinstall/update the package and rerun from a machine/session that can open native windows.
+- `Review failed: Unable to locate packaged ... runtime` → reinstall/update the package so its declared Monaco and Tailwind dependencies are present, then rerun.

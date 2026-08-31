@@ -39,7 +39,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 - [`confirm-destructive`](./extensions/confirm-destructive): Confirms before destructive session actions like clear, switch, and fork.
 - [`dirty-repo-guard`](./extensions/dirty-repo-guard): Prompts before new sessions, session switches, or forks when the current git repo has uncommitted changes.
-- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash commands and protected `write`/`edit` targets like `.git`, `node_modules`, and secret-bearing `.env` files.
+- [`permission-gate`](./extensions/permission-gate): Prompts for confirmation before dangerous bash/PowerShell commands and protected `write`/`edit` targets like `.git`, `node_modules`, and secret-bearing `.env` files.
 
 ### Quality of life
 

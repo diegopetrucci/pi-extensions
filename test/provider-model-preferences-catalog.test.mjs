@@ -51,6 +51,32 @@ test('hardcoded provider preference patterns still match the pinned built-in cat
   }
 });
 
+test('selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curated preferences', () => {
+  const preferences = extractConst('extensions/oracle/index.ts', 'PROVIDER_MODEL_PREFERENCES');
+  const expectedPatterns = {
+    'amazon-bedrock': ['openai.gpt-5.6-sol', 'xai.grok-4.6'],
+    baseten: ['zai-org/GLM-5.3'],
+    'cloudflare-ai-gateway': [
+      'workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813',
+      'workers-ai/@cf/zai-org/glm-5.3',
+    ],
+    'cloudflare-workers-ai': [
+      '@cf/deepseek-ai/deepseek-v4-pro-0813',
+      '@cf/zai-org/glm-5.3',
+    ],
+    nvidia: ['moonshotai/kimi-k3', 'deepseek-ai/deepseek-v4-pro-0813'],
+    openrouter: ['z-ai/glm-5.3'],
+    together: ['zai-org/GLM-5.3-Flash'],
+    'vercel-ai-gateway': ['zai/glm-5.3'],
+  };
+
+  for (const [provider, patterns] of Object.entries(expectedPatterns)) {
+    for (const pattern of patterns) {
+      assert.ok(preferences[provider].includes(pattern), `${provider} omitted pinned frontier pattern ${pattern}`);
+    }
+  }
+});
+
 test('cross-provider frontier preference lists stay in sync where roles intentionally share them', () => {
   for (const fixture of PROVIDER_POLICY_CONTRACT.catalogParity.frontierPreferenceConstants) {
     const source = extractConst(fixture.source.file, fixture.source.constName);

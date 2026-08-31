@@ -22,6 +22,16 @@ function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function createMockWindow(name = 'window') {
   class MockWindow extends EventEmitter {
     constructor() {
@@ -29,6 +39,9 @@ function createMockWindow(name = 'window') {
       this.name = name;
       this.sendCalls = [];
       this.closeCalls = 0;
+      this.closed = false;
+      this.failure = null;
+      this.on('error', () => {});
     }
 
     send(js) {
@@ -123,6 +136,7 @@ function createAnnotateLastMessageState(overrides = {}) {
   return {
     windows: [],
     openCalls: [],
+    openGate: null,
     composeCalls: [],
     buildHtmlCalls: [],
     findCalls: 0,
@@ -167,7 +181,9 @@ function createAnnotateGitDiffState(overrides = {}) {
   return {
     windows: [],
     openCalls: [],
-    buildHtmlCalls: [],
+    startUiServerCalls: [],
+    uiServers: [],
+    disposedUiServers: 0,
     composeCalls: [],
     clipboardReads: [],
     clipboardWrites: [],
@@ -202,6 +218,7 @@ function annotateLastMessageStubs(stateKey) {
         state.openCalls.push({ html, options });
         const window = state.windows.shift();
         if (!window) throw new Error('No mock window queued');
+        if (state.openGate) await state.openGate;
         return window;
       }
     `,
@@ -287,11 +304,35 @@ function annotateGitDiffStubs(stateKey) {
         return window;
       }
     `,
-    './ui.js': `
+    './review-server.js': `
       const state = globalThis[${JSON.stringify(stateKey)}];
-      export function buildReviewHtml(data) {
-        state.buildHtmlCalls.push(data);
-        return state.htmlResult;
+      export async function startReviewUiServer(data) {
+        state.startUiServerCalls.push(data);
+        if (state.startUiServerError) throw state.startUiServerError;
+        if (state.startUiServerGate) await state.startUiServerGate;
+        const uiServer = {
+          failure: null,
+          html: state.htmlResult,
+          disposed: false,
+          errorListeners: new Set(),
+          onError(listener) {
+            uiServer.errorListeners.add(listener);
+            return () => uiServer.errorListeners.delete(listener);
+          },
+          fail(error) {
+            if (uiServer.disposed || uiServer.failure) return;
+            uiServer.failure = error;
+            for (const listener of uiServer.errorListeners) listener(error);
+          },
+          dispose() {
+            if (uiServer.disposed) return;
+            uiServer.disposed = true;
+            uiServer.errorListeners.clear();
+            state.disposedUiServers += 1;
+          },
+        };
+        state.uiServers.push(uiServer);
+        return uiServer;
       }
     `,
     './watch.js': `
@@ -383,6 +424,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     assert.equal(state.openCalls.length, 2);
     secondWindow.emit('message', { type: 'cancel' });
     await flushAsyncWork();
+    assert.equal(secondWindow.closeCalls, 1);
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native annotation window.', level: 'info' },
       { message: 'Annotation cancelled.', level: 'info' },
@@ -412,6 +454,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     });
     await flushAsyncWork();
 
+    assert.equal(submitWindow.closeCalls, 1);
     assert.deepEqual(pasted, ['\n\nANNOTATE LAST MESSAGE PROMPT']);
     assert.deepEqual(state.composeCalls, [
       {
@@ -438,6 +481,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     });
     await flushAsyncWork();
 
+    assert.equal(blankWindow.closeCalls, 1);
     assert.deepEqual(pasted, ['\n\nANNOTATE LAST MESSAGE PROMPT']);
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native annotation window.', level: 'info' },
@@ -480,6 +524,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     runtimeWindow.emit('error', new Error('native window crashed'));
     await flushAsyncWork();
 
+    assert.equal(runtimeWindow.closeCalls, 1);
     assert.deepEqual(pasted, []);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Annotation failed: native window crashed', level: 'error' },
@@ -489,6 +534,37 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     await handler({}, ctx);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Annotation failed: No mock window queued', level: 'error' },
+    ]);
+  });
+
+  await t.test('blocks concurrent native startup and closes a window that opens after shutdown', async () => {
+    const gate = createDeferred();
+    const startupWindow = createMockWindow('delayed-startup-window');
+    const state = createAnnotateLastMessageState({ windows: [startupWindow], openGate: gate.promise });
+    const extension = await loadAnnotateLastMessageExtension(state);
+    const { pi, commands, handlers } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-last-message').handler;
+    const shutdownHandler = handlers.get('session_shutdown');
+    const { ctx, notifications, pasted } = createCommandContext();
+    const opening = handler({}, ctx);
+    await flushAsyncWork();
+
+    await handler({}, ctx);
+    assert.equal(state.openCalls.length, 1);
+    assert.deepEqual(notifications, [
+      { message: 'A last-message annotation window is already open.', level: 'warning' },
+    ]);
+
+    await shutdownHandler({}, ctx);
+    gate.resolve();
+    await opening;
+
+    assert.equal(startupWindow.closeCalls, 1);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(notifications, [
+      { message: 'A last-message annotation window is already open.', level: 'warning' },
     ]);
   });
 });
@@ -590,6 +666,8 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     await shutdownHandler({}, ctx);
     assert.equal(firstReviewWindow.closeCalls, 1);
     assert.equal(state.disposedWatchers, 1);
+    assert.equal(state.disposedUiServers, 1);
+    assert.equal(state.uiServers[0].disposed, true);
     assert.equal(state.watchers[0].disposed, true);
 
     firstReviewWindow.emit('message', {
@@ -605,6 +683,9 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     assert.equal(state.openCalls.length, 2);
     secondReviewWindow.emit('message', { type: 'cancel' });
     await flushAsyncWork();
+    assert.equal(secondReviewWindow.closeCalls, 1);
+    assert.equal(state.disposedUiServers, 2);
+    assert.equal(state.uiServers[1].disposed, true);
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native review window.', level: 'info' },
       { message: 'Review cancelled.', level: 'info' },
@@ -758,7 +839,9 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     });
     await flushAsyncWork();
 
+    assert.equal(helperWindow.closeCalls, 1);
     assert.deepEqual(pasted, ['\n\nANNOTATE GIT DIFF PROMPT']);
+    assert.equal(state.disposedUiServers, 1);
     assert.deepEqual(state.composeCalls, [
       {
         files: [...initialReviewData.files, ...refreshedReviewData.files],
@@ -781,12 +864,100 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     });
     await flushAsyncWork();
 
+    assert.equal(blankSubmitWindow.closeCalls, 1);
     assert.deepEqual(pasted, ['\n\nANNOTATE GIT DIFF PROMPT']);
+    assert.equal(state.disposedUiServers, 2);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Opened native review window.', level: 'info' },
     ]);
 
     await shutdownHandler({}, ctx);
+  });
+
+  await t.test('cleans up local UI servers when native startup fails and reports asset startup errors', async () => {
+    const state = createAnnotateGitDiffState();
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx, notifications } = createCommandContext();
+
+    await handler({}, ctx);
+    assert.deepEqual(notifications, [
+      { message: 'Review failed: No mock window queued', level: 'error' },
+    ]);
+    assert.equal(state.uiServers.length, 1);
+    assert.equal(state.uiServers[0].disposed, true);
+    assert.equal(state.disposedUiServers, 1);
+    assert.equal(state.watchers.length, 0);
+
+    state.getReviewWindowDataResults.push(state.startUiServerCalls[0]);
+    state.startUiServerError = new Error('packaged Monaco assets unavailable');
+    await handler({}, ctx);
+
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Review failed: packaged Monaco assets unavailable', level: 'error' },
+    ]);
+    assert.equal(state.uiServers.length, 1);
+    assert.equal(state.disposedUiServers, 1);
+    assert.equal(state.watchers.length, 0);
+  });
+
+  await t.test('blocks concurrent startup and disposes a server that finishes opening during shutdown', async () => {
+    const gate = createDeferred();
+    const state = createAnnotateGitDiffState({ startUiServerGate: gate.promise });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const shutdownHandler = handlers.get('session_shutdown');
+    const { ctx, notifications } = createCommandContext();
+
+    const opening = handler({}, ctx);
+    await flushAsyncWork();
+    await handler({}, ctx);
+    assert.deepEqual(notifications, [
+      { message: 'A review window is already open.', level: 'warning' },
+    ]);
+    assert.equal(state.startUiServerCalls.length, 1);
+
+    await shutdownHandler({}, ctx);
+    gate.resolve();
+    await opening;
+
+    assert.equal(state.openCalls.length, 0);
+    assert.equal(state.uiServers.length, 1);
+    assert.equal(state.uiServers[0].disposed, true);
+    assert.equal(state.disposedUiServers, 1);
+    assert.equal(state.watchers.length, 0);
+    assert.deepEqual(notifications, [
+      { message: 'A review window is already open.', level: 'warning' },
+    ]);
+  });
+
+  await t.test('closes the native window and watcher when the local UI server fails after startup', async () => {
+    const window = createMockWindow('server-failure-window');
+    const state = createAnnotateGitDiffState({ windows: [window] });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx, notifications, pasted } = createCommandContext();
+    await handler({}, ctx);
+
+    state.uiServers[0].fail(new Error('loopback listener failed'));
+    await flushAsyncWork();
+
+    assert.equal(window.closeCalls, 1);
+    assert.equal(state.uiServers[0].disposed, true);
+    assert.equal(state.watchers[0].disposed, true);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(notifications.slice(-1), [
+      { message: 'Review failed: loopback listener failed', level: 'error' },
+    ]);
   });
 
   await t.test('surfaces repository, request, watcher, and runtime errors while cleaning up watchers', async () => {
@@ -903,8 +1074,10 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     failingReviewWindow.emit('error', new Error('native host crashed'));
     await flushAsyncWork();
 
+    assert.equal(failingReviewWindow.closeCalls, 1);
     assert.deepEqual(pasted, []);
     assert.equal(state.disposedWatchers, 1);
+    assert.equal(state.disposedUiServers, 1);
     assert.equal(state.watchers[0].disposed, true);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Review failed: native host crashed', level: 'error' },

@@ -46,3 +46,28 @@ jobs:
 
       - name: Run validation
         run: npm run ci
+
+  powershell-safety:
+    name: PowerShell safety (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check installed package state
+        run: npm run preflight:install-state
+
+      - name: Exercise permission gate with the native PowerShell parser
+        run: node --test test/shell-safety.test.mjs
+        env:
+          PI_REQUIRE_POWERSHELL_7: "1"

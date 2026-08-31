@@ -18,8 +18,8 @@ const packageBudgets = [
     args: ['pack', '--dry-run', '--json'],
     limits: {
       size: 1_350_000,
-      // Bounded headroom for intentional DCP and unified Fast runtime/documentation growth.
-      unpackedSize: 2_175_000,
+      // Bounded headroom for intentional DCP/Fast growth and Pi 0.84 safety/catalog support.
+      unpackedSize: 2_225_000,
     },
   },
   {

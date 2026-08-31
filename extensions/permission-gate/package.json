@@ -1,12 +1,13 @@
 {
   "name": "@diegopetrucci/pi-permission-gate",
-  "version": "0.1.13",
-  "description": "A pi extension that prompts before dangerous bash commands and protected file writes.",
+  "version": "0.1.14",
+  "description": "A pi extension that prompts before dangerous shell commands and protected file writes.",
   "keywords": [
     "pi-package",
     "pi",
     "security",
     "bash",
+    "powershell",
     "permissions",
     "file-safety"
   ],
@@ -18,6 +19,7 @@
   },
   "files": [
     "index.ts",
+    "powershell-safety.ts",
     "README.md",
     ".pi-fleet-tested-version"
   ],

@@ -6,6 +6,7 @@ import { readSystemClipboard, writeSystemClipboard } from "./clipboard.js";
 import { getCommitFiles, getReviewWindowData, isWorkingTreeCommitSha, loadReviewFileContents } from "./git.js";
 import { composeReviewPrompt } from "./prompt.js";
 import { openQuietGlimpse, type QuietGlimpseWindow } from "./quiet-glimpse.js";
+import { startReviewUiServer, type ReviewUiServer } from "./review-server.js";
 import type {
 	ReviewCancelPayload,
 	ReviewClipboardReadPayload,
@@ -19,7 +20,6 @@ import type {
 	ReviewSubmitPayload,
 	ReviewWindowMessage,
 } from "./types.js";
-import { buildReviewHtml } from "./ui.js";
 import { createRepoChangeWatcher, type RepoChangeWatcher } from "./watch.js";
 
 function hasMessageType(value: unknown, type: ReviewWindowMessage["type"]): boolean {
@@ -69,7 +69,10 @@ function appendReviewPrompt(ctx: ExtensionCommandContext, prompt: string): void 
 
 export default function (pi: ExtensionAPI) {
 	let activeWindow: QuietGlimpseWindow | null = null;
+	let activeUiServer: ReviewUiServer | null = null;
 	let activeWatcher: RepoChangeWatcher | null = null;
+	let reviewOpening = false;
+	let reviewAttempt = 0;
 	const suppressedWindows = new WeakSet<QuietGlimpseWindow>();
 
 	function stopActiveWatcher(): void {
@@ -79,10 +82,13 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function closeActiveWindow(options: { suppressResults?: boolean } = {}): void {
-		if (activeWindow == null) return;
+		reviewAttempt += 1;
 		const windowToClose = activeWindow;
 		activeWindow = null;
+		activeUiServer?.dispose();
+		activeUiServer = null;
 		stopActiveWatcher();
+		if (windowToClose == null) return;
 		if (options.suppressResults) {
 			suppressedWindows.add(windowToClose);
 		}
@@ -99,26 +105,43 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		if (activeWindow != null) {
+		if (reviewOpening || activeWindow != null || activeUiServer != null) {
 			ctx.ui.notify("A review window is already open.", "warning");
 			return;
 		}
 
+		reviewOpening = true;
+		const attempt = ++reviewAttempt;
 		try {
 			let reviewData = await getReviewWindowData(pi, ctx.cwd);
+			if (attempt !== reviewAttempt) return;
 			const { repoRoot } = reviewData;
 			if (reviewData.files.length === 0 && reviewData.commits.length === 0) {
 				ctx.ui.notify("No reviewable files found.", "info");
 				return;
 			}
 
-			const html = buildReviewHtml(reviewData);
-			const window = await openQuietGlimpse(html, {
+			const uiServer = await startReviewUiServer(reviewData);
+			if (attempt !== reviewAttempt) {
+				uiServer.dispose();
+				return;
+			}
+			activeUiServer = uiServer;
+			const window = await openQuietGlimpse(uiServer.html, {
 				width: 1680,
 				height: 1020,
 				title: "annotate-git-diff",
 			});
+			if (attempt !== reviewAttempt) {
+				suppressedWindows.add(window);
+				window.close();
+				uiServer.dispose();
+				return;
+			}
 			activeWindow = window;
+			if (uiServer.failure != null) throw uiServer.failure;
+			if (window.failure != null) throw window.failure;
+			if (window.closed) throw new Error("Glimpse closed while the review window was starting.");
 
 			const fileMap = new Map(reviewData.files.map((file) => [file.id, file]));
 			const commitFileCache = new Map<string, Promise<ReviewFile[]>>();
@@ -185,6 +208,15 @@ export default function (pi: ExtensionAPI) {
 				(resolve, reject) => {
 					let settled = false;
 					let closeTimer: ReturnType<typeof setTimeout> | null = null;
+					let removeUiServerErrorListener = (): void => {};
+
+					const requestWindowClose = (): void => {
+						try {
+							window.close();
+						} catch {
+							// Ignore races when the native process has already exited.
+						}
+					};
 
 					const cleanup = (): void => {
 						if (closeTimer != null) {
@@ -194,10 +226,14 @@ export default function (pi: ExtensionAPI) {
 						window.removeListener("message", onMessage);
 						window.removeListener("closed", onClosed);
 						window.removeListener("error", onError);
+						removeUiServerErrorListener();
+						removeUiServerErrorListener = (): void => {};
 						if (activeWindow === window) {
 							activeWindow = null;
 							stopActiveWatcher();
 						}
+						if (activeUiServer === uiServer) activeUiServer = null;
+						uiServer.dispose();
 					};
 
 					const settle = (value: ReviewSubmitPayload | ReviewCancelPayload | null): void => {
@@ -345,6 +381,7 @@ export default function (pi: ExtensionAPI) {
 							return;
 						}
 						if (isSubmitPayload(message) || isCancelPayload(message)) {
+							requestWindowClose();
 							settle(message);
 						}
 					};
@@ -360,6 +397,7 @@ export default function (pi: ExtensionAPI) {
 					const onError = (error: Error): void => {
 						if (settled) return;
 						settled = true;
+						requestWindowClose();
 						cleanup();
 						reject(error);
 					};
@@ -367,6 +405,10 @@ export default function (pi: ExtensionAPI) {
 					window.on("message", onMessage);
 					window.on("closed", onClosed);
 					window.on("error", onError);
+					removeUiServerErrorListener = uiServer.onError(onError);
+					if (uiServer.failure != null) onError(uiServer.failure);
+					else if (window.failure != null) onError(window.failure);
+					else if (window.closed) onClosed();
 				},
 			);
 
@@ -396,6 +438,8 @@ export default function (pi: ExtensionAPI) {
 			closeActiveWindow({ suppressResults: true });
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(`Review failed: ${message}`, "error");
+		} finally {
+			reviewOpening = false;
 		}
 	}
 

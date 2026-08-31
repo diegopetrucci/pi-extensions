@@ -23,6 +23,8 @@ interface GlimpseProtocolMessage {
 }
 
 export interface QuietGlimpseWindow {
+	readonly closed: boolean;
+	readonly failure: Error | null;
 	on(event: "message", listener: (data: unknown) => void): this;
 	on(event: "closed", listener: () => void): this;
 	on(event: "error", listener: (error: Error) => void): this;
@@ -38,11 +40,15 @@ class QuietGlimpseWindowImpl extends EventEmitter implements QuietGlimpseWindow 
 	#closed = false;
 	#pendingHTML: string | null;
 	#stderr = "";
+	#failure: Error | null = null;
 
 	constructor(proc: ChildProcessWithoutNullStreams, initialHTML: string) {
 		super();
 		this.#proc = proc;
 		this.#pendingHTML = initialHTML;
+		// EventEmitter treats an unobserved `error` as fatal. Keep a permanent
+		// fallback while callers attach and detach their lifecycle listeners.
+		this.on("error", () => {});
 
 		proc.stdin.on("error", () => {});
 		proc.stderr.on("data", (chunk) => {
@@ -55,7 +61,7 @@ class QuietGlimpseWindowImpl extends EventEmitter implements QuietGlimpseWindow 
 			try {
 				message = JSON.parse(line) as GlimpseProtocolMessage;
 			} catch {
-				this.emit("error", new Error(`Malformed glimpse protocol line: ${line}`));
+				this.#reportError(new Error(`Malformed glimpse protocol line: ${line}`));
 				return;
 			}
 
@@ -77,16 +83,18 @@ class QuietGlimpseWindowImpl extends EventEmitter implements QuietGlimpseWindow 
 			}
 		});
 
-		proc.on("error", (error) => this.emit("error", error));
+		proc.on("error", (error) => this.#reportError(error));
 		proc.on("exit", (code, signal) => {
 			const stderr = this.#stderr.trim();
 			const failed = signal != null || (code != null && code !== 0);
 			if (!this.#closed && failed) {
 				const message = stderr || `Glimpse process exited abnormally (code: ${code}, signal: ${signal}).`;
-				this.emit("error", new Error(message));
+				this.#reportError(new Error(message));
 			}
 			this.#markClosed();
 		});
+		// Spawn failures can emit `error` and then `close` without `exit`.
+		proc.on("close", () => this.#markClosed());
 	}
 
 	send(js: string): void {
@@ -95,6 +103,19 @@ class QuietGlimpseWindowImpl extends EventEmitter implements QuietGlimpseWindow 
 
 	close(): void {
 		this.#write({ type: "close" });
+	}
+
+	get closed(): boolean {
+		return this.#closed;
+	}
+
+	get failure(): Error | null {
+		return this.#failure;
+	}
+
+	#reportError(error: Error): void {
+		this.#failure ??= error;
+		this.emit("error", error);
 	}
 
 	#markClosed(): void {

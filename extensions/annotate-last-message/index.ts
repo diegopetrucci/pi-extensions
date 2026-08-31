@@ -21,12 +21,15 @@ function appendPrompt(ctx: ExtensionCommandContext, prompt: string): void {
 
 export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 	let activeWindow: QuietGlimpseWindow | null = null;
+	let annotationOpening = false;
+	let annotationAttempt = 0;
 	const suppressedWindows = new WeakSet<QuietGlimpseWindow>();
 
 	function closeActiveWindow(options: { suppressResults?: boolean } = {}): void {
-		if (activeWindow == null) return;
+		annotationAttempt += 1;
 		const windowToClose = activeWindow;
 		activeWindow = null;
+		if (windowToClose == null) return;
 		if (options.suppressResults) {
 			suppressedWindows.add(windowToClose);
 		}
@@ -42,7 +45,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 			ctx.ui.notify("annotate-last-message requires interactive mode.", "error");
 			return;
 		}
-		if (activeWindow != null) {
+		if (annotationOpening || activeWindow != null) {
 			ctx.ui.notify("A last-message annotation window is already open.", "warning");
 			return;
 		}
@@ -54,6 +57,8 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 		}
 
 		const messageData = messageResult.data;
+		annotationOpening = true;
+		const attempt = ++annotationAttempt;
 
 		try {
 			const html = buildAnnotateLastMessageHtml(messageData);
@@ -62,12 +67,27 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 				height: 980,
 				title: "annotate last message",
 			});
+			if (attempt !== annotationAttempt) {
+				suppressedWindows.add(window);
+				window.close();
+				return;
+			}
 			activeWindow = window;
+			if (window.failure != null) throw window.failure;
+			if (window.closed) throw new Error("Glimpse closed while the annotation window was starting.");
 
 			const terminalMessagePromise = new Promise<AnnotateLastMessageSubmitPayload | AnnotateLastMessageCancelPayload | null>(
 				(resolve, reject) => {
 					let settled = false;
 					let closeTimer: ReturnType<typeof setTimeout> | null = null;
+
+					const requestWindowClose = (): void => {
+						try {
+							window.close();
+						} catch {
+							// Ignore races when the native process has already exited.
+						}
+					};
 
 					const cleanup = (): void => {
 						if (closeTimer != null) {
@@ -91,6 +111,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 
 					const onMessage = (data: unknown): void => {
 						if (isSubmitPayload(data) || isCancelPayload(data)) {
+							requestWindowClose();
 							settle(data);
 						}
 					};
@@ -106,6 +127,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 					const onError = (error: Error): void => {
 						if (settled) return;
 						settled = true;
+						requestWindowClose();
 						cleanup();
 						reject(error);
 					};
@@ -113,6 +135,8 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 					window.on("message", onMessage);
 					window.on("closed", onClosed);
 					window.on("error", onError);
+					if (window.failure != null) onError(window.failure);
+					else if (window.closed) onClosed();
 				},
 			);
 
@@ -145,6 +169,8 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 			closeActiveWindow({ suppressResults: true });
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(`Annotation failed: ${message}`, "error");
+		} finally {
+			annotationOpening = false;
 		}
 	}
 
