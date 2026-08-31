@@ -1,8 +1,8 @@
 /**
  * Permission Gate Extension
  *
- * Prompts for confirmation before running potentially dangerous bash commands
- * or modifying protected paths via write/edit.
+ * Prompts for confirmation before running potentially dangerous bash or
+ * PowerShell commands, or modifying protected paths via write/edit.
  * Protected paths include exact .git and node_modules path segments plus
  * secret-bearing .env files (excluding example/template variants).
  */
@@ -11,10 +11,19 @@ import * as path from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import {
+	analyzePowerShellLexically,
+	buildPowerShellAstCommand,
+	MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES,
+	parsePowerShellAstOutput,
+} from "./powershell-safety.ts";
+
 const dangerousPatterns = [/\bsudo\b/i, /\b(chmod|chown)\b.*777/i];
 const protectedPathSegments = new Set([".git", "node_modules"]);
 const shellCommandSeparators = new Set([";", "&", "&&", "||", "|", "\n", "(", ")", "{", "}"]);
 const safeEnvSuffixes = new Set(["example", "examples", "template", "templates"]);
+const MAX_SHELL_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
+const POWERSHELL_ANALYSIS_TIMEOUT_MS = 5_000;
 
 type GuardDecision = { block: true; reason: string } | undefined;
 type NormalizedPath = {
@@ -30,6 +39,7 @@ type ShellToken = {
 
 type WriteInput = { path: string; content: string };
 type EditInput = { path: string; edits: Array<{ oldText: string; newText: string }> };
+type ShellInput = { command: string; timeout?: number };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -524,6 +534,55 @@ function hasDangerousRecursiveRm(command: string): boolean {
 	return evaluateTokens(currentCommand);
 }
 
+function validateShellInput(input: unknown): ShellInput | undefined {
+	if (!isRecord(input) || typeof input.command !== "string" || input.command.trim() === "") return undefined;
+	if (
+		input.timeout !== undefined &&
+		(typeof input.timeout !== "number" ||
+			!Number.isFinite(input.timeout) ||
+			input.timeout <= 0 ||
+			input.timeout > MAX_SHELL_TIMEOUT_SECONDS)
+	) {
+		return undefined;
+	}
+	return input.timeout === undefined
+		? { command: input.command }
+		: { command: input.command, timeout: input.timeout };
+}
+
+async function hasDangerousPowerShellCommand(
+	pi: ExtensionAPI,
+	command: string,
+	signal?: AbortSignal,
+): Promise<boolean> {
+	// Keep both lexical work and Windows' base64-expanded -Command transport
+	// bounded below the platform command-line limit. Oversized input is
+	// deliberately treated as requiring confirmation rather than failing open.
+	if (Buffer.byteLength(command, "utf8") > MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES) return true;
+
+	const lexicalAnalysis = analyzePowerShellLexically(command);
+	if (lexicalAnalysis.risky) return true;
+
+	// Pi only exposes its built-in PowerShell tool on Windows. On that platform,
+	// ask PowerShell's own parser for the final word so ordinary syntax features
+	// (module qualification, interpolation, splatting, and backtick escapes) cannot
+	// bypass the fallback lexer. Parser failures and malformed output fail closed.
+	if (process.platform !== "win32") return false;
+
+	try {
+		const { getPowerShellConfig } = await import("@earendil-works/pi-coding-agent");
+		const config = getPowerShellConfig();
+		const result = await pi.exec(config.shell, [...config.args, buildPowerShellAstCommand(command)], {
+			timeout: POWERSHELL_ANALYSIS_TIMEOUT_MS,
+			signal,
+		});
+		if (result.code !== 0 || result.killed) return true;
+		return parsePowerShellAstOutput(result.stdout).risky;
+	} catch {
+		return true;
+	}
+}
+
 function validateWriteInput(input: unknown): WriteInput | undefined {
 	if (!isRecord(input)) return undefined;
 	if (typeof input.path !== "string" || typeof input.content !== "string") return undefined;
@@ -576,13 +635,17 @@ async function confirmProtectedPathAction(
 
 export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
-		if (event.toolName === "bash") {
-			const command = event.input?.command;
-			if (typeof command !== "string" || command.trim() === "") {
-				return { block: true, reason: "Malformed bash command blocked" };
+		if (event.toolName === "bash" || event.toolName === "powershell") {
+			const shellToolName = event.toolName;
+			const input = validateShellInput(event.input);
+			if (!input) {
+				return { block: true, reason: `Malformed ${shellToolName} command blocked` };
 			}
+			const { command } = input;
 
-			const isDangerous = hasDangerousRecursiveRm(command) || dangerousPatterns.some((p) => p.test(command));
+				const isDangerous = shellToolName === "powershell"
+					? await hasDangerousPowerShellCommand(pi, command, ctx.signal)
+				: hasDangerousRecursiveRm(command) || dangerousPatterns.some((pattern) => pattern.test(command));
 
 			if (isDangerous) {
 				if (!ctx.hasUI) {
