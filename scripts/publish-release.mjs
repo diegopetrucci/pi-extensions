@@ -14,6 +14,11 @@ export const PUBLIC_REGISTRY = 'https://registry.npmjs.org';
 export const TRUSTED_REPOSITORY = 'diegopetrucci/pi-extensions';
 export const TRUSTED_WORKFLOW = 'publish.yml';
 export const TRUSTED_ENVIRONMENT = 'npm-release';
+const PUBLISHED_VISIBILITY_RETRY_INTERVAL_MS = 5_000;
+// npm accepted pi-context-cap@0.1.11 during v0.1.66 but kept returning 404 for
+// longer than the old one-minute retry window. Keep this bounded while allowing
+// enough time for delayed registry propagation before an idempotent rerun.
+const PUBLISHED_VISIBILITY_RETRY_ATTEMPTS = 121;
 const DEPENDENCY_SECTIONS = ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies'];
 const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const RELEASE_VERSION_RE = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -430,7 +435,7 @@ function defaultSleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function verifyPublishedWithRetry(pkg, version, expectedPack, run, root, sleep, attempts = 12) {
+async function verifyPublishedWithRetry(pkg, version, expectedPack, run, root, sleep, attempts = PUBLISHED_VISIBILITY_RETRY_ATTEMPTS) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       if (await checkPublishedVersion(pkg, version, expectedPack, run, root)) {
@@ -440,7 +445,7 @@ async function verifyPublishedWithRetry(pkg, version, expectedPack, run, root, s
     } catch (error) {
       if (attempt === attempts) throw error;
     }
-    if (attempt < attempts) await sleep(5_000);
+    if (attempt < attempts) await sleep(PUBLISHED_VISIBILITY_RETRY_INTERVAL_MS);
   }
   throw new Error(`Published package did not become visible: ${pkg.name}@${version}`);
 }
