@@ -93,8 +93,9 @@ function githubEnv(overrides = {}) {
   };
 }
 
-function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), registryError, registryDistOverrides = {}, registryPackPayloadOverrides = {}, registryPackDirectories = [], packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), postPublishVisibilityMisses = {}, registryError, registryDistOverrides = {}, registryPackPayloadOverrides = {}, registryPackDirectories = [], packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
   const artifacts = new Map();
+  const remainingPostPublishMisses = new Map();
   return async (file, args, options = {}) => {
     calls.push({ file, args: [...args], cwd: options.cwd, env: options.env, replaceEnv: options.replaceEnv });
     if (file === 'git') {
@@ -124,6 +125,11 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
       }
       if (registryError) return { code: 1, stdout: '', stderr: registryError };
       if (publishedSpecs.has(spec)) {
+        const remainingMisses = remainingPostPublishMisses.get(spec) ?? 0;
+        if (remainingMisses > 0) {
+          remainingPostPublishMisses.set(spec, remainingMisses - 1);
+          return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
+        }
         const dist = registryDistOverrides[spec] ?? (() => {
           const version = spec.slice(spec.lastIndexOf('@') + 1);
           return { shasum: `${spec.replace(`@${version}`, '')}:same`, integrity: `sha512-${spec.replace(`@${version}`, '')}:same` };
@@ -137,6 +143,7 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
       assert.ok(spec, `unknown packed artifact ${args[1]}`);
       assert.deepEqual(args.slice(2), ['--ignore-scripts', '--access', 'public', '--tag', 'latest', `--registry=${PUBLIC_REGISTRY}`]);
       publishedSpecs.add(spec);
+      remainingPostPublishMisses.set(spec, postPublishVisibilityMisses[spec] ?? 0);
       return { code: 0, stdout: 'published\n', stderr: '' };
     }
     if (args[0] === 'pack' && !args[1].startsWith('-')) {
@@ -297,6 +304,51 @@ test('GitHub OIDC live mode skips exact published versions, publishes verified t
   assert.ok(publishCalls.every(({ cwd }) => cwd === root));
   assert.ok(publishCalls.every(({ env, replaceEnv }) => replaceEnv && env.NPM_CONFIG_USERCONFIG && env.NPM_CONFIG_GLOBALCONFIG));
   assert.ok(publishCalls.every(({ env }) => !env.NPM_TOKEN && !env.NODE_AUTH_TOKEN));
+});
+
+test('GitHub OIDC live mode gives post-publish propagation a bounded ten-minute window', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const sleeps = [];
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    githubActions: true,
+    env: githubEnv(),
+    run: mockRunner({
+      root,
+      snapshot,
+      publishedSpecs: new Set(['plain-addon@1.2.3']),
+      postPublishVisibilityMisses: { '@example/feature@1.2.3': 120 },
+    }),
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.deepEqual(result.published, ['@example/feature@1.2.3', '@example/umbrella@1.2.3']);
+  assert.equal(sleeps.length, 120);
+  assert.ok(sleeps.every((milliseconds) => milliseconds === 5_000));
+
+  const { root: timeoutRoot, snapshot: timeoutSnapshot } = await fixture(t);
+  const timeoutSleeps = [];
+  await assert.rejects(
+    publishRelease({
+      cwd: timeoutRoot,
+      version: 'v1.2.3',
+      githubActions: true,
+      env: githubEnv(),
+      run: mockRunner({
+        root: timeoutRoot,
+        snapshot: timeoutSnapshot,
+        publishedSpecs: new Set(['plain-addon@1.2.3']),
+        postPublishVisibilityMisses: { '@example/feature@1.2.3': 121 },
+      }),
+      sleep: async (milliseconds) => timeoutSleeps.push(milliseconds),
+      createTagSnapshot: async () => cloneSnapshot(timeoutSnapshot),
+    }),
+    /Published package did not become visible: @example\/feature@1\.2\.3/,
+  );
+  assert.equal(timeoutSleeps.length, 120);
+  assert.ok(timeoutSleeps.every((milliseconds) => milliseconds === 5_000));
 });
 
 test('unsafe evidence order and dirty publishable paths hard-fail before publish', async (t) => {
