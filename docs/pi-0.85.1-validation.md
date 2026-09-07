@@ -2,6 +2,8 @@
 
 Target: Pi 0.85.1. Existing fleet certification remains 0.84.4 until the manual matrix below passes.
 
+The v0.1.67 model-selection release is separate from this certification effort. It ships the validated catalog changes without advancing fleet markers or claiming completion of the remaining 0.85.1 gates.
+
 ## Changes
 
 - Upgrade development Pi dependencies and lockfile to 0.85.1. Skip 0.85.0, whose published SDK import regression was fixed in 0.85.1.
