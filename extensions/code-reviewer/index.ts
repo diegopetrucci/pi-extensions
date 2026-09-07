@@ -23,6 +23,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
 const CODE_REVIEWER_MODEL_PREFERENCES = [
+	"gpt-6-astra",
 	"gpt-5.6-sol",
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
@@ -56,8 +57,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-sonnet-4-6",
 		"claude-sonnet-4-5",
 	],
-	openai: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5", "gpt-4.1", "o3", "o4-mini"],
+	openai: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5", "gpt-4.1", "o3", "o4-mini"],
 	"openai-codex": [
+		"gpt-6-astra",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",

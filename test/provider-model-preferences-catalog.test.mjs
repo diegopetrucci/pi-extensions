@@ -18,6 +18,17 @@ function firstCatalogMatch(provider, patterns) {
   return patterns.find((pattern) => texts.some((text) => text.includes(pattern.toLowerCase())));
 }
 
+test('Pi 0.85.1 Astra leads direct OpenAI and Codex preferences with older fallbacks retained', () => {
+  for (const role of ['oracle', 'contrarian', 'code-reviewer']) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+    for (const provider of ['openai', 'openai-codex']) {
+      assert.equal(firstCatalogMatch(provider, preferences[provider]), 'gpt-6-astra');
+      assert.equal(preferences[provider][0], 'gpt-6-astra');
+      assert.ok(preferences[provider].includes('gpt-5.6-sol'));
+    }
+  }
+});
+
 test('oracle and contrarian hardcoded provider coverage matches the built-in provider catalog', () => {
   const builtinProviders = getBuiltinProviders().sort();
   for (const fixture of PROVIDER_POLICY_CONTRACT.catalogParity.providerPreferenceConstants) {

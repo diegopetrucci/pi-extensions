@@ -7,6 +7,37 @@ async function loadOracleTestUtils() {
   return loadRoleTestUtils('oracle');
 }
 
+for (const provider of ['openai', 'openai-codex', 'github-copilot']) {
+  test(`Oracle selects Astra on ${provider} and falls back when unavailable`, async () => {
+    const { selectOracleModel } = await loadOracleTestUtils();
+    const older = { provider, id: 'gpt-5.6-sol', reasoning: true };
+    const astra = { provider, id: 'gpt-6-astra', reasoning: true, thinkingLevelMap: { xhigh: 'xhigh', max: 'max' } };
+    for (const available of [[older, astra], [older]]) {
+      const result = await selectOracleModel(createModelSelectionContext({ model: older, available }));
+      assert.equal(result.ok, true);
+      assert.equal(result.selection.modelRef, `${provider}/${available.length === 2 ? astra.id : older.id}`);
+    }
+  });
+}
+
+test('Oracle preserves Copilot Claude precedence before Astra and Sol fallbacks', async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  const provider = 'github-copilot';
+  const sol = { provider, id: 'gpt-5.6-sol', reasoning: true };
+  const astra = { provider, id: 'gpt-6-astra', reasoning: true };
+  const claude = { provider, id: 'claude-opus-5', reasoning: true };
+
+  for (const [available, expected] of [
+    [[sol, astra, claude], claude],
+    [[sol, astra], astra],
+    [[sol], sol],
+  ]) {
+    const result = await selectOracleModel(createModelSelectionContext({ model: sol, available }));
+    assert.equal(result.ok, true);
+    assert.equal(result.selection.modelRef, `${provider}/${expected.id}`);
+  }
+});
+
 test('oracle auto-selection keeps the gpt-5.6 sol/terra/luna ordering before older openai-codex fallbacks', async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(

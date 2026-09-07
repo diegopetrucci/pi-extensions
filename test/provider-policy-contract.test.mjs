@@ -7,6 +7,21 @@ import {
   loadRoleTestUtils,
 } from './support/provider-policy-contract-support.mjs';
 
+for (const [role, method] of [['contrarian', 'selectContrarianModel'], ['code-reviewer', 'selectCodeReviewerModel']]) {
+  test(`${role} selects Astra across providers ahead of GPT-5.6`, async () => {
+    const utils = await loadRoleTestUtils(role);
+    const result = await utils[method](createModelSelectionContext({
+      model: { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+      available: [
+        { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-6-astra', reasoning: true },
+      ],
+    }));
+    assert.equal(result.ok, true);
+    assert.equal(result.selection.modelRef ?? `${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-6-astra');
+  });
+}
+
 for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
   test(`${fixture.role} contract: ${fixture.description}`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
