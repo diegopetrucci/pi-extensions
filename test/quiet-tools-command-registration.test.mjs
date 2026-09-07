@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -11,6 +13,32 @@ const quietToolsModule = await import(pathToFileURL(path.join(repoRoot, 'extensi
 const quietToolsExtension = quietToolsModule.default;
 
 initTheme('dark');
+
+test('Pi 0.85.1 quiet tool execution uses current context cwd rather than registration cwd', async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'quiet-cwd-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const current = path.join(root, 'current');
+  mkdirSync(current);
+  writeFileSync(path.join(root, 'fixture.txt'), 'original');
+  writeFileSync(path.join(current, 'fixture.txt'), 'current');
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+  await getSessionStartHandler(harness)({}, { cwd: root });
+  const ctx = { cwd: current, sessionManager: { getSessionId: () => 'cwd-test', getSessionFile: () => undefined } };
+  const run = (name, args) => harness.tools.get(name).execute(name, args, undefined, undefined, ctx);
+  writeFileSync(path.join(current, 'current-only.txt'), 'unique-current-marker');
+  assert.match((await run('ls', { path: '.' })).content[0].text, /current-only.txt/);
+  assert.match((await run('find', { pattern: 'current-only.txt' })).content[0].text, /current-only.txt/);
+  assert.match((await run('grep', { pattern: 'unique-current-marker' })).content[0].text, /current-only.txt/);
+  assert.match((await run('bash', { command: 'cat fixture.txt' })).content[0].text, /^current\s*$/);
+  const result = await harness.tools.get('read').execute('read', { path: 'fixture.txt' }, undefined, undefined, ctx);
+  assert.equal(result.content[0].text, 'current');
+  await harness.tools.get('write').execute('write', { path: 'fixture.txt', content: 'updated' }, undefined, undefined, ctx);
+  assert.equal(readFileSync(path.join(current, 'fixture.txt'), 'utf8'), 'updated');
+  await run('edit', { path: 'fixture.txt', edits: [{ oldText: 'updated', newText: 'edited' }] });
+  assert.equal(readFileSync(path.join(current, 'fixture.txt'), 'utf8'), 'edited');
+  assert.equal(readFileSync(path.join(root, 'fixture.txt'), 'utf8'), 'original');
+});
 
 const theme = {
   fg(kind, text) {
