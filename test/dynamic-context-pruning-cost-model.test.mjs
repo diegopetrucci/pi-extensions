@@ -238,29 +238,36 @@ test('resolveBreakEvenThreshold uses the per-state override when present', () =>
   assert.equal(resolveBreakEvenThreshold(gateConfig, 'mid_loop'), 20);
 });
 
-test('resolveBreakEvenThreshold falls back to breakEvenThreshold by default (both states equal)', () => {
-  const gateConfig = defaultConfig().gate;
+test('resolveBreakEvenThreshold falls back to breakEvenThreshold when a state override is not a finite number', () => {
+  const gateConfig = { ...defaultConfig().gate, breakEvenThresholdByState: { idle: undefined, mid_loop: undefined } };
   assert.equal(resolveBreakEvenThreshold(gateConfig, 'idle'), gateConfig.breakEvenThreshold);
   assert.equal(resolveBreakEvenThreshold(gateConfig, 'mid_loop'), gateConfig.breakEvenThreshold);
+  // With the shipped defaults the states diverge by design (idle=22, mid_loop=1):
+  const defaults = defaultConfig().gate;
+  assert.equal(resolveBreakEvenThreshold(defaults, 'idle'), defaults.breakEvenThreshold);
+  assert.equal(resolveBreakEvenThreshold(defaults, 'mid_loop'), 1);
 });
 
-test('default gate config uses the pe-c5n9 recalibrated threshold (T=22 at r=0.1) with idle/mid_loop kept at parity', () => {
+test('default gate config uses the pe-c5n9 recalibrated idle threshold (T=22 at r=0.1) with a stricter mid_loop default (T=1)', () => {
   // pe-zy4s (2026-07-08): real runtime mid_loop/idle detection is now wired
   // through the `context` event handler, and the offline benchmark's
   // candidate labeling was aligned to that same runtime-observable
   // (turn-START) definition and re-derived on the representative corpus.
   // The re-derived split REVERSES the earlier turn-END-based pe-c5n9 finding:
   // at r=0.1, "idle" now carries essentially all the realized net benefit
-  // (T=22, ~20.6k) and "mid_loop" carries essentially none (T=1, ~0). Since
-  // idle is not the worthless state under this definition, parity is kept
-  // rather than forcing a stricter default in either direction. This test
-  // locks that deliberate parity so a future change to it is a visible,
+  // (T=22, ~20.6k) and "mid_loop" carries essentially none (T=1, ~0).
+  // Follow-up (2026-09-08): the reported byte-level capture (81% of a warm
+  // prefix invalidated by a mid_loop prune at T=22) illustrates the bust,
+  // not an inability to amortize it over enough subsequent calls. The measured
+  // corpus supports a conservative mid_loop default of T=1; idle keeps T=22.
+  // Turn-start classification does not imply the provider cache is cold. Both remain
+  // config-overridable via gate.breakEvenThresholdByState. This test locks
+  // those deliberate defaults so a future change to either is a visible,
   // reviewed diff.
   const gateConfig = defaultConfig().gate;
   assert.equal(gateConfig.breakEvenThreshold, 22);
   assert.equal(gateConfig.breakEvenThresholdByState.idle, 22);
-  assert.equal(gateConfig.breakEvenThresholdByState.mid_loop, 22);
-  assert.equal(resolveBreakEvenThreshold(gateConfig, 'idle'), resolveBreakEvenThreshold(gateConfig, 'mid_loop'));
+  assert.equal(gateConfig.breakEvenThresholdByState.mid_loop, 1);
 });
 
 // ---------------------------------------------------------------------------

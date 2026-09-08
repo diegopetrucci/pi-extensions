@@ -221,12 +221,27 @@ test('formatStatusReport includes enabled state, strategies, protections, and sn
     lastSnapshot: { rawTokens: 500, effectiveTokens: 300, tokensSavedThisCall: 200 },
   }).join('\n');
   assert.match(lines, /ENABLED/);
+  assert.match(lines, /Gate: mode=on thresholds=\{idle:22, mid_loop:1\} cachedPriceRatio=0\.1/);
   assert.match(lines, /dedupe: on/);
   assert.match(lines, /error-purge: on/);
   assert.match(lines, /superseded-file-ops: on/);
   assert.match(lines, /recentTurns=/);
   assert.match(lines, /raw=500 tok, effective=300 tok, saved=200 tok/);
   assert.match(lines, /1200 \/ 100000 tokens \(1.2%\)/);
+});
+
+test('formatStatusReport shows effective custom state thresholds rather than the global fallback', () => {
+  const config = defaultConfig();
+  config.gate.breakEvenThreshold = 50;
+  config.gate.breakEvenThresholdByState = { idle: 0, mid_loop: 12 };
+  assert.equal(formatStatusReport({ config })[1], 'Gate: mode=on thresholds={idle:0, mid_loop:12} cachedPriceRatio=0.1');
+});
+
+test('formatStatusReport resolves invalid state overrides through the global fallback', () => {
+  const config = defaultConfig();
+  config.gate.breakEvenThreshold = 50;
+  config.gate.breakEvenThresholdByState = { idle: undefined, mid_loop: NaN };
+  assert.equal(formatStatusReport({ config })[1], 'Gate: mode=on thresholds={idle:50, mid_loop:50} cachedPriceRatio=0.1');
 });
 
 test('formatStatusReport degrades gracefully with no snapshot/usage yet', () => {
