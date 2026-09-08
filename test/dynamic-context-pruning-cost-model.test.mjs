@@ -256,12 +256,11 @@ test('default gate config uses the pe-c5n9 recalibrated idle threshold (T=22 at 
   // The re-derived split REVERSES the earlier turn-END-based pe-c5n9 finding:
   // at r=0.1, "idle" now carries essentially all the realized net benefit
   // (T=22, ~20.6k) and "mid_loop" carries essentially none (T=1, ~0).
-  // Follow-up (2026-09-08): field evidence from byte-level request captures
-  // on a live agent stack confirmed mid_loop prunes accepted at T=22 bust a
-  // warm prefix mid-iteration (81% of message history invalidated between
-  // two consecutive LLM calls separated only by a toolResult) with no chance
-  // to amortize inside the tool loop. The mid_loop default is therefore set
-  // to the benchmark-optimal T=1; idle keeps T=22. Both remain
+  // Follow-up (2026-09-08): the reported byte-level capture (81% of a warm
+  // prefix invalidated by a mid_loop prune at T=22) illustrates the bust,
+  // not an inability to amortize it over enough subsequent calls. The measured
+  // corpus supports a conservative mid_loop default of T=1; idle keeps T=22.
+  // Turn-start classification does not imply the provider cache is cold. Both remain
   // config-overridable via gate.breakEvenThresholdByState. This test locks
   // those deliberate defaults so a future change to either is a visible,
   // reviewed diff.

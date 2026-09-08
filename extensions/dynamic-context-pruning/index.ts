@@ -117,19 +117,16 @@ const DEFAULT_BREAK_EVEN_THRESHOLD = 22;
 /**
  * Default mid_loop break-even threshold (pe-zy4s follow-up). The package's own
  * representative-corpus benchmark (turn-START state definition — the same one
- * the runtime `context` handler uses) found that at cachedPriceRatio r=0.1
- * mid_loop candidates carry essentially zero realized net benefit
- * (mid_loop-optimal T=1, total realized net benefit ~0.0), i.e. no mid_loop
- * automatic prune is ever worth the cache bust it causes. Field evidence
- * (2026-09-08, byte-level request capture on a live agent stack): a
- * superseded-file-ops prune accepted mid_loop at T=22 rewrote 81% of a
- * request's message history between two consecutive LLM calls that were
- * separated only by a toolResult — the exact prefix-cache-bust signature the
- * gate's cost model is supposed to prevent, because the one-time bust cannot
- * amortize inside a tool loop that keeps issuing new calls. Setting the
- * mid_loop default to 1 keeps the benchmark-optimal behavior while idle
- * prunes (turn starts, cache usually already cold) keep T=22. Users who want
- * the old behavior can override via gate.breakEvenThresholdByState.mid_loop.
+ * the runtime `context` handler uses) favored rejecting mid_loop candidates
+ * at cachedPriceRatio r=0.1 (mid_loop-optimal T=1, total realized
+ * net benefit ~0.0). This supports a conservative default for the measured
+ * corpus, not a universal claim that mid_loop pruning cannot pay off.
+ * The reported 2026-09-08 byte-level capture (a mid_loop prune at T=22
+ * invalidating 81% of a warm request prefix) illustrates cache invalidation,
+ * not an inability to amortize it: enough subsequent calls can recoup a
+ * one-time bust. Idle keeps T=22; turn-start classification does not imply
+ * the provider cache is cold. Users who want the old behavior can override
+ * via gate.breakEvenThresholdByState.mid_loop.
  */
 const DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD = 1;
 
@@ -241,8 +238,7 @@ export type GateMode = "on" | "off" | "always-apply";
  * turn-START "idle" population (calls made at the start of a turn) carries
  * essentially ALL the realized net benefit (idle-optimal T=22, total realized
  * net benefit ~20,594 token-units), while "mid_loop" carries essentially NONE
- * (mid_loop-optimal T=1, total realized net benefit ~0.0 -- i.e. no mid_loop
- * candidate is ever worth accepting at r=0.1 under this definition). This is
+ * (mid_loop-optimal T=1, total realized net benefit ~0.0 on this corpus). This is
  * the OPPOSITE of what the pe-c5n9 evidence (measured under the old,
  * non-runtime-observable turn-END definition) suggested.
  *
@@ -250,10 +246,11 @@ export type GateMode = "on" | "off" | "always-apply";
  * shown to be ~worthless): idle is NOT worthless here -- it is the ONLY state
  * carrying value at r=0.1 -- so the idle default stays at
  * DEFAULT_BREAK_EVEN_THRESHOLD. The mid_loop default, by the same benchmark,
- * is now DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD (=1): no mid_loop candidate
- * is ever worth accepting at r=0.1, and mid_loop cache busts are the most
- * expensive ones (they invalidate a warm prefix mid-iteration). Both remain
- * config-overridable via gate.breakEvenThresholdByState.
+ * is now DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD (=1): the measured candidates
+ * did not justify a more permissive threshold at r=0.1. Mid_loop pruning can
+ * still amortize over enough subsequent calls; state alone does not establish
+ * cache warmth or profitability. Both defaults remain config-overridable via
+ * gate.breakEvenThresholdByState.
  */
 export type AgentState = "idle" | "mid_loop";
 
@@ -2428,7 +2425,7 @@ export function formatStatusReport(input: StatusReportInput): string[] {
 	const lines: string[] = [];
 	lines.push(`Dynamic context pruning: ${config.enabled ? "ENABLED" : "disabled"}`);
 	lines.push(
-		`Gate: mode=${config.gate.mode} threshold=${config.gate.breakEvenThreshold} cachedPriceRatio=${config.gate.cachedPriceRatio}`,
+		`Gate: mode=${config.gate.mode} thresholds={idle:${resolveBreakEvenThreshold(config.gate, "idle")}, mid_loop:${resolveBreakEvenThreshold(config.gate, "mid_loop")}} cachedPriceRatio=${config.gate.cachedPriceRatio}`,
 	);
 	lines.push("Strategies:");
 	lines.push(`  dedupe: ${config.strategies.dedupe.enabled ? "on" : "off"}`);

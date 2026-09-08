@@ -130,10 +130,10 @@ Where `r` is `gate.cachedPriceRatio` — the fraction of full price still paid
 for cached tokens (default `0.1`, i.e. cached tokens cost ~10% of fresh
 tokens). `breakEvenCalls` is how many subsequent LLM calls are needed to
 recoup the one-time cache-bust cost via the recurring saving. The gate accepts
-a batch of candidates only if `breakEvenCalls <= gate.breakEvenThreshold`
-(default `22`, calibrated from the representative-corpus benchmark — see the
-calibration note under [Configuration](#configuration) and the
-[Roadmap](#roadmap) evidence).
+a batch of candidates only if `breakEvenCalls` is at most the effective
+threshold for the current state (`idle=22`, `mid_loop=1` by default,
+calibrated from the representative-corpus benchmark — see the calibration
+note under [Configuration](#configuration) and the [Roadmap](#roadmap) evidence).
 
 All candidates proposed in the same `context` call share one cache bust (since
 a prompt cache is a single linear prefix), so they're evaluated and
@@ -179,7 +179,7 @@ branch:
 /context-pruning gate <on|off|always-apply>
 ```
 
-- `status`: enabled state, gate mode/threshold/ratio, per-strategy on/off
+- `status`: enabled state, gate mode/effective per-state thresholds/ratio, per-strategy on/off
   state, protection counts, last call's raw/effective/saved token snapshot,
   and current context usage.
 - `stats`: cumulative tokens saved, overall and per strategy.
@@ -243,7 +243,7 @@ Notes:
   break-even math (`gate.*`), which is a separate, later check on whatever
   survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
-  different thresholds; `idle` defaults to `gate.breakEvenThreshold` and
+  different thresholds; `idle` defaults to `22` and
   `mid_loop` defaults to `1`. Real
   mid-loop/idle detection is wired through the `context` event handler
   (pe-zy4s): the state is classified straight from the message payload —
@@ -254,13 +254,15 @@ Notes:
   runtime-observable definition and found the state-split REVERSED from an
   earlier turn-end-based analysis: at r=0.1, `idle` candidates now carry
   essentially all the realized net benefit and `mid_loop` candidates carry
-  essentially none. Field evidence (2026-09-08, byte-level request capture)
-  confirmed the cost side: a mid_loop prune accepted at `T=22` invalidated
-  81% of a warm request prefix between two consecutive LLM calls separated
-  only by a toolResult — the bust cannot amortize inside a tool loop. The
-  `mid_loop` default is therefore `1` (effectively: fresh automatic prunes
-  apply at turn starts, when the cache is usually already cold, not while
-  iterating). Set `mid_loop` back to `22` to restore the old parity behavior.
+  essentially none. At r=0.1, the measured corpus therefore supports a
+  conservative `mid_loop=1` default, while `idle` remains `22`. Mid-loop
+  pruning can amortize over enough subsequent calls, but the observed
+  candidates did not justify a more permissive threshold. Turn-start
+  classification does not imply the provider cache is cold. The reported
+  field capture (2026-09-08: a mid_loop prune at `T=22` invalidated 81% of a
+  warm request prefix between consecutive LLM calls separated only by a
+  toolResult) illustrates cache invalidation, not proof that amortization is
+  impossible. Set `mid_loop` back to `22` to restore the old parity behavior.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case) — see [Roadmap](#roadmap) for the full
@@ -453,11 +455,13 @@ re-derived on the representative corpus (460 gate-eligible candidates on the
 current `~/.the-last-harness/agent/sessions` corpus). The split **reverses**:
 at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now carries essentially
 all the value, and `mid_loop` (T=1, ~0 realized net benefit) carries
-essentially none. Per the decision rule (stricter idle default only if idle
-is shown ~worthless), this evidence does **not** support a stricter idle
-default — parity (`22`/`22`) is kept. The table above is retained as the
-historical turn-END-definition record; it no longer reflects how the runtime
-classifies agent state.
+essentially none. Under that ticket's decision rule (stricter idle default
+only if idle is shown ~worthless), parity (`22`/`22`) was retained at the time.
+The 2026-09-08 follow-up supersedes that default with `idle=22` / `mid_loop=1`,
+using the measured mid-loop result to choose a conservative threshold (see
+[Configuration](#configuration) for the evidence and limitations). The table
+above is retained as the historical turn-END-definition record; it no longer
+reflects how the runtime classifies agent state.
 
 **This reframes, rather than weakens, the case for v2.** Small deterministic
 removals (dedupe/error-purge/superseded-file-ops) structurally cannot beat
