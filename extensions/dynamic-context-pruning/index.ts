@@ -114,6 +114,25 @@ const DEFAULT_CACHED_PRICE_RATIO = 0.1;
  */
 const DEFAULT_BREAK_EVEN_THRESHOLD = 22;
 
+/**
+ * Default mid_loop break-even threshold (pe-zy4s follow-up). The package's own
+ * representative-corpus benchmark (turn-START state definition — the same one
+ * the runtime `context` handler uses) found that at cachedPriceRatio r=0.1
+ * mid_loop candidates carry essentially zero realized net benefit
+ * (mid_loop-optimal T=1, total realized net benefit ~0.0), i.e. no mid_loop
+ * automatic prune is ever worth the cache bust it causes. Field evidence
+ * (2026-09-08, byte-level request capture on a live agent stack): a
+ * superseded-file-ops prune accepted mid_loop at T=22 rewrote 81% of a
+ * request's message history between two consecutive LLM calls that were
+ * separated only by a toolResult — the exact prefix-cache-bust signature the
+ * gate's cost model is supposed to prevent, because the one-time bust cannot
+ * amortize inside a tool loop that keeps issuing new calls. Setting the
+ * mid_loop default to 1 keeps the benchmark-optimal behavior while idle
+ * prunes (turn starts, cache usually already cold) keep T=22. Users who want
+ * the old behavior can override via gate.breakEvenThresholdByState.mid_loop.
+ */
+const DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD = 1;
+
 /** Tool names never pruned by default: orchestration/subagent-style tools and todo-like state. */
 const DEFAULT_PROTECTED_TOOL_NAMES = [
 	"todo",
@@ -229,13 +248,12 @@ export type GateMode = "on" | "off" | "always-apply";
  *
  * Per the pe-zy4s decision rule (stricter idle default only if idle itself is
  * shown to be ~worthless): idle is NOT worthless here -- it is the ONLY state
- * carrying value at r=0.1 -- so no state-conditioned strictness is justified
- * in either direction. The per-state split is therefore kept at PARITY
- * (`breakEvenThresholdByState: { idle: DEFAULT_BREAK_EVEN_THRESHOLD, mid_loop:
- * DEFAULT_BREAK_EVEN_THRESHOLD }`), both config-overridable. A future ticket
- * could consider a stricter mid_loop default given this evidence, but that is
- * a new, unreviewed direction outside this ticket's authorized decision rule
- * and is left for a follow-up.
+ * carrying value at r=0.1 -- so the idle default stays at
+ * DEFAULT_BREAK_EVEN_THRESHOLD. The mid_loop default, by the same benchmark,
+ * is now DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD (=1): no mid_loop candidate
+ * is ever worth accepting at r=0.1, and mid_loop cache busts are the most
+ * expensive ones (they invalidate a warm prefix mid-iteration). Both remain
+ * config-overridable via gate.breakEvenThresholdByState.
  */
 export type AgentState = "idle" | "mid_loop";
 
@@ -285,7 +303,7 @@ export function defaultConfig(): DynamicContextPruningConfig {
 			mode: "on",
 			cachedPriceRatio: DEFAULT_CACHED_PRICE_RATIO,
 			breakEvenThreshold: DEFAULT_BREAK_EVEN_THRESHOLD,
-			breakEvenThresholdByState: { idle: DEFAULT_BREAK_EVEN_THRESHOLD, mid_loop: DEFAULT_BREAK_EVEN_THRESHOLD },
+			breakEvenThresholdByState: { idle: DEFAULT_BREAK_EVEN_THRESHOLD, mid_loop: DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD },
 		},
 	};
 }

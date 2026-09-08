@@ -223,7 +223,7 @@ never required to exist. Full shape, with defaults:
     "mode": "on",
     "cachedPriceRatio": 0.1,
     "breakEvenThreshold": 22,
-    "breakEvenThresholdByState": { "idle": 22, "mid_loop": 22 }
+    "breakEvenThresholdByState": { "idle": 22, "mid_loop": 1 }
   }
 }
 ```
@@ -243,7 +243,8 @@ Notes:
   break-even math (`gate.*`), which is a separate, later check on whatever
   survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
-  different thresholds; both default to `gate.breakEvenThreshold`. Real
+  different thresholds; `idle` defaults to `gate.breakEvenThreshold` and
+  `mid_loop` defaults to `1`. Real
   mid-loop/idle detection is wired through the `context` event handler
   (pe-zy4s): the state is classified straight from the message payload —
   `idle` if the most recent relevant message is a user message (this is the
@@ -253,9 +254,13 @@ Notes:
   runtime-observable definition and found the state-split REVERSED from an
   earlier turn-end-based analysis: at r=0.1, `idle` candidates now carry
   essentially all the realized net benefit and `mid_loop` candidates carry
-  essentially none. Since `idle` is not the worthless state under this
-  definition, both states are kept at parity (`22`/`22`) rather than forcing
-  a stricter default in either direction.
+  essentially none. Field evidence (2026-09-08, byte-level request capture)
+  confirmed the cost side: a mid_loop prune accepted at `T=22` invalidated
+  81% of a warm request prefix between two consecutive LLM calls separated
+  only by a toolResult — the bust cannot amortize inside a tool loop. The
+  `mid_loop` default is therefore `1` (effectively: fresh automatic prunes
+  apply at turn starts, when the cache is usually already cold, not while
+  iterating). Set `mid_loop` back to `22` to restore the old parity behavior.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case) — see [Roadmap](#roadmap) for the full
