@@ -24,6 +24,7 @@ const {
   formatPrunableItemDetail,
   formatPrunableItemsReport,
   sessionEntriesToMessages,
+  normalizeSessionProjection,
   buildManualPruneProposal,
   proposalToDecisionRecord,
   buildRestoreRecord,
@@ -33,6 +34,7 @@ const {
   emptyCumulativeStats,
   foldStatsRecord,
   computeCacheCostModel,
+  default: dynamicContextPruningExtension,
 } = dcp;
 
 function setEnv(t, key, value) {
@@ -83,6 +85,74 @@ function toolCallMessages({ toolCallId = 'call_1', toolName = 'bash', args = { c
     { role: 'toolResult', toolCallId, toolName, content: [{ type: 'text', text: resultText }], isError, timestamp: 3 },
     { role: 'assistant', content: [{ type: 'text', text: 'done' }], timestamp: 4 },
   ];
+}
+
+function contextEditProjectionFixture() {
+  const userMessage = { role: 'user', content: 'inspect the current context', timestamp: 1 };
+  const omittedToolCall = {
+    role: 'assistant',
+    content: [{ type: 'toolCall', id: 'omitted-call', name: 'omitted-tool', arguments: { path: 'omitted.txt' } }],
+    timestamp: 2,
+  };
+  const omittedResult = {
+    role: 'toolResult',
+    toolCallId: 'omitted-call',
+    toolName: 'omitted-tool',
+    content: [{ type: 'text', text: 'o'.repeat(400) }],
+    isError: false,
+    timestamp: 3,
+  };
+  const keptToolCall = {
+    role: 'assistant',
+    content: [{ type: 'toolCall', id: 'kept-call', name: 'kept-tool', arguments: { path: 'kept.txt' } }],
+    timestamp: 4,
+  };
+  const keptResult = {
+    role: 'toolResult',
+    toolCallId: 'kept-call',
+    toolName: 'kept-tool',
+    content: [{ type: 'text', text: 'k'.repeat(400) }],
+    isError: false,
+    timestamp: 5,
+  };
+  const replacementResult = {
+    ...keptResult,
+    content: [{ type: 'text', text: 'replacement result' }],
+  };
+  let timestampCounter = 0;
+  const entry = (id, message) => ({
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: `2026-01-01T00:00:${String(timestampCounter++).padStart(2, '0')}.000Z`,
+    message,
+  });
+  const userEntry = entry('user-entry', userMessage);
+  const omittedCallEntry = entry('omitted-call-entry', omittedToolCall);
+  const omittedResultEntry = entry('omitted-result-entry', omittedResult);
+  const keptCallEntry = entry('kept-call-entry', keptToolCall);
+  const keptResultEntry = entry('kept-result-entry', keptResult);
+  const omissionEdit = {
+    type: 'context_edit',
+    id: 'omit-edit',
+    parentId: 'omitted-result-entry',
+    timestamp: '2026-01-01T00:00:10.000Z',
+    targetId: 'omitted-result-entry',
+    replacement: null,
+  };
+  const entries = [userEntry, omittedCallEntry, omittedResultEntry, keptCallEntry, keptResultEntry, omissionEdit];
+  const projection = {
+    entries: [
+      { sourceEntry: userEntry, messages: [userMessage] },
+      { sourceEntry: omittedCallEntry, messages: [] },
+      { sourceEntry: omittedResultEntry, messages: [] },
+      { sourceEntry: keptCallEntry, messages: [keptToolCall] },
+      { sourceEntry: keptResultEntry, messages: [replacementResult] },
+      { sourceEntry: omissionEdit, messages: [] },
+    ],
+    messages: [userMessage, keptToolCall, replacementResult],
+  };
+  return { entries, projection, userMessage, omittedResult, replacementResult };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,6 +372,117 @@ test('sessionEntriesToMessages extracts only "message"-typed entries in order', 
   assert.equal(messages[1].role, 'assistant');
 });
 
+test('sessionEntriesToMessages uses canonical projection omission/replacement and preserves the older fallback', () => {
+  const { entries, projection, omittedResult, replacementResult } = contextEditProjectionFixture();
+  const normalized = normalizeSessionProjection(projection);
+  assert.ok(normalized);
+
+  const legacyMessages = sessionEntriesToMessages(entries);
+  assert.ok(legacyMessages.includes(omittedResult), 'older runtimes still reconstruct from raw message entries');
+
+  const projectedMessages = sessionEntriesToMessages(entries, normalized);
+  assert.deepEqual(projectedMessages, projection.messages);
+  assert.equal(projectedMessages.includes(omittedResult), false, 'context-omitted content must not enter the picker inventory');
+  assert.ok(projectedMessages.includes(replacementResult), 'the projected replacement must be used');
+
+  const items = buildPrunableItems(projectedMessages, new Map(), new Set());
+  assert.deepEqual(items.map((item) => item.toolCallId), ['kept-call']);
+  assert.equal(items[0].estimatedTokens, Math.ceil('replacement result'.length / 4));
+});
+
+test('malformed canonical projection is rejected so session reconstruction falls back to raw messages', () => {
+  const { entries, projection, omittedResult } = contextEditProjectionFixture();
+  const malformedSource = structuredClone(projection);
+  malformedSource.entries[0].sourceEntry.id = 42;
+  assert.equal(normalizeSessionProjection(malformedSource), undefined);
+  assert.ok(sessionEntriesToMessages(entries, normalizeSessionProjection(malformedSource)).includes(omittedResult));
+
+  const malformedRole = structuredClone(projection);
+  malformedRole.entries[0].messages[0] = { content: 'missing role' };
+  assert.equal(normalizeSessionProjection(malformedRole), undefined);
+
+  const malformedType = structuredClone(projection);
+  malformedType.entries[0].sourceEntry.type = 42;
+  assert.equal(normalizeSessionProjection(malformedType), undefined);
+});
+
+test('/prune uses the canonical projected message list when the host exposes it', async () => {
+  const { entries, projection } = contextEditProjectionFixture();
+  const commands = new Map();
+  const pi = {
+    on() {},
+    registerCommand(name, command) {
+      commands.set(name, command);
+    },
+    appendEntry() {},
+  };
+  dynamicContextPruningExtension(pi);
+
+  const selectCalls = [];
+  const ctx = {
+    hasUI: true,
+    ui: {
+      async select(title, options) {
+        selectCalls.push({ title, options });
+        return 'Done';
+      },
+      notify() {},
+    },
+    sessionManager: {
+      getBranch() {
+        return entries;
+      },
+      buildSessionProjection() {
+        return projection;
+      },
+    },
+  };
+
+  await commands.get('prune').handler('', ctx);
+  assert.equal(selectCalls.length, 1);
+  assert.equal(selectCalls[0].options.at(-1), 'Done');
+  assert.equal(selectCalls[0].options.length, 2, 'only the projected kept result plus Done should be offered');
+  assert.match(selectCalls[0].options[0], /kept-tool/);
+  assert.doesNotMatch(selectCalls[0].options[0], /omitted-tool/);
+  assert.match(selectCalls[0].options[0], /~5 tok/);
+});
+
+test('/prune retains the raw branch-entry fallback when buildSessionProjection is unavailable', async () => {
+  const { entries } = contextEditProjectionFixture();
+  const commands = new Map();
+  const pi = {
+    on() {},
+    registerCommand(name, command) {
+      commands.set(name, command);
+    },
+    appendEntry() {},
+  };
+  dynamicContextPruningExtension(pi);
+
+  const selectCalls = [];
+  const ctx = {
+    hasUI: true,
+    ui: {
+      async select(title, options) {
+        selectCalls.push({ title, options });
+        return 'Done';
+      },
+      notify() {},
+    },
+    sessionManager: {
+      getBranch() {
+        return entries;
+      },
+    },
+  };
+
+  await commands.get('prune').handler('', ctx);
+  const rows = selectCalls[0].options.slice(0, -1);
+  assert.equal(rows.length, 2, 'the compatibility fallback keeps the prior raw inventory behavior');
+  assert.ok(rows.some((row) => row.includes('omitted-tool')));
+  assert.ok(rows.some((row) => row.includes('~100 tok')));
+});
+
 // ---------------------------------------------------------------------------
 // buildPrunableItems / formatPrunableItemOption / formatPrunableItemDetail
 // ---------------------------------------------------------------------------
@@ -357,7 +538,7 @@ test('formatPrunableItemOption/Detail render tool name, args digest, tokens, and
 });
 
 test('formatPrunableItemsReport degrades to an informative message when nothing is prunable', () => {
-  assert.deepEqual(formatPrunableItemsReport([]), ['No prunable tool results found in this session.']);
+  assert.deepEqual(formatPrunableItemsReport([]), ['No prunable tool results found in the current model context.']);
 });
 
 test('buildPrunableItemPickerOptions disambiguates duplicate items so each row maps back to its own toolCallId', () => {

@@ -81,7 +81,7 @@ export const PROVIDER_POLICY_CONTRACT = {
     {
       role: 'oracle',
       method: 'selectOracleModel',
-      description: 'Oracle stays on the current provider, prefers the latest frontier tier, and defaults gpt-5.6-sol to high thinking',
+      description: 'Oracle stays on the current provider, prefers the latest frontier tier, and defaults GPT-5.6/GPT-6 Sol to high thinking',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.4', reasoning: true },
         scopedModels: [],
@@ -394,11 +394,15 @@ export const PROVIDER_POLICY_CONTRACT = {
   thinkingLevelCases: [
     {
       role: 'oracle',
-      description: 'Oracle defaults gpt-5.6-sol to high while other reasoning models default to xhigh',
+      description: 'Oracle defaults GPT-5.6/GPT-6 Sol to high while other reasoning models default to xhigh',
       method: 'resolveThinkingLevel',
       assertions: [
         {
           args: [{ provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
+          expected: { requested: 'high', effective: 'high', clamped: false },
+        },
+        {
+          args: [{ provider: 'openai', id: 'gpt-6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
           expected: { requested: 'high', effective: 'high', clamped: false },
         },
         {

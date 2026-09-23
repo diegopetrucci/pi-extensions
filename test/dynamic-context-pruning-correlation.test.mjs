@@ -12,6 +12,7 @@ const {
   buildEntryIdToMessageIndexMap,
   findMessageIndexByRoleAndTimestamp,
   resolveMessageIndexForEntry,
+  normalizeSessionProjection,
 } = dcp;
 
 test('findToolCallPairIndices locates both the assistant toolCall block and the toolResult by id', () => {
@@ -52,6 +53,72 @@ test('buildEntryIdToMessageIndexMap order-zips message-producing entries against
   assert.equal(map.get('e1'), 0);
   assert.equal(map.get('e3'), 1);
   assert.equal(map.has('e2'), false, 'custom (non-message-producing) entries must not appear in the zip');
+});
+
+test('legacy raw correlation preserves positional semantics without a canonical projection', () => {
+  const first = { role: 'user', content: 'first', timestamp: 1 };
+  const omitted = { role: 'user', content: 'omitted', timestamp: 2 };
+  const kept = { role: 'user', content: 'kept', timestamp: 3 };
+  const entries = [
+    { type: 'message', id: 'e1', parentId: null, timestamp: 't1', message: first },
+    { type: 'message', id: 'e2', parentId: 'e1', timestamp: 't2', message: omitted },
+    { type: 'message', id: 'e3', parentId: 'e2', timestamp: 't3', message: kept },
+    {
+      type: 'context_edit',
+      id: 'edit-1',
+      parentId: 'e3',
+      timestamp: 't4',
+      targetId: 'e2',
+      replacement: null,
+    },
+  ];
+  const messages = [first, kept];
+  const map = buildEntryIdToMessageIndexMap(entries, messages);
+  assert.equal(map.get('e1'), 0);
+  assert.equal(map.get('e2'), 1, 'legacy raw correlation does not infer context-edit omission');
+  assert.equal(map.has('e3'), false);
+  assert.equal(resolveMessageIndexForEntry('e2', entries, messages), 1);
+});
+
+test('validated projection provenance correlates replacements and leaves omitted context_edit entries unmapped', () => {
+  const omitted = { role: 'user', content: 'omitted', timestamp: 1 };
+  const original = { role: 'user', content: 'original', timestamp: 2 };
+  const replacement = { role: 'user', content: 'replacement', timestamp: 2 };
+  const entries = [
+    { type: 'message', id: 'omitted-entry', parentId: null, timestamp: 't1', message: omitted },
+    { type: 'message', id: 'replaced-entry', parentId: 'omitted-entry', timestamp: 't2', message: original },
+    {
+      type: 'context_edit',
+      id: 'edit-1',
+      parentId: 'replaced-entry',
+      timestamp: 't3',
+      targetId: 'omitted-entry',
+      replacement: null,
+    },
+    {
+      type: 'context_edit',
+      id: 'edit-2',
+      parentId: 'edit-1',
+      timestamp: 't4',
+      targetId: 'replaced-entry',
+      replacement: { content: 'replacement' },
+    },
+  ];
+  const projection = normalizeSessionProjection({
+    entries: [
+      { sourceEntry: entries[0], messages: [] },
+      { sourceEntry: entries[1], messages: [replacement] },
+      { sourceEntry: entries[2], messages: [] },
+      { sourceEntry: entries[3], messages: [] },
+    ],
+    messages: [replacement],
+  });
+  assert.ok(projection);
+  const map = buildEntryIdToMessageIndexMap(entries, [replacement], projection);
+  assert.equal(map.has('omitted-entry'), false);
+  assert.equal(map.get('replaced-entry'), 0);
+  assert.equal(resolveMessageIndexForEntry('omitted-entry', entries, [replacement], projection), undefined);
+  assert.equal(resolveMessageIndexForEntry('replaced-entry', entries, [replacement], projection), 0);
 });
 
 test('findMessageIndexByRoleAndTimestamp is the last-resort fallback when order-zip counts diverge', () => {

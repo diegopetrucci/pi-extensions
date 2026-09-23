@@ -75,6 +75,54 @@ export interface MinimalSessionEntry {
 	[key: string]: unknown;
 }
 
+export interface MinimalProjectedSessionEntry {
+	sourceEntry: MinimalSessionEntry;
+	messages: MinimalMessage[];
+}
+
+export interface MinimalSessionProjection {
+	entries: MinimalProjectedSessionEntry[];
+	messages?: MinimalMessage[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isMinimalMessage(value: unknown): value is MinimalMessage {
+	return isRecord(value) && typeof value.role === "string" && value.role.length > 0;
+}
+
+function isProjectionSourceEntry(value: unknown): value is MinimalSessionEntry {
+	return isRecord(value)
+		&& typeof value.type === "string"
+		&& value.type.length > 0
+		&& typeof value.id === "string"
+		&& value.id.length > 0;
+}
+
+export function normalizeSessionProjection(value: unknown): MinimalSessionProjection | undefined {
+	if (!isRecord(value) || !Array.isArray(value.entries)) return undefined;
+
+	const entries: MinimalProjectedSessionEntry[] = [];
+	for (const candidate of value.entries) {
+		if (!isRecord(candidate) || !isProjectionSourceEntry(candidate.sourceEntry) || !Array.isArray(candidate.messages)) return undefined;
+		if (!candidate.messages.every(isMinimalMessage)) return undefined;
+		entries.push({
+			sourceEntry: candidate.sourceEntry,
+			messages: candidate.messages,
+		});
+	}
+
+	if ("messages" in value && (!Array.isArray(value.messages) || !value.messages.every(isMinimalMessage))) return undefined;
+	const messages = Array.isArray(value.messages) ? value.messages : entries.flatMap((entry) => entry.messages);
+	return { entries, messages };
+}
+
+export function sessionProjectionToMessages(projection: MinimalSessionProjection): MinimalMessage[] {
+	return projection.messages ?? projection.entries.flatMap((entry) => entry.messages);
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -699,13 +747,7 @@ export function findToolCallPairIndices(
 	return pair;
 }
 
-/**
- * Fallback correlation for decisions that reference a session entry rather
- * than a toolCallId (reserved for future non-tool-call strategies). Zips
- * message-producing session entries against the current context projection
- * by position; entry/message counts are expected to match in the common
- * case, but this degrades gracefully otherwise.
- */
+/** Map raw session-entry provenance to projected message positions when Pi exposes it. */
 function expectedRoleForEntry(entry: MinimalSessionEntry): string | undefined {
 	if (entry.type === "message") return entry.message?.role;
 	if (entry.type === "custom_message") return "custom";
@@ -714,15 +756,53 @@ function expectedRoleForEntry(entry: MinimalSessionEntry): string | undefined {
 	return undefined;
 }
 
+function buildProjectedEntryIdToMessageIndexMap(
+	entries: MinimalSessionEntry[],
+	messages: MinimalMessage[],
+	projection: MinimalSessionProjection,
+): Map<string, number> {
+	const map = new Map<string, number>();
+	const entryIds = new Set(entries.map((entry) => entry.id));
+	let cursor = 0;
+
+	for (const projectedEntry of projection.entries) {
+		let firstMessageIndex: number | undefined;
+		for (const projectedMessage of projectedEntry.messages) {
+			let messageIndex = messages.indexOf(projectedMessage, cursor);
+			if (messageIndex < cursor) messageIndex = -1;
+
+			if (messageIndex < 0 && typeof projectedMessage.timestamp === "number") {
+				messageIndex = messages.findIndex(
+					(candidate, index) =>
+						index >= cursor && candidate.role === projectedMessage.role && candidate.timestamp === projectedMessage.timestamp,
+				);
+			}
+			if (messageIndex < 0) continue;
+			firstMessageIndex ??= messageIndex;
+			cursor = messageIndex + 1;
+		}
+
+		if (firstMessageIndex !== undefined && entryIds.has(projectedEntry.sourceEntry.id)) {
+			map.set(projectedEntry.sourceEntry.id, firstMessageIndex);
+		}
+	}
+	return map;
+}
+
 export function buildEntryIdToMessageIndexMap(
 	entries: MinimalSessionEntry[],
 	messages: MinimalMessage[],
+	projection?: MinimalSessionProjection,
 ): Map<string, number> {
-	const map = new Map<string, number>();
+	if (projection) return buildProjectedEntryIdToMessageIndexMap(entries, messages, projection);
+
+	// Older runtimes expose only raw branch entries; preserve their positional
+	// correlation and use role/timestamp only when the counts diverge.
 	const producing = entries.filter((entry) =>
 		entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary" || entry.type === "compaction",
 	);
 	const length = Math.min(producing.length, messages.length);
+	const map = new Map<string, number>();
 	for (let i = 0; i < length; i++) {
 		const entry = producing[i];
 		const expectedRole = expectedRoleForEntry(entry);
@@ -747,15 +827,21 @@ export function findMessageIndexByRoleAndTimestamp(
 	return index >= 0 ? index : undefined;
 }
 
-/** Resolve a session entry id to a message index using order-zip, then role+timestamp fallback. */
+/** Resolve a session entry id using projection provenance, then legacy role+timestamp fallback. */
 export function resolveMessageIndexForEntry(
 	entryId: string,
 	entries: MinimalSessionEntry[],
 	messages: MinimalMessage[],
+	projection?: MinimalSessionProjection,
 ): number | undefined {
-	const zipMap = buildEntryIdToMessageIndexMap(entries, messages);
+	const zipMap = buildEntryIdToMessageIndexMap(entries, messages, projection);
 	const zipped = zipMap.get(entryId);
 	if (zipped !== undefined) return zipped;
+
+	// An empty projected contribution is an explicit omission/replacement state;
+	// only a validated projection may make that context-edit-aware decision.
+	if (projection?.entries.some((entry) => entry.sourceEntry.id === entryId && entry.messages.length === 0)) return undefined;
+
 	const entry = entries.find((candidate) => candidate.id === entryId);
 	if (!entry) return undefined;
 	return findMessageIndexByRoleAndTimestamp(entry, messages);
@@ -2172,8 +2258,22 @@ export function rebuildDecisionStateFromEntries(entries: MinimalSessionEntry[]):
 // /prune picker helpers (pe-8re9)
 // ============================================================================
 
-/** Convert branch entries into the plain message array the pipeline/pickers correlate against. */
-export function sessionEntriesToMessages(entries: MinimalSessionEntry[]): MinimalMessage[] {
+function resolveSessionProjection(ctx: ExtensionContext): MinimalSessionProjection | undefined {
+	try {
+		const sessionManager = ctx.sessionManager as unknown as { buildSessionProjection?: () => unknown };
+		const buildProjection = sessionManager.buildSessionProjection;
+		if (typeof buildProjection !== "function") return undefined;
+		return normalizeSessionProjection(buildProjection.call(sessionManager));
+	} catch {
+		return undefined;
+	}
+}
+
+export function sessionEntriesToMessages(
+	entries: MinimalSessionEntry[],
+	projection?: MinimalSessionProjection,
+): MinimalMessage[] {
+	if (projection) return sessionProjectionToMessages(projection);
 	const messages: MinimalMessage[] = [];
 	for (const entry of entries) {
 		if (entry.type === "message" && entry.message) messages.push(entry.message);
@@ -2288,7 +2388,7 @@ export function formatPrunableItemDetail(item: PrunableItem, cost?: CacheCostMod
 
 /** Plain-text report used both by the non-UI /prune fallback and as a debugging aid. */
 export function formatPrunableItemsReport(items: PrunableItem[]): string[] {
-	if (items.length === 0) return ["No prunable tool results found in this session."];
+	if (items.length === 0) return ["No prunable tool results found in the current model context."];
 	return items.map((item, index) => `${index + 1}. ${formatPrunableItemOption(item)}`);
 }
 
@@ -2596,7 +2696,8 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 		description: "Review, manually prune, and restore prunable tool results (interactive picker in TUI/RPC)",
 		handler: async (_args, ctx) => {
 			const branchEntries = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
-			const messages = sessionEntriesToMessages(branchEntries);
+			const projection = resolveSessionProjection(ctx);
+			const messages = sessionEntriesToMessages(branchEntries, projection);
 			const activeByToolCallId = buildActiveResultDecisionMap(persistedDecisions);
 			const restoredToolCallIds = new Set(
 				Array.from(lastDecisionByKey.values())
@@ -2606,19 +2707,20 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 			const items = buildPrunableItems(messages, activeByToolCallId, restoredToolCallIds);
 
 			if (!ctx.hasUI) {
-				notify(ctx, ["/prune: no interactive UI available. Prunable tool results in this session:", "", ...formatPrunableItemsReport(items)].join("\n"), "info");
+				notify(ctx, ["/prune: no interactive UI available. Prunable tool results in the current model context:", "", ...formatPrunableItemsReport(items)].join("\n"), "info");
 				return;
 			}
 
 			if (items.length === 0) {
-				notify(ctx, "No prunable tool results found in this session.", "info");
+				notify(ctx, "No prunable tool results found in the current model context.", "info");
 				return;
 			}
 
 			const doneLabel = "Done";
 			while (true) {
 				const latestBranch = ctx.sessionManager.getBranch() as unknown as MinimalSessionEntry[];
-				const latestMessages = sessionEntriesToMessages(latestBranch);
+				const latestProjection = resolveSessionProjection(ctx);
+				const latestMessages = sessionEntriesToMessages(latestBranch, latestProjection);
 				const latestActive = buildActiveResultDecisionMap(persistedDecisions);
 				const latestRestoredToolCallIds = new Set(
 					Array.from(lastDecisionByKey.values())
@@ -2627,7 +2729,7 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 				);
 				const latestItems = buildPrunableItems(latestMessages, latestActive, latestRestoredToolCallIds);
 				if (latestItems.length === 0) {
-					notify(ctx, "No prunable tool results found in this session.", "info");
+					notify(ctx, "No prunable tool results found in the current model context.", "info");
 					return;
 				}
 
