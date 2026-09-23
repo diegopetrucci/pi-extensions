@@ -86,10 +86,12 @@ prove the older output is stale, never on a guess:
    never supersedes.
 
 The newest operation for a given path (by message order) is never
-superseded, regardless of kind. Path extraction accepts `path`, `file_path`,
-and `filePath` argument names, matched only against pi's built-in
-`read`/`write`/`edit` tools; `bash` file writes are out of scope (this
-strategy does not parse shell commands).
+superseded, regardless of kind. Which tool **names** count as file ops is
+configurable via `strategies.supersededFileOps.readToolNames` /
+`.writeToolNames` (defaults `["read"]` / `["write", "edit"]` — pi's built-ins);
+a host whose edit extension adds tools (`replace`/`insert`) registers them there
+(a name in both lists resolves to a write). Path extraction accepts `path`,
+`file_path`, `filePath`; a call without one is skipped, and `bash` is out of scope.
 
 ## Protections
 
@@ -217,7 +219,11 @@ never required to exist. Full shape, with defaults:
   "strategies": {
     "dedupe": { "enabled": true },
     "errorPurge": { "enabled": true, "minTurnsOld": 4 },
-    "supersededFileOps": { "enabled": true }
+    "supersededFileOps": {
+      "enabled": true,
+      "readToolNames": ["read"],
+      "writeToolNames": ["write", "edit"]
+    }
   },
   "gate": {
     "mode": "on",

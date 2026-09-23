@@ -251,8 +251,18 @@ export interface StrategiesConfig {
 		/** A tool call's input is only eligible for purging once it is older than this many turns. */
 		minTurnsOld: number;
 	};
-	/** Superseded file-ops strategy (pe-qs8j): stale read/write/edit outputs replaced by a placeholder. */
-	supersededFileOps: { enabled: boolean };
+	/**
+	 * Superseded file-ops strategy (pe-qs8j): stale read/write outputs replaced by
+	 * a placeholder. Tool names are configurable so an anchor-based edit extension
+	 * can register its read/mutate tools without a code change.
+	 */
+	supersededFileOps: {
+		enabled: boolean;
+		/** Tool names treated as non-mutating file reads. Default: ["read"]. */
+		readToolNames: string[];
+		/** Tool names treated as mutating writes/edits. Default: ["write", "edit"]. */
+		writeToolNames: string[];
+	};
 }
 
 /** Net-benefit gate operating mode (pe-s2ho). */
@@ -342,7 +352,11 @@ export function defaultConfig(): DynamicContextPruningConfig {
 		strategies: {
 			dedupe: { enabled: true },
 			errorPurge: { enabled: true, minTurnsOld: DEFAULT_ERROR_PURGE_MIN_TURNS_OLD },
-			supersededFileOps: { enabled: true },
+			supersededFileOps: {
+				enabled: true,
+				readToolNames: [...DEFAULT_FILE_OP_READ_TOOL_NAMES],
+				writeToolNames: [...DEFAULT_FILE_OP_WRITE_TOOL_NAMES],
+			},
 		},
 		gate: {
 			mode: "on",
@@ -432,6 +446,8 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 			},
 			supersededFileOps: {
 				enabled: asBoolean(rawSupersededFileOps.enabled, defaults.strategies.supersededFileOps.enabled),
+				readToolNames: asStringArray(rawSupersededFileOps.readToolNames, defaults.strategies.supersededFileOps.readToolNames),
+				writeToolNames: asStringArray(rawSupersededFileOps.writeToolNames, defaults.strategies.supersededFileOps.writeToolNames),
 			},
 		},
 		gate: {
@@ -1737,18 +1753,38 @@ export const errorPurgeStrategy: PruneStrategy = {
 // superseded/pruned, regardless of kind — there is nothing later to point
 // the placeholder at.
 //
-// Path extraction is defensive: pi's built-in `read`/`write`/`edit` tools
-// all accept a `path` argument (see packages/coding-agent/src/core/tools/
-// {read,write,edit}.ts); some tool-call renderers also fall back to a
-// legacy `file_path` name, and `filePath` is accepted as a further
-// defensive fallback. `bash` is explicitly OUT of scope: this strategy does
-// not attempt to parse shell commands for file paths.
+// Path extraction is defensive: file-op tools are expected to accept a `path`
+// argument (pi's built-ins do); some renderers also fall back to a legacy
+// `file_path` name. Which tool NAMES count as file ops is configurable — see the
+// DEFAULT_FILE_OP_*_TOOL_NAMES constants below. `bash` is OUT of scope: this
+// strategy does not parse shell commands for file paths.
 
 const SUPERSEDED_FILE_OPS_STRATEGY_ID = "superseded-file-ops";
 
-type FileOpKind = "read" | "write" | "edit";
+/**
+ * Operation class derived from a tool name: `read` does not mutate the file,
+ * `mutate` does. Rules branch on this class, never on the literal name.
+ */
+type FileOpClass = "read" | "mutate";
 
-const FILE_OP_TOOL_NAMES: ReadonlySet<string> = new Set(["read", "write", "edit"]);
+/** Default tool names treated as non-mutating reads (pi's built-in `read`). */
+const DEFAULT_FILE_OP_READ_TOOL_NAMES = ["read"];
+
+/** Default tool names treated as mutating writes/edits (pi's built-in `write`/`edit`). */
+const DEFAULT_FILE_OP_WRITE_TOOL_NAMES = ["write", "edit"];
+
+/**
+ * Normalize configured tool names into lookup sets (trimmed, lower-cased, empty
+ * entries dropped). A name in both sets resolves to `mutate` (mutating wins).
+ */
+function resolveFileOpToolNames(config: { readToolNames: string[]; writeToolNames: string[] }): {
+	read: ReadonlySet<string>;
+	write: ReadonlySet<string>;
+} {
+	const normalize = (names: readonly string[]): ReadonlySet<string> =>
+		new Set(names.map((name) => name.trim().toLowerCase()).filter((name) => name.length > 0));
+	return { read: normalize(config.readToolNames), write: normalize(config.writeToolNames) };
+}
 
 /** Extract a file path from tool-call arguments, checking common arg names defensively. */
 export function extractFileOpPathArg(args: Record<string, unknown> | undefined): string | undefined {
@@ -1816,7 +1852,9 @@ export function readRangeCovers(later: FileReadRange, earlier: FileReadRange): b
 
 interface FileOpOccurrence {
 	toolCallId: string;
-	kind: FileOpKind;
+	/** Lower-cased tool name; kept for human-readable placeholders and reasons. */
+	toolName: string;
+	opClass: FileOpClass;
 	normalizedPath: string;
 	range: FileReadRange | undefined;
 	isError: boolean;
@@ -1824,11 +1862,20 @@ interface FileOpOccurrence {
 	assistantIndex: number;
 }
 
-function collectFileOpOccurrences(messages: MinimalMessage[], cwd: string | undefined): FileOpOccurrence[] {
+function collectFileOpOccurrences(
+	messages: MinimalMessage[],
+	cwd: string | undefined,
+	toolNames: { read: ReadonlySet<string>; write: ReadonlySet<string> },
+): FileOpOccurrence[] {
 	const occurrences: FileOpOccurrence[] = [];
 	for (const occurrence of collectCompletedToolCallOccurrences(messages)) {
-		const kind = occurrence.toolName.trim().toLowerCase();
-		if (!FILE_OP_TOOL_NAMES.has(kind)) continue;
+		const toolName = occurrence.toolName.trim().toLowerCase();
+		const opClass: FileOpClass | undefined = toolNames.write.has(toolName)
+			? "mutate"
+			: toolNames.read.has(toolName)
+				? "read"
+				: undefined;
+		if (!opClass) continue;
 		const rawPath = extractFileOpPathArg(occurrence.arguments);
 		if (!rawPath) continue; // can't safely correlate without a path
 		const normalizedPath = normalizeFileOpsPath(rawPath, cwd);
@@ -1836,9 +1883,10 @@ function collectFileOpOccurrences(messages: MinimalMessage[], cwd: string | unde
 		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
 		occurrences.push({
 			toolCallId: occurrence.toolCallId,
-			kind: kind as FileOpKind,
+			toolName,
+			opClass,
 			normalizedPath,
-			range: kind === "read" ? computeFileReadRange(occurrence.arguments) : undefined,
+			range: opClass === "read" ? computeFileReadRange(occurrence.arguments) : undefined,
 			isError: occurrence.isError,
 			resultTextLength: contentTextLength(resultMessage.content),
 			assistantIndex: occurrence.assistantIndex,
@@ -1847,16 +1895,16 @@ function collectFileOpOccurrences(messages: MinimalMessage[], cwd: string | unde
 	return occurrences;
 }
 
-function buildFileChangedPlaceholder(normalizedPath: string, supersedingKind: FileOpKind, supersedingToolCallId: string): string {
-	return `[pruned by ${EXTENSION_ID}: file has since changed — ${normalizedPath} was modified by a later ${supersedingKind} (call ${supersedingToolCallId})]`;
+function buildFileChangedPlaceholder(normalizedPath: string, supersedingToolName: string, supersedingToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: file has since changed — ${normalizedPath} was modified by a later ${supersedingToolName} (call ${supersedingToolCallId})]`;
 }
 
 function buildSupersededReadPlaceholder(normalizedPath: string, supersedingToolCallId: string): string {
 	return `[pruned by ${EXTENSION_ID}: superseded by newer read of ${normalizedPath} (call ${supersedingToolCallId})]`;
 }
 
-function buildSupersededWritePlaceholder(normalizedPath: string, supersedingKind: FileOpKind, supersedingToolCallId: string): string {
-	return `[pruned by ${EXTENSION_ID}: superseded by newer ${supersedingKind} of ${normalizedPath} (call ${supersedingToolCallId})]`;
+function buildSupersededWritePlaceholder(normalizedPath: string, supersedingToolName: string, supersedingToolCallId: string): string {
+	return `[pruned by ${EXTENSION_ID}: superseded by newer ${supersedingToolName} of ${normalizedPath} (call ${supersedingToolCallId})]`;
 }
 
 export const supersededFileOpsStrategy: PruneStrategy = {
@@ -1864,7 +1912,8 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 	propose(input: StrategyProposeInput): ProposedPrune[] {
 		if (input.config.strategies.supersededFileOps.enabled === false) return [];
 
-		const occurrences = collectFileOpOccurrences(input.messages, input.cwd);
+		const toolNames = resolveFileOpToolNames(input.config.strategies.supersededFileOps);
+		const occurrences = collectFileOpOccurrences(input.messages, input.cwd, toolNames);
 		const byPath = new Map<string, FileOpOccurrence[]>();
 		for (const occurrence of occurrences) {
 			const group = byPath.get(occurrence.normalizedPath);
@@ -1903,7 +1952,7 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 				// supersede the newest op for a path") — but still fold it into the
 				// tracking state below so earlier occurrences can see it as "later".
 				if (i !== group.length - 1) {
-					if (occurrence.kind === "read") {
+					if (occurrence.opClass === "read") {
 						// Rule 3 takes priority: any later successful write/edit makes
 						// this read stale outright, regardless of read-vs-read coverage.
 						if (nearestLaterSuccessfulWrite) {
@@ -1912,10 +1961,10 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 									strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
 									toolCallId: occurrence.toolCallId,
 									kind: "tool_result_content",
-									reason: `${occurrence.normalizedPath} has since been modified (see ${nearestLaterSuccessfulWrite.kind} call ${nearestLaterSuccessfulWrite.toolCallId})`,
+									reason: `${occurrence.normalizedPath} has since been modified (see ${nearestLaterSuccessfulWrite.toolName} call ${nearestLaterSuccessfulWrite.toolCallId})`,
 									placeholder: buildFileChangedPlaceholder(
 										occurrence.normalizedPath,
-										nearestLaterSuccessfulWrite.kind,
+										nearestLaterSuccessfulWrite.toolName,
 										nearestLaterSuccessfulWrite.toolCallId,
 									),
 								});
@@ -1945,10 +1994,10 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 								strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
 								toolCallId: occurrence.toolCallId,
 								kind: "tool_result_content",
-								reason: `superseded by newer ${nearestLaterSuccessfulWrite.kind} of ${occurrence.normalizedPath} (call ${nearestLaterSuccessfulWrite.toolCallId})`,
+								reason: `superseded by newer ${nearestLaterSuccessfulWrite.toolName} of ${occurrence.normalizedPath} (call ${nearestLaterSuccessfulWrite.toolCallId})`,
 								placeholder: buildSupersededWritePlaceholder(
 									occurrence.normalizedPath,
-									nearestLaterSuccessfulWrite.kind,
+									nearestLaterSuccessfulWrite.toolName,
 									nearestLaterSuccessfulWrite.toolCallId,
 								),
 							});
@@ -1957,7 +2006,7 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 				}
 
 				// Fold this occurrence into the tracking state for the next (earlier) iteration.
-				if (occurrence.kind !== "read") {
+				if (occurrence.opClass !== "read") {
 					if (!occurrence.isError) nearestLaterSuccessfulWrite = occurrence;
 				} else if (occurrence.range !== undefined) {
 					const occurrenceRange = occurrence.range;
@@ -2532,7 +2581,9 @@ export function formatStatusReport(input: StatusReportInput): string[] {
 	lines.push(
 		`  error-purge: ${config.strategies.errorPurge.enabled ? "on" : "off"} (minTurnsOld=${config.strategies.errorPurge.minTurnsOld})`,
 	);
-	lines.push(`  superseded-file-ops: ${config.strategies.supersededFileOps.enabled ? "on" : "off"}`);
+	lines.push(
+		`  superseded-file-ops: ${config.strategies.supersededFileOps.enabled ? "on" : "off"} (readTools=${config.strategies.supersededFileOps.readToolNames.join(",")}, writeTools=${config.strategies.supersededFileOps.writeToolNames.join(",")})`,
+	);
 	lines.push(
 		`Protections: recentTurns=${config.protections.recentTurns}, protectedTools=${config.protections.toolNames.length}, protectedPathGlobs=${config.protections.pathGlobs.length}`,
 	);

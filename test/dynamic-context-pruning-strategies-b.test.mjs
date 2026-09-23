@@ -70,6 +70,24 @@ function propose(messages, configOverrides = {}, cwd = undefined) {
   });
 }
 
+/**
+ * Like `propose`, but overrides the superseded-file-ops tool-name lists — the
+ * knob a host uses to register an anchor-based edit extension's tools.
+ */
+function proposeWithToolNames(messages, { readToolNames, writeToolNames }, cwd = undefined) {
+  const base = defaultConfig();
+  return propose(
+    messages,
+    {
+      strategies: {
+        ...base.strategies,
+        supersededFileOps: { ...base.strategies.supersededFileOps, readToolNames, writeToolNames },
+      },
+    },
+    cwd,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Path extraction & normalization
 // ---------------------------------------------------------------------------
@@ -443,4 +461,67 @@ test('pipeline via cwd: relative reads against the same session cwd are recogniz
   });
   const r1Result = result.messages.find((m) => m.role === 'toolResult' && m.toolCallId === 'r1');
   assert.ok(r1Result.content[0].text.includes('pruned by dynamic-context-pruning'));
+});
+
+// ---------------------------------------------------------------------------
+// Strategy: configurable file-op tool names (read vs. mutate)
+// ---------------------------------------------------------------------------
+
+test('supersededFileOpsStrategy: configured write tools (replace/insert) supersede an earlier read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+  });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1', 'the stale read is the prune target');
+  assert.match(proposals[0].placeholder, /file has since changed/);
+  assert.ok(proposals[0].placeholder.includes('e1'));
+});
+
+test('supersededFileOpsStrategy: by default an unlisted tool name (replace) is ignored', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'applied'),
+  ];
+  assert.deepEqual(propose(messages), [], 'defaults recognize only read/write/edit - no third-party coupling by default');
+});
+
+test('supersededFileOpsStrategy: a configured custom read tool name is treated as a read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'view', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('r2', 'view', { path: 'a.txt' }, 'y'.repeat(500)),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: ['view'], writeToolNames: ['write', 'edit'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1');
+});
+
+test('supersededFileOpsStrategy: tool names match case-insensitively and trim surrounding whitespace', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'Replace', { path: 'a.txt' }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: [' read '], writeToolNames: ['Replace'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1');
+});
+
+test('supersededFileOpsStrategy: a name in both lists resolves to mutate (mutating wins)', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'dual', { path: 'a.txt' }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read', 'dual'],
+    writeToolNames: ['write', 'edit', 'dual'],
+  });
+  // Were `dual` classified as a read, rule 3 would not fire and r1 would
+  // survive; classifying it as a mutate supersedes r1.
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1');
+  assert.match(proposals[0].placeholder, /file has since changed/);
 });
