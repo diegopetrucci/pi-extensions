@@ -1,5 +1,7 @@
 # Pi 0.85.1 compatibility work
 
+> Superseded as the current development-baseline record by [`pi-0.87.1-validation.md`](./pi-0.87.1-validation.md); this document remains the historical Pi 0.85.1 evidence.
+
 Target: Pi 0.85.1. Existing fleet certification remains 0.84.4 until the manual matrix below passes.
 
 The v0.1.67 model-selection release is separate from this certification effort. It ships the validated catalog changes without advancing fleet markers or claiming completion of the remaining 0.85.1 gates.

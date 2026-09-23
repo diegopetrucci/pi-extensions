@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
+
 import { createModelSelectionContext, loadRoleTestUtils } from './support/provider-policy-contract-support.mjs';
 
 async function loadOracleTestUtils() {
@@ -105,6 +107,18 @@ test('oracle auto-selection stays on the current provider when it has no reasoni
     result.selection.selectionReason,
     /current provider has no reasoning models available, so the top-ranked model on that provider was used\./i,
   );
+});
+
+test('Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 remain xhigh', async () => {
+  const { resolveThinkingLevel } = await loadOracleTestUtils();
+  const sol = getBuiltinModels('openai').find((model) => model.id === 'gpt-6-sol');
+  const astra = getBuiltinModels('openai').find((model) => model.id === 'gpt-6-astra');
+  const opus = getBuiltinModels('anthropic').find((model) => model.id === 'claude-opus-5-5');
+  assert.ok(sol && astra && opus, 'expected Pi 0.87.1 frontier models in the pinned catalog');
+
+  assert.equal(resolveThinkingLevel(sol, undefined).effective, 'high');
+  assert.equal(resolveThinkingLevel(astra, undefined).effective, 'xhigh');
+  assert.equal(resolveThinkingLevel(opus, undefined).effective, 'xhigh');
 });
 
 test('oracle thinking-level resolution clamps unsupported levels for matched models', async () => {

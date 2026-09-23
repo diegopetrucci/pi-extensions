@@ -157,6 +157,21 @@ type MinimalEntry = {
 	firstKeptEntryId?: string;
 };
 
+type MinimalProjectionEntry = {
+	sourceEntry: MinimalEntry;
+	messages: MinimalMessage[];
+};
+
+type MinimalSessionProjection = {
+	entries: MinimalProjectionEntry[];
+	messages?: MinimalMessage[];
+};
+
+type AnalysisResult = {
+	segments: Segment[];
+	messageCount: number;
+};
+
 type Segment = {
 	id: string;
 	category: CategoryId;
@@ -757,13 +772,53 @@ function collectCurrentContextEntries(branchEntries: MinimalEntry[]): MinimalEnt
 	return result;
 }
 
+function isProjectionSourceEntry(value: unknown): value is MinimalEntry {
+	return isRecord(value)
+		&& typeof value.type === "string"
+		&& value.type.length > 0
+		&& typeof value.id === "string"
+		&& value.id.length > 0;
+}
+
+function isProjectionMessage(value: unknown): value is MinimalMessage {
+	return isRecord(value) && typeof value.role === "string" && value.role.length > 0;
+}
+
+function resolveSessionProjection(ctx: ExtensionCommandContext): MinimalSessionProjection | undefined {
+	const sessionManager = ctx.sessionManager as unknown as { buildSessionProjection?: () => unknown };
+	const buildProjection = sessionManager.buildSessionProjection;
+	if (typeof buildProjection !== "function") return undefined;
+
+	const projection = safeCall(() => buildProjection.call(sessionManager));
+	if (!isRecord(projection) || !Array.isArray(projection.entries)) return undefined;
+
+	const entries: MinimalProjectionEntry[] = [];
+	for (const candidate of projection.entries) {
+		if (!isRecord(candidate) || !isProjectionSourceEntry(candidate.sourceEntry) || !Array.isArray(candidate.messages)) return undefined;
+		if (!candidate.messages.every(isProjectionMessage)) return undefined;
+		entries.push({
+			sourceEntry: candidate.sourceEntry,
+			messages: candidate.messages,
+		});
+	}
+	if ("messages" in projection && (!Array.isArray(projection.messages) || !projection.messages.every(isProjectionMessage))) return undefined;
+	return {
+		entries,
+		messages: Array.isArray(projection.messages) ? projection.messages : entries.flatMap((entry) => entry.messages),
+	};
+}
+
 function resolveCurrentContextEntries(ctx: ExtensionCommandContext, branchEntries: MinimalEntry[]): MinimalEntry[] {
-	const currentEntries = safeCall(() => ctx.sessionManager.buildContextEntries()) as MinimalEntry[] | undefined;
-	if (Array.isArray(currentEntries)) return currentEntries;
+	const sessionManager = ctx.sessionManager as unknown as { buildContextEntries?: () => unknown };
+	const buildEntries = sessionManager.buildContextEntries;
+	const currentEntries = typeof buildEntries === "function"
+		? safeCall(() => buildEntries.call(sessionManager))
+		: undefined;
+	if (Array.isArray(currentEntries)) return currentEntries as MinimalEntry[];
 	return collectCurrentContextEntries(branchEntries);
 }
 
-function analyzeEntries(entries: MinimalEntry[], redact: boolean): { segments: Segment[]; messageCount: number } {
+function analyzeEntries(entries: MinimalEntry[], redact: boolean): AnalysisResult {
 	const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
 	let messageCount = 0;
 	for (const entry of entries) {
@@ -773,6 +828,31 @@ function analyzeEntries(entries: MinimalEntry[], redact: boolean): { segments: S
 		analyzeMessage(state, message, entry);
 	}
 	return { segments: state.segments, messageCount };
+}
+
+function analyzeProjection(projection: MinimalSessionProjection, redact: boolean): AnalysisResult {
+	const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
+	let messageCount = 0;
+	for (const projectedEntry of projection.entries) {
+		for (const message of projectedEntry.messages) {
+			// Pi's projection may carry the persisted system message on a compaction
+			// entry; the active system prompt is accounted for separately as overhead.
+			if (message.role === "system") continue;
+			messageCount++;
+			analyzeMessage(state, message, projectedEntry.sourceEntry);
+		}
+	}
+	return { segments: state.segments, messageCount };
+}
+
+function resolveCurrentContextAnalysis(
+	ctx: ExtensionCommandContext,
+	branchEntries: MinimalEntry[],
+	redact: boolean,
+): AnalysisResult {
+	const projection = resolveSessionProjection(ctx);
+	if (projection) return analyzeProjection(projection, redact);
+	return analyzeEntries(resolveCurrentContextEntries(ctx, branchEntries), redact);
 }
 
 function collectToolSchemaText(pi: ExtensionAPI): string {
@@ -927,9 +1007,8 @@ function getSessionName(ctx: ExtensionCommandContext): string | undefined {
 
 function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: CommandOptions): ReportData {
 	const branchEntries = ctx.sessionManager.getBranch() as MinimalEntry[];
-	const currentEntries = resolveCurrentContextEntries(ctx, branchEntries);
 	const overhead = buildOverheadSegments(pi, ctx, options.redact);
-	const currentAnalysis = analyzeEntries(currentEntries, options.redact);
+	const currentAnalysis = resolveCurrentContextAnalysis(ctx, branchEntries, options.redact);
 	const fullAnalysis = analyzeEntries(branchEntries, options.redact);
 	const usage = ctx.getContextUsage();
 	const contextTokens = usage?.tokens ?? null;

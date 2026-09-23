@@ -154,7 +154,7 @@ Gate modes (`/context-pruning gate <mode>`):
 ### `/prune`
 
 Interactive picker (TUI/RPC) over every prunable tool result in the current
-branch:
+model context:
 
 ```text
 /prune
