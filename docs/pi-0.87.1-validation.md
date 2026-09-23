@@ -28,7 +28,7 @@ Pi `v0.87.1` adds Claude Opus 5.5, GPT-6 Sol, GPT-6 Luna, and Grok 4.7 to the su
 ## Completed 0.87.1 model-policy refresh
 
 - Opus 5.5 now leads the affected Claude ladders, with exact hyphen/dot spellings before ambiguous Opus 5 patterns and regional Bedrock aliases retained.
-- GPT-6 Astra remains above GPT-6 Sol/Luna; newer Sol/Luna tiers precede their GPT-5.6 counterparts on Amazon Bedrock, Azure, Cloudflare, Copilot, OpenAI, Codex, OpenCode, OpenRouter, Radius, and Vercel ladders.
+- GPT-6 Astra remains above GPT-6 Sol/Luna; newer Sol/Luna tiers precede their GPT-5.6 counterparts on Azure, Copilot, OpenAI, Codex, OpenCode, OpenRouter, Radius, and Vercel ladders.
 - Grok 4.7 now precedes Grok 4.6 wherever the 0.87.1 catalog exposes both, including Copilot, OpenCode Go, OpenRouter, Vercel, and xAI.
 - Oracle defaults GPT-6 Sol to `high`, while GPT-6 Astra and Claude Opus 5.5 retain `xhigh`; none of the new frontier models were added to fast-mode allowlists.
 - Catalog-backed model-selection tests resolve actual model IDs under normal and reversed catalog order and assert version/tier invariants without requiring one Bedrock region.

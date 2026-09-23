@@ -7,7 +7,7 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 
 | Provider | Intended top pick | Notes |
 |---|---|---|
-| `amazon-bedrock` | `global.anthropic.claude-opus-5-5` | Prefers the stable global Bedrock alias, then the pinned canonical/regional Opus 5.5 IDs before generic availability fallback; older Opus/Fable, GPT-5.6 tiers, Claude Sonnet, and Grok 4.6 remain below it. |
+| `amazon-bedrock` | `global.anthropic.claude-opus-5-5` | Prefers the stable global Bedrock alias, then the pinned canonical/regional Opus 5.5 IDs before generic availability fallback; older Opus/Fable, GPT-6 Astra, GPT-5.6 tiers, Claude Sonnet, and Grok 4.6 remain below it. |
 | `ant-ling` | `Ling-2.6-1T` | Then Ling 2.6 Flash. |
 | `anthropic` | `claude-opus-5-5` | Then Claude Opus 5, Fable, older Opus IDs, and Claude Sonnet 5 before Claude Sonnet 4. |
 | `azure-openai-responses` | `gpt-6-astra` | Then GPT-6 Sol, GPT-5.6 Sol/Terra, GPT-6 Luna, GPT-5.6 Luna, current GPT-5 aliases, newer GPT-5.x releases, and o-series reasoning models. |
