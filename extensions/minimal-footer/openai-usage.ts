@@ -5,6 +5,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 const PROVIDER_ID = "openai-codex";
 
 interface WhamUsageWindow {
+	limit_window_seconds?: number;
 	reset_at?: number;
 	used_percent?: number;
 }
@@ -18,6 +19,7 @@ interface WhamUsageResponse {
 
 export interface UsageWindow {
 	usedPercent?: number;
+	windowSeconds?: number;
 	resetAt?: number;
 }
 
@@ -43,6 +45,11 @@ function normalizeUsedPercent(value?: number): number | undefined {
 	return Math.min(100, Math.max(0, value));
 }
 
+function normalizeWindowSeconds(value?: number): number | undefined {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+	return value;
+}
+
 function normalizeResetAt(value?: number): number | undefined {
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
 	return value * 1000;
@@ -51,9 +58,10 @@ function normalizeResetAt(value?: number): number | undefined {
 function parseUsageWindow(window?: WhamUsageWindow): UsageWindow | undefined {
 	if (!window) return undefined;
 	const usedPercent = normalizeUsedPercent(window.used_percent);
+	const windowSeconds = normalizeWindowSeconds(window.limit_window_seconds);
 	const resetAt = normalizeResetAt(window.reset_at);
-	if (usedPercent === undefined && resetAt === undefined) return undefined;
-	return { usedPercent, resetAt };
+	if (usedPercent === undefined && windowSeconds === undefined && resetAt === undefined) return undefined;
+	return { usedPercent, windowSeconds, resetAt };
 }
 
 function parseUsageSnapshot(data: WhamUsageResponse): Omit<UsageSnapshot, "fetchedAt"> {
@@ -125,6 +133,36 @@ function formatUsagePercent(value?: number): string | undefined {
 	return `${Math.round(value)}%`;
 }
 
+// Primary/secondary describe positions, not fixed periods. Match each reported
+// duration the same way Codex does, allowing small backend rounding differences.
+const KNOWN_WINDOW_LABELS: ReadonlyArray<{ seconds: number; label: string }> = [
+	{ seconds: 5 * 60 * 60, label: "5h" },
+	{ seconds: 24 * 60 * 60, label: "1d" },
+	{ seconds: 7 * 24 * 60 * 60, label: "7d" },
+	{ seconds: 30 * 24 * 60 * 60, label: "30d" },
+	{ seconds: 365 * 24 * 60 * 60, label: "365d" },
+];
+
+function isApproximateWindow(actualSeconds: number, expectedSeconds: number): boolean {
+	return Math.abs(actualSeconds - expectedSeconds) <= expectedSeconds * 0.05;
+}
+
+function formatUsageWindowLabel(
+	window: UsageWindow | undefined,
+	configuredLabel: string,
+	fallbackLabel: string,
+): string {
+	if (configuredLabel.toLowerCase() !== "auto") return configuredLabel;
+	const windowSeconds = window?.windowSeconds;
+	if (windowSeconds !== undefined) {
+		const knownWindow = KNOWN_WINDOW_LABELS.find(({ seconds }) =>
+			isApproximateWindow(windowSeconds, seconds)
+		);
+		if (knownWindow) return knownWindow.label;
+	}
+	return fallbackLabel;
+}
+
 export function isOpenAICodexProvider(provider?: string): boolean {
 	return provider === PROVIDER_ID;
 }
@@ -139,8 +177,18 @@ export function formatUsageSummary(
 	const secondary = formatUsagePercent(snapshot.secondary?.usedPercent);
 	const parts: string[] = [];
 
-	if (windows.primary.enabled && primary) parts.push(`${windows.primary.label} ${primary}`);
-	if (windows.secondary.enabled && secondary) parts.push(`${windows.secondary.label} ${secondary}`);
+	if (windows.primary.enabled && primary) {
+		const label = formatUsageWindowLabel(snapshot.primary, windows.primary.label, "usage");
+		parts.push(`${label} ${primary}`);
+	}
+	if (windows.secondary.enabled && secondary) {
+		const label = formatUsageWindowLabel(
+			snapshot.secondary,
+			windows.secondary.label,
+			"secondary usage",
+		);
+		parts.push(`${label} ${secondary}`);
+	}
 
 	return parts.length > 0 ? parts.join(" · ") : undefined;
 }

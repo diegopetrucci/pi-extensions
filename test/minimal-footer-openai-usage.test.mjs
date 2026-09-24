@@ -71,8 +71,8 @@ test('minimal-footer openai usage detects provider and formats enabled usage win
   assert.equal(isOpenAICodexProvider(undefined), false)
 
   const snapshot = {
-    primary: { usedPercent: 12.4 },
-    secondary: { usedPercent: 67.6 },
+    primary: { usedPercent: 12.4, windowSeconds: 604_800 },
+    secondary: { usedPercent: 67.6, windowSeconds: 18_000 },
     fetchedAt: 123,
   }
   const windows = {
@@ -97,6 +97,45 @@ test('minimal-footer openai usage detects provider and formats enabled usage win
   )
   assert.equal(formatUsageSummary({ primary: { resetAt: 1 }, fetchedAt: 123 }, windows), undefined)
   assert.equal(formatUsageSummary(undefined, windows), undefined)
+})
+
+test('minimal-footer openai usage auto-labels windows from their reported durations', () => {
+  const windows = {
+    primary: { enabled: true, label: 'auto' },
+    secondary: { enabled: true, label: 'auto' },
+  }
+
+  assert.equal(
+    formatUsageSummary({
+      primary: { usedPercent: 12.4, windowSeconds: 18_000 },
+      secondary: { usedPercent: 67.6, windowSeconds: 604_800 },
+      fetchedAt: 123,
+    }, windows),
+    '5h 12% · 7d 68%',
+  )
+  assert.equal(
+    formatUsageSummary({
+      primary: { usedPercent: 42.2, windowSeconds: 604_800 },
+      fetchedAt: 123,
+    }, windows),
+    '7d 42%',
+  )
+  assert.equal(
+    formatUsageSummary({
+      primary: { usedPercent: 9, windowSeconds: 86_400 },
+      secondary: { usedPercent: 10, windowSeconds: 2_592_000 },
+      fetchedAt: 123,
+    }, windows),
+    '1d 9% · 30d 10%',
+  )
+  assert.equal(
+    formatUsageSummary({
+      primary: { usedPercent: 9, windowSeconds: 999 },
+      secondary: { usedPercent: 10 },
+      fetchedAt: 123,
+    }, windows),
+    'usage 9% · secondary usage 10%',
+  )
 })
 
 test('minimal-footer openai usage skips fetch when no token is available', async () => {
@@ -154,10 +193,12 @@ test('minimal-footer openai usage adds OAuth account header and normalizes usage
             rate_limit: {
               primary_window: {
                 used_percent: -5,
+                limit_window_seconds: 604_800,
                 reset_at: 123,
               },
               secondary_window: {
                 used_percent: 150.2,
+                limit_window_seconds: -1,
                 reset_at: 456.789,
               },
             },
@@ -167,8 +208,8 @@ test('minimal-footer openai usage adds OAuth account header and normalizes usage
     }, async () => {
       const snapshot = await fetchOpenAICodexUsage(authStorage, { timeoutMs: 321 })
       assert.deepEqual(snapshot, {
-        primary: { usedPercent: 0, resetAt: 123000 },
-        secondary: { usedPercent: 100, resetAt: 456789 },
+        primary: { usedPercent: 0, windowSeconds: 604800, resetAt: 123000 },
+        secondary: { usedPercent: 100, windowSeconds: undefined, resetAt: 456789 },
         fetchedAt: 987654321,
       })
     })

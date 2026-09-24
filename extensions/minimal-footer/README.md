@@ -12,7 +12,7 @@ It replaces pi's built-in footer with a cleaner two-line layout that focuses on 
 - current context percentage
 - red `DUMB ZONE` indicator when context usage is above 200k tokens
 - current model and thinking level
-- OpenAI Codex 5-hour and 7-day usage when available
+- OpenAI Codex usage windows, labeled from the durations reported by OpenAI
 - `xp` marker when Pi experimental features are enabled
 
 ## Layout
@@ -45,11 +45,13 @@ When context usage is above 200k tokens, the bottom-left line includes a red war
 44.1% · DUMB ZONE
 ```
 
-When using `openai-codex`, the bottom-left line also includes subscription usage:
+When using `openai-codex`, the bottom-left line also includes subscription usage. A typical account with both windows looks like:
 
 ```text
 44.1% · 5h 12% · 7d 38%
 ```
+
+Window labels come from OpenAI's reported durations, so an account that reports only a weekly primary window is shown correctly (for example, `7d 38%`) instead of being assumed to have a 5-hour window.
 
 When `PI_EXPERIMENTAL=1`, the bottom-left line also includes an experimental marker:
 
@@ -116,11 +118,11 @@ Example:
     "windows": {
       "primary": {
         "enabled": true,
-        "label": "5h"
+        "label": "auto"
       },
       "secondary": {
         "enabled": true,
-        "label": "7d"
+        "label": "auto"
       }
     }
   },
@@ -205,9 +207,9 @@ Disable git dirty/ahead/PR status:
 - `codexUsage.cacheTtlMs`: in-memory usage cache duration
 - `codexUsage.requestTimeoutMs`: usage request timeout
 - `codexUsage.windows.primary.enabled`: show the primary usage window
-- `codexUsage.windows.primary.label`: label for the primary usage window
+- `codexUsage.windows.primary.label`: `"auto"` derives the primary label from OpenAI's reported duration; any other value overrides it
 - `codexUsage.windows.secondary.enabled`: show the secondary usage window
-- `codexUsage.windows.secondary.label`: label for the secondary usage window
+- `codexUsage.windows.secondary.label`: `"auto"` derives the secondary label from OpenAI's reported duration; any other value overrides it
 - `experimentalMarker.enabled`: show the marker when `PI_EXPERIMENTAL=1`
 - `experimentalMarker.label`: marker text
 - `experimentalMarker.color`: theme color for the marker (`error`, `warning`, `accent`, `text`, or `dim`)
@@ -221,7 +223,7 @@ Disable git dirty/ahead/PR status:
 - **Top left:** current git branch plus dirty/ahead/PR status when available
 - **Top right:** current repo directory name
 - **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 200k context tokens
-- **Bottom left on `openai-codex`:** current context usage percentage plus 5-hour and 7-day Codex usage
+- **Bottom left on `openai-codex`:** current context usage percentage plus the Codex usage windows reported for the account
 - **Bottom left with `PI_EXPERIMENTAL=1`:** current context usage percentage plus `xp`
 - **Bottom right:** model id and thinking level
 
@@ -237,5 +239,5 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 - Shows `DUMB ZONE` only while context usage is above 200k tokens.
 - Shows the model id rather than a provider-specific display label.
 - Shows `xp` when `PI_EXPERIMENTAL=1`.
-- For `openai-codex`, reads pi's stored OAuth login and fetches usage from ChatGPT's backend usage endpoint.
+- For `openai-codex`, reads pi's stored OAuth login and fetches usage from ChatGPT's backend usage endpoint. Window labels are inferred from each window's reported duration; missing or unrecognized durations use neutral `usage` labels rather than guessing from window position.
 - Usage is cached briefly in memory and refreshed after turns.
