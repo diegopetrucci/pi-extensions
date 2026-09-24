@@ -70,6 +70,30 @@ function propose(messages, configOverrides = {}, cwd = undefined) {
   });
 }
 
+/**
+ * Like `propose`, but overrides the superseded-file-ops tool-name lists and
+ * no-op markers — the knobs a host uses to register an anchor-based edit
+ * extension's tools.
+ */
+function proposeWithToolNames(messages, { readToolNames, writeToolNames, noopMarkers = [] }, cwd = undefined) {
+  const base = defaultConfig();
+  return propose(
+    messages,
+    {
+      strategies: {
+        ...base.strategies,
+        supersededFileOps: {
+          ...base.strategies.supersededFileOps,
+          readToolNames,
+          writeToolNames,
+          noopMarkers,
+        },
+      },
+    },
+    cwd,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Path extraction & normalization
 // ---------------------------------------------------------------------------
@@ -443,4 +467,151 @@ test('pipeline via cwd: relative reads against the same session cwd are recogniz
   });
   const r1Result = result.messages.find((m) => m.role === 'toolResult' && m.toolCallId === 'r1');
   assert.ok(r1Result.content[0].text.includes('pruned by dynamic-context-pruning'));
+});
+
+// ---------------------------------------------------------------------------
+// Strategy: configurable file-op tool names (read vs. mutate)
+// ---------------------------------------------------------------------------
+
+test('supersededFileOpsStrategy: configured write tools (replace/insert) supersede an earlier read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+  });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1', 'the stale read is the prune target');
+  assert.match(proposals[0].placeholder, /file has since changed/);
+  assert.ok(proposals[0].placeholder.includes('e1'));
+});
+
+test('supersededFileOpsStrategy: by default an unlisted tool name (replace) is ignored', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'applied'),
+  ];
+  assert.deepEqual(propose(messages), [], 'defaults recognize only read/write/edit - no third-party coupling by default');
+});
+
+test('supersededFileOpsStrategy: a configured custom read tool name is treated as a read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'view', { path: 'a.txt', offset: 1, limit: 5 }, 'x'.repeat(500)),
+    ...toolCallTurn('w1', 'write', { path: 'a.txt', content: 'v2' }, 'Successfully wrote 2 bytes to a.txt'),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: ['view'], writeToolNames: ['write', 'edit'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1', 'the custom read is invalidated by the later write');
+});
+
+test('supersededFileOpsStrategy: tool names match case-insensitively and trim surrounding whitespace', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'Replace', { path: 'a.txt' }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: [' read '], writeToolNames: ['Replace'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1');
+});
+
+test('supersededFileOpsStrategy: a name in both lists resolves to mutate (mutating wins)', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'dual', { path: 'a.txt' }, 'applied'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read', 'dual'],
+    writeToolNames: ['write', 'edit', 'dual'],
+  });
+  // Were `dual` classified as a read, rule 3 would not fire and r1 would
+  // survive; classifying it as a mutate supersedes r1.
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1');
+  assert.match(proposals[0].placeholder, /file has since changed/);
+});
+
+// ---------------------------------------------------------------------------
+// Strategy: read range contracts and no-op mutations
+// ---------------------------------------------------------------------------
+
+test('supersededFileOpsStrategy: a custom reader with an unknown range contract is NOT superseded by a later read of the same path', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'excerpt', { path: 'a.txt', startLine: 1, endLine: 5 }, 'x'.repeat(500)),
+    ...toolCallTurn('r2', 'excerpt', { path: 'a.txt', startLine: 40, endLine: 44 }, 'y'.repeat(500)),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: ['read', 'excerpt'], writeToolNames: ['write', 'edit'] });
+  assert.deepEqual(propose(messages), [], 'the built-in default still ignores the custom reader');
+  assert.deepEqual(proposals, [], 'two DISJOINT custom reads must not supersede each other: no offset/limit means the range contract is unknown');
+});
+
+test('supersededFileOpsStrategy: an unknown-range custom read is still invalidated by a later mutation', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'excerpt', { path: 'a.txt', startLine: 1, endLine: 5 }, 'x'.repeat(500)),
+    ...toolCallTurn('w1', 'write', { path: 'a.txt', content: 'v2' }, 'Successfully wrote 2 bytes to a.txt'),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: ['read', 'excerpt'], writeToolNames: ['write', 'edit'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1', 'rule 3 (later mutation) still applies when the range is unknown');
+  assert.match(proposals[0].placeholder, /file has since changed/);
+});
+
+test('supersededFileOpsStrategy: a custom reader that passes offset/limit is assumed to share the built-in range contract', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'excerpt', { path: 'a.txt', offset: 1, limit: 5 }, 'x'.repeat(500)),
+    ...toolCallTurn('r2', 'excerpt', { path: 'a.txt', offset: 1, limit: 20 }, 'y'.repeat(500)),
+  ];
+  const proposals = proposeWithToolNames(messages, { readToolNames: ['read', 'excerpt'], writeToolNames: ['write', 'edit'] });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].toolCallId, 'r1', 'the covering later read supersedes the earlier one');
+});
+
+test('supersededFileOpsStrategy: a configured no-op mutation does NOT invalidate an earlier read', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'No changes made to a.txt. The edit produced identical content.'),
+  ];
+  const noopAware = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+    noopMarkers: ['no changes made'],
+  });
+  assert.deepEqual(noopAware, [], 'a no-op mutation proves nothing changed, so the read stays fresh');
+
+  // Without the marker the tool result is indistinguishable from a real edit —
+  // the pre-existing (over-eager) behaviour is preserved.
+  const unmarked = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+    noopMarkers: [],
+  });
+  assert.equal(unmarked.length, 1);
+  assert.match(unmarked[0].placeholder, /file has since changed/);
+});
+
+test('supersededFileOpsStrategy: a configured no-op mutation does NOT supersede an earlier successful write', () => {
+  const messages = [
+    ...toolCallTurn('w1', 'write', { path: 'a.txt', content: 'v1' }, 'Successfully wrote 2 bytes to a.txt'),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'No changes made to a.txt. The edit produced identical content.'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+    noopMarkers: ['no changes made'],
+  });
+  assert.deepEqual(proposals, [], 'rule 4 requires the later mutation to have changed the file');
+});
+
+test('supersededFileOpsStrategy: no-op matching is case-insensitive and substring-based', () => {
+  const messages = [
+    ...toolCallTurn('r1', 'read', { path: 'a.txt' }, 'x'.repeat(500)),
+    ...toolCallTurn('e1', 'replace', { path: 'a.txt', remove_from: 'aaaa', remove_to: 'bbbb', replacement_lines: ['y'] }, 'NO CHANGES MADE to a.txt — identical content.'),
+  ];
+  const proposals = proposeWithToolNames(messages, {
+    readToolNames: ['read'],
+    writeToolNames: ['write', 'edit', 'replace', 'insert'],
+    noopMarkers: ['no changes made'],
+  });
+  assert.deepEqual(proposals, []);
 });
