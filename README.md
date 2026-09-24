@@ -13,7 +13,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### Providers
 
-- [`fast`](./extensions/fast): Adds one `/fast` toggle that enables the provider-specific Fast mode for the currently selected supported OpenAI Codex or Anthropic Claude model.
+- [`fast`](./extensions/fast): Adds one `/fast` toggle that enables the provider-specific Fast mode for the currently selected supported direct OpenAI API, OpenAI Codex, or Anthropic Claude model.
 
 ### UI
 

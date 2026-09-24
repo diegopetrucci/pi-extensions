@@ -1,8 +1,16 @@
 # fast
 
-A pi extension that provides one `/fast` toggle for supported OpenAI Codex and Anthropic Claude models. It selects the provider-specific Fast-mode request shape from the currently selected model.
+A pi extension that provides one `/fast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models. It selects the provider-specific Fast-mode request shape from the currently selected model.
 
-For eligible OpenAI Codex models it injects:
+For eligible direct OpenAI API models it injects:
+
+```json
+{
+  "service_tier": "fast"
+}
+```
+
+For eligible OpenAI Codex OAuth models it injects:
 
 ```json
 {
@@ -26,7 +34,14 @@ anthropic-beta: fast-mode-2026-02-01
 
 ## Eligibility
 
-OpenAI Fast mode requires all of the following:
+Direct OpenAI API Fast mode requires all of the following:
+
+- Provider `openai`.
+- API `openai-responses` or `openai-completions`.
+- Model `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
+- No existing `service_tier` field in the request payload.
+
+OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
@@ -114,6 +129,7 @@ The collection package loads this unified extension instead of `openai-fast` and
 ## Notes
 
 - Anthropic Fast mode has separate rate limits, costs more than standard speed, and does not share prompt-cache prefixes with standard-speed requests.
-- OpenAI Fast mode intentionally does not affect API-key models.
+- Direct OpenAI Fast mode is limited to the confirmed, officially priced GPT-6 API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
+- OpenAI Codex Fast mode intentionally does not affect API-key models.
 - Existing `speed` and `service_tier` fields are never overwritten.
-- Cost accounting still depends on the provider reporting the effective tier in its streamed response.
+- Pi's model catalog may not include a Fast-mode premium. Cost accounting depends on the provider reporting the effective tier in its streamed response, and this extension does not patch usage totals.

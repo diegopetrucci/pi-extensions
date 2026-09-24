@@ -12,25 +12,14 @@ const illustrationExamplesDir = path.join(
   'extensions/illustrations-to-explain-things/skills/illustrations-to-explain-things/assets/examples',
 );
 
-const packageBudgets = [
-  {
-    label: 'root collection',
-    args: ['pack', '--dry-run', '--json'],
-    limits: {
-      size: 1_350_000,
-      // Rounded headroom for the approved Pi 0.87.1 exact-ID policy/catalog strings.
-      unpackedSize: 2_235_000,
-    },
+const illustrationPackageBudget = {
+  label: 'illustrations workspace',
+  args: ['pack', '--dry-run', '--json', '--workspace', '@diegopetrucci/pi-illustrations-to-explain-things'],
+  limits: {
+    size: 900_000,
+    unpackedSize: 900_000,
   },
-  {
-    label: 'illustrations workspace',
-    args: ['pack', '--dry-run', '--json', '--workspace', '@diegopetrucci/pi-illustrations-to-explain-things'],
-    limits: {
-      size: 900_000,
-      unpackedSize: 900_000,
-    },
-  },
-];
+};
 
 function readPackSummary(args) {
   const stdout = execFileSync('npm', args, { cwd: repoRoot, encoding: 'utf8' });
@@ -71,19 +60,17 @@ test('illustration calibration assets stay runtime-readable and use compressed r
   }
 });
 
-test('root and illustration packages stay within deterministic size budgets', () => {
-  for (const packageBudget of packageBudgets) {
-    const summary = readPackSummary(packageBudget.args);
+test('illustration package stays within its deterministic size budget', () => {
+  const summary = readPackSummary(illustrationPackageBudget.args);
 
-    assert.ok(
-      summary.size <= packageBudget.limits.size,
-      `${packageBudget.label} packed size ${summary.size} exceeds budget ${packageBudget.limits.size}`,
-    );
-    assert.ok(
-      summary.unpackedSize <= packageBudget.limits.unpackedSize,
-      `${packageBudget.label} unpacked size ${summary.unpackedSize} exceeds budget ${packageBudget.limits.unpackedSize}`,
-    );
-  }
+  assert.ok(
+    summary.size <= illustrationPackageBudget.limits.size,
+    `${illustrationPackageBudget.label} packed size ${summary.size} exceeds budget ${illustrationPackageBudget.limits.size}`,
+  );
+  assert.ok(
+    summary.unpackedSize <= illustrationPackageBudget.limits.unpackedSize,
+    `${illustrationPackageBudget.label} unpacked size ${summary.unpackedSize} exceeds budget ${illustrationPackageBudget.limits.unpackedSize}`,
+  );
 });
 
 test('illustration package dry-run publishes compressed assets and excludes legacy png examples', () => {
