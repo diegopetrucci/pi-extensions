@@ -1,7 +1,8 @@
 /**
  * Pi Notify Extension
  *
- * Sends notifications when Pi agent is done and waiting for input.
+ * Sends notifications when Pi agent is done and waiting for input, and
+ * (optionally) when a permission prompt needs a human response.
  * Supports multiple channels:
  * - terminal notifications: OSC 777 and OSC 99, wrapped for tmux when needed
  * - desktop notifications: macOS Notification Center, Linux notify-send, Windows toast
@@ -16,7 +17,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 type TerminalBackend = "auto" | "osc777" | "osc99" | "none";
@@ -29,17 +30,26 @@ type ProjectConfigContext = {
 	isProjectTrusted?: () => boolean;
 };
 
+interface NotificationChannels {
+	terminal: boolean;
+	desktop: boolean;
+	bell: boolean;
+	sound: boolean;
+}
+
+interface PermissionPromptConfig {
+	enabled: boolean;
+	title: string;
+	body: string;
+	channels: NotificationChannels;
+}
+
 interface NotifyConfig {
 	enabled: boolean;
 	onlyWhenInteractive: boolean;
 	title: string;
 	body: string;
-	channels: {
-		terminal: boolean;
-		desktop: boolean;
-		bell: boolean;
-		sound: boolean;
-	};
+	channels: NotificationChannels;
 	terminal: {
 		backend: TerminalBackend;
 		tmuxPassthrough: TmuxPassthrough;
@@ -55,6 +65,14 @@ interface NotifyConfig {
 		durationMs: number;
 		command: string;
 	};
+	/**
+	 * Notifications fired when a permission prompt is about to wait for a
+	 * human response (the `permissions:ui_prompt` event broadcast by
+	 * `@gotgenes/pi-permission-system`, when that extension is installed).
+	 * Disabled by default: opt in explicitly since this fires mid-turn,
+	 * unlike the settled-only `agent_settled` notification above.
+	 */
+	permissionPrompt: PermissionPromptConfig;
 }
 
 const DEFAULT_CONFIG: NotifyConfig = {
@@ -82,6 +100,17 @@ const DEFAULT_CONFIG: NotifyConfig = {
 		frequencyHz: 1000,
 		durationMs: 250,
 		command: "",
+	},
+	permissionPrompt: {
+		enabled: false,
+		title: "Pi permission request",
+		body: "{surface}: {value}",
+		channels: {
+			terminal: false,
+			desktop: true,
+			bell: false,
+			sound: false,
+		},
 	},
 };
 
@@ -115,6 +144,14 @@ function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): Noti
 		sound: {
 			...base.sound,
 			...overrides.sound,
+		},
+		permissionPrompt: {
+			...base.permissionPrompt,
+			...overrides.permissionPrompt,
+			channels: {
+				...base.permissionPrompt.channels,
+				...overrides.permissionPrompt?.channels,
+			},
 		},
 	};
 }
@@ -297,36 +334,101 @@ async function playSound(config: NotifyConfig, backend: Exclude<SoundBackend, "a
 }
 
 export default function notifyExtension(pi: ExtensionAPI) {
+	let currentCtx: ExtensionContext | undefined;
+
+	const captureCtx = async (_event: unknown, ctx: ExtensionContext) => {
+		currentCtx = ctx;
+	};
+
+	pi.on("session_start", captureCtx);
+	pi.on("before_agent_start", captureCtx);
+
 	pi.on("agent_settled", async (_event, ctx) => {
+		currentCtx = ctx;
 		const config = loadConfig(ctx);
 		if (!config.enabled) return;
 		if (config.onlyWhenInteractive && !ctx.hasUI) return;
 
-		const tasks: Array<Promise<unknown>> = [];
-
-		if (config.channels.terminal) {
-			sendTerminalNotification(
-				config.title,
-				config.body,
-				detectTerminalBackend(config),
-				shouldWrapForTmux(config),
-			);
-		}
-
-		if (config.channels.desktop) {
-			tasks.push(sendDesktopNotification(config.title, config.body, detectDesktopBackend(config)));
-		}
-
-		if (config.channels.bell) {
-			ringBell();
-		}
-
-		if (config.channels.sound) {
-			tasks.push(playSound(config, detectSoundBackend(config)));
-		}
-
-		if (tasks.length > 0) {
-			await Promise.allSettled(tasks);
-		}
+		await deliverNotification(config, config.title, config.body, config.channels);
 	});
+
+	// Fired by `@gotgenes/pi-permission-system` (when installed) immediately
+	// before it shows an interactive permission prompt to the user. See:
+	// https://github.com/gotgenes/pi-packages/blob/main/packages/pi-permission-system/docs/cross-extension-api.md#ui-prompt-broadcasts
+	// No hard dependency on that package: the payload is read defensively,
+	// and the channel simply never fires when the package isn't loaded.
+	pi.events.on("permissions:ui_prompt", (raw) => {
+		void handlePermissionUiPrompt(raw, currentCtx);
+	});
+}
+
+async function handlePermissionUiPrompt(raw: unknown, ctx: ExtensionContext | undefined): Promise<void> {
+	if (!ctx) return;
+
+	const config = loadConfig(ctx);
+	if (!config.enabled) return;
+	if (!config.permissionPrompt.enabled) return;
+	if (config.onlyWhenInteractive && !ctx.hasUI) return;
+
+	const vars = extractPermissionPromptVars(raw);
+	const title = renderTemplate(config.permissionPrompt.title, vars);
+	const body = renderTemplate(config.permissionPrompt.body, vars);
+
+	await deliverNotification(config, title, body, config.permissionPrompt.channels);
+}
+
+/**
+ * Best-effort extraction of the `PermissionUiPromptEvent` display fields
+ * (`surface`, `value`, `request.matchedPattern`). Read defensively per the
+ * cross-extension API's stability guarantee: broadcast payloads carry no
+ * `protocolVersion`, and fields may be added without a major bump.
+ */
+function extractPermissionPromptVars(raw: unknown): Record<string, string> {
+	const event = (raw ?? {}) as {
+		surface?: unknown;
+		value?: unknown;
+		request?: { matchedPattern?: unknown } | null;
+	};
+
+	const surface = typeof event.surface === "string" ? event.surface : "";
+	const value = typeof event.value === "string" ? event.value : "";
+	const pattern =
+		event.request && typeof event.request === "object" && typeof event.request.matchedPattern === "string"
+			? event.request.matchedPattern
+			: "";
+
+	return { surface, value, pattern };
+}
+
+function renderTemplate(template: string, vars: Record<string, string>): string {
+	return template.replace(/\{(\w+)\}/g, (match, key: string) => (key in vars ? vars[key] : match));
+}
+
+async function deliverNotification(
+	config: NotifyConfig,
+	title: string,
+	body: string,
+	channels: NotificationChannels,
+): Promise<void> {
+	const tasks: Array<Promise<unknown>> = [];
+
+	if (channels.terminal) {
+		sendTerminalNotification(title, body, detectTerminalBackend(config), shouldWrapForTmux(config));
+	}
+
+	if (channels.desktop) {
+		tasks.push(sendDesktopNotification(title, body, detectDesktopBackend(config)));
+	}
+
+	if (channels.bell) {
+		ringBell();
+	}
+
+	if (channels.sound) {
+		tasks.push(playSound(config, detectSoundBackend(config)));
+	}
+
+	if (tasks.length > 0) {
+		await Promise.allSettled(tasks);
+	}
 }

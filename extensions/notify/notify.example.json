@@ -23,5 +23,16 @@
     "frequencyHz": 1000,
     "durationMs": 250,
     "command": ""
+  },
+  "permissionPrompt": {
+    "enabled": false,
+    "title": "Pi permission request",
+    "body": "{surface}: {value}",
+    "channels": {
+      "terminal": false,
+      "desktop": true,
+      "bell": false,
+      "sound": false
+    }
   }
 }
