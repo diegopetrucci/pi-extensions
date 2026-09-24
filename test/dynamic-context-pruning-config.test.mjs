@@ -75,16 +75,20 @@ test('supersededFileOps tool-name lists default to the pi built-ins and are conf
         enabled: true,
         readToolNames: ['read', 'view'],
         writeToolNames: ['write', 'edit', 'replace', 'insert'],
+        noopMarkers: ['no changes made'],
       },
     },
   });
   assert.deepEqual(custom.strategies.supersededFileOps.readToolNames, ['read', 'view']);
   assert.deepEqual(custom.strategies.supersededFileOps.writeToolNames, ['write', 'edit', 'replace', 'insert']);
+  assert.deepEqual(defaults.noopMarkers, [], 'no default no-op markers: a host opts in per tool');
+  assert.deepEqual(custom.strategies.supersededFileOps.noopMarkers, ['no changes made']);
 
   // Empty or non-array values fall back to the defaults, mirroring asStringArray.
   const fallback = dcp.normalizeConfig({
-    strategies: { supersededFileOps: { readToolNames: [], writeToolNames: 'nope' } },
+    strategies: { supersededFileOps: { readToolNames: [], writeToolNames: 'nope', noopMarkers: '' } },
   });
   assert.deepEqual(fallback.strategies.supersededFileOps.readToolNames, ['read']);
   assert.deepEqual(fallback.strategies.supersededFileOps.writeToolNames, ['write', 'edit']);
+  assert.deepEqual(fallback.strategies.supersededFileOps.noopMarkers, []);
 });

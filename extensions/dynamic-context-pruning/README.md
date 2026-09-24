@@ -88,10 +88,19 @@ prove the older output is stale, never on a guess:
 The newest operation for a given path (by message order) is never
 superseded, regardless of kind. Which tool **names** count as file ops is
 configurable via `strategies.supersededFileOps.readToolNames` /
-`.writeToolNames` (defaults `["read"]` / `["write", "edit"]` — pi's built-ins);
-a host whose edit extension adds tools (`replace`/`insert`) registers them there
-(a name in both lists resolves to a write). Path extraction accepts `path`,
-`file_path`, `filePath`; a call without one is skipped, and `bash` is out of scope.
+`.writeToolNames` / `.noopMarkers` (defaults `["read"]` / `["write", "edit"]` /
+`[]` — pi's built-ins); a host whose edit extension adds tools registers them
+there (a name in both lists resolves to a write). For an anchor-based editor
+such as [pi-hashline-edit-pro](https://github.com/YuGiMob/pi-hashline-edit-pro):
+use `writeToolNames: ["write", "edit", "replace", "insert", "undo_last_change"]`
+and note that (a) `replace`/`insert` only declare `path` when the extension's
+**Require path** setting is enabled, and (b) its no-op result (`No changes made
+to <path>.`) proves nothing changed, so add `noopMarkers: ["no changes made"]`.
+Read-to-read coverage assumes the reader shares pi's range contract: only the
+built-in `read` may omit `offset`/`limit` as a full-file read; any other reader
+without them has an unknown range and read-to-read supersession is skipped for
+it (later mutations still apply). Path extraction accepts `path`, `file_path`,
+`filePath`; a call without one is skipped, and `bash` is out of scope.
 
 ## Protections
 
@@ -222,8 +231,8 @@ never required to exist. Full shape, with defaults:
     "supersededFileOps": {
       "enabled": true,
       "readToolNames": ["read"],
-      "writeToolNames": ["write", "edit"]
-    }
+      "writeToolNames": ["write", "edit"],
+      "noopMarkers": []
   },
   "gate": {
     "mode": "on",

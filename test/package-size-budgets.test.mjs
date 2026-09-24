@@ -18,8 +18,9 @@ const packageBudgets = [
     args: ['pack', '--dry-run', '--json'],
     limits: {
       size: 1_350_000,
-      // Rounded headroom for the approved Pi 0.87.1 exact-ID policy/catalog strings.
-      unpackedSize: 2_235_000,
+      // Headroom for the approved Pi 0.87.1 exact-ID policy/catalog strings and the
+      // superseded-file-ops configurable tool names/no-op markers (PR #87).
+      unpackedSize: 2_245_000,
     },
   },
   {

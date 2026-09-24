@@ -253,8 +253,7 @@ export interface StrategiesConfig {
 	};
 	/**
 	 * Superseded file-ops strategy (pe-qs8j): stale read/write outputs replaced by
-	 * a placeholder. Tool names are configurable so an anchor-based edit extension
-	 * can register its read/mutate tools without a code change.
+	 * a placeholder; the file-op tool names are configurable.
 	 */
 	supersededFileOps: {
 		enabled: boolean;
@@ -262,6 +261,8 @@ export interface StrategiesConfig {
 		readToolNames: string[];
 		/** Tool names treated as mutating writes/edits. Default: ["write", "edit"]. */
 		writeToolNames: string[];
+		/** Case-insensitive result-text markers for a successful mutation that is a no-op (file unchanged). Default: []. */
+		noopMarkers: string[];
 	};
 }
 
@@ -356,6 +357,7 @@ export function defaultConfig(): DynamicContextPruningConfig {
 				enabled: true,
 				readToolNames: [...DEFAULT_FILE_OP_READ_TOOL_NAMES],
 				writeToolNames: [...DEFAULT_FILE_OP_WRITE_TOOL_NAMES],
+				noopMarkers: [...DEFAULT_FILE_OP_NOOP_MARKERS],
 			},
 		},
 		gate: {
@@ -448,6 +450,7 @@ export function normalizeConfig(parsed: unknown): DynamicContextPruningConfig {
 				enabled: asBoolean(rawSupersededFileOps.enabled, defaults.strategies.supersededFileOps.enabled),
 				readToolNames: asStringArray(rawSupersededFileOps.readToolNames, defaults.strategies.supersededFileOps.readToolNames),
 				writeToolNames: asStringArray(rawSupersededFileOps.writeToolNames, defaults.strategies.supersededFileOps.writeToolNames),
+				noopMarkers: asStringArray(rawSupersededFileOps.noopMarkers, defaults.strategies.supersededFileOps.noopMarkers),
 			},
 		},
 		gate: {
@@ -1755,8 +1758,9 @@ export const errorPurgeStrategy: PruneStrategy = {
 //
 // Path extraction is defensive: file-op tools are expected to accept a `path`
 // argument (pi's built-ins do); some renderers also fall back to a legacy
-// `file_path` name. Which tool NAMES count as file ops is configurable — see the
-// DEFAULT_FILE_OP_*_TOOL_NAMES constants below. `bash` is OUT of scope: this
+// `file_path` name. Which tool NAMES count as file ops is configurable (see the
+// DEFAULT_FILE_OP_* constants below), as are the result-text markers that
+// identify a successful mutation as a no-op. `bash` is OUT of scope: this
 // strategy does not parse shell commands for file paths.
 
 const SUPERSEDED_FILE_OPS_STRATEGY_ID = "superseded-file-ops";
@@ -1774,16 +1778,34 @@ const DEFAULT_FILE_OP_READ_TOOL_NAMES = ["read"];
 const DEFAULT_FILE_OP_WRITE_TOOL_NAMES = ["write", "edit"];
 
 /**
- * Normalize configured tool names into lookup sets (trimmed, lower-cased, empty
- * entries dropped). A name in both sets resolves to `mutate` (mutating wins).
+ * Default result-text markers that identify a *successful* mutation as a no-op
+ * (the file was left unchanged). Empty by default: a host opts in per tool, so a
+ * default mutation is always treated as change evidence unless configured otherwise.
  */
-function resolveFileOpToolNames(config: { readToolNames: string[]; writeToolNames: string[] }): {
+const DEFAULT_FILE_OP_NOOP_MARKERS: string[] = [];
+
+/**
+ * Readers whose zero-argument form provably reads the whole file; any other
+ * reader without `offset`/`limit` has an unknown range contract.
+ */
+const FULL_FILE_READ_TOOL_NAMES: ReadonlySet<string> = new Set(["read"]);
+
+/**
+ * Normalize configured tool names and no-op markers (trimmed, lower-cased);
+ * a name in both tool sets resolves to `mutate` (mutating wins).
+ */
+function resolveFileOpClassification(config: { readToolNames: string[]; writeToolNames: string[]; noopMarkers: string[] }): {
 	read: ReadonlySet<string>;
 	write: ReadonlySet<string>;
+	noopMarkers: readonly string[];
 } {
 	const normalize = (names: readonly string[]): ReadonlySet<string> =>
 		new Set(names.map((name) => name.trim().toLowerCase()).filter((name) => name.length > 0));
-	return { read: normalize(config.readToolNames), write: normalize(config.writeToolNames) };
+	return {
+		read: normalize(config.readToolNames),
+		write: normalize(config.writeToolNames),
+		noopMarkers: config.noopMarkers.map((marker) => marker.trim().toLowerCase()).filter((marker) => marker.length > 0),
+	};
 }
 
 /** Extract a file path from tool-call arguments, checking common arg names defensively. */
@@ -1856,23 +1878,58 @@ interface FileOpOccurrence {
 	toolName: string;
 	opClass: FileOpClass;
 	normalizedPath: string;
+	/** Line range of a read, or `undefined` when the reader's range contract is unknown. */
 	range: FileReadRange | undefined;
 	isError: boolean;
+	/** True for a mutation that provably changed the file (non-error, not a no-op). */
+	mutated: boolean;
 	resultTextLength: number;
 	assistantIndex: number;
 }
 
+/** Join a tool result's text blocks; used for no-op marker matching. */
+function resultTextOf(content: (MinimalTextContent | MinimalImageContent)[]): string {
+	return content
+		.filter((block): block is MinimalTextContent => block.type === "text")
+		.map((block) => block.text)
+		.join("\n");
+}
+
+/**
+ * Range of a read occurrence, or `undefined` when unknown: full-file inference
+ * is only sound for the built-in `read`, so other readers without
+ * `offset`/`limit` get no range.
+ */
+function fileOpReadRange(toolName: string, args: Record<string, unknown> | undefined): FileReadRange | undefined {
+	if (toolName !== "read" && !(args && (args.offset !== undefined || args.limit !== undefined))) return undefined;
+	return computeFileReadRange(args);
+}
+
+/**
+ * True when a mutation result matches a configured no-op marker
+ * (case-insensitive), e.g. hashline's `No changes made to <path>.`.
+ */
+function isNoopMutation(resultText: string, noopMarkers: readonly string[]): boolean {
+	if (noopMarkers.length === 0) return false;
+	const lowered = resultText.toLowerCase();
+	return noopMarkers.some((marker) => lowered.includes(marker));
+}
+
+/**
+ * Collect completed file-op tool calls, classified and path-correlated.
+ * Occurrences without a resolvable `path` are skipped.
+ */
 function collectFileOpOccurrences(
 	messages: MinimalMessage[],
 	cwd: string | undefined,
-	toolNames: { read: ReadonlySet<string>; write: ReadonlySet<string> },
+	classification: ReturnType<typeof resolveFileOpClassification>,
 ): FileOpOccurrence[] {
 	const occurrences: FileOpOccurrence[] = [];
 	for (const occurrence of collectCompletedToolCallOccurrences(messages)) {
 		const toolName = occurrence.toolName.trim().toLowerCase();
-		const opClass: FileOpClass | undefined = toolNames.write.has(toolName)
+		const opClass: FileOpClass | undefined = classification.write.has(toolName)
 			? "mutate"
-			: toolNames.read.has(toolName)
+			: classification.read.has(toolName)
 				? "read"
 				: undefined;
 		if (!opClass) continue;
@@ -1881,13 +1938,15 @@ function collectFileOpOccurrences(
 		const normalizedPath = normalizeFileOpsPath(rawPath, cwd);
 		if (!normalizedPath) continue;
 		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
+		const resultText = resultTextOf(resultMessage.content);
 		occurrences.push({
 			toolCallId: occurrence.toolCallId,
 			toolName,
 			opClass,
 			normalizedPath,
-			range: opClass === "read" ? computeFileReadRange(occurrence.arguments) : undefined,
+			range: opClass === "read" ? fileOpReadRange(toolName, occurrence.arguments) : undefined,
 			isError: occurrence.isError,
+			mutated: opClass === "mutate" && !occurrence.isError && !isNoopMutation(resultText, classification.noopMarkers),
 			resultTextLength: contentTextLength(resultMessage.content),
 			assistantIndex: occurrence.assistantIndex,
 		});
@@ -1895,14 +1954,17 @@ function collectFileOpOccurrences(
 	return occurrences;
 }
 
+/** Placeholder for an older read invalidated by a later mutation of the same path. */
 function buildFileChangedPlaceholder(normalizedPath: string, supersedingToolName: string, supersedingToolCallId: string): string {
 	return `[pruned by ${EXTENSION_ID}: file has since changed — ${normalizedPath} was modified by a later ${supersedingToolName} (call ${supersedingToolCallId})]`;
 }
 
+/** Placeholder for an older read covered by a later read of the same path. */
 function buildSupersededReadPlaceholder(normalizedPath: string, supersedingToolCallId: string): string {
 	return `[pruned by ${EXTENSION_ID}: superseded by newer read of ${normalizedPath} (call ${supersedingToolCallId})]`;
 }
 
+/** Placeholder for an older mutation superseded by a later mutation of the same path. */
 function buildSupersededWritePlaceholder(normalizedPath: string, supersedingToolName: string, supersedingToolCallId: string): string {
 	return `[pruned by ${EXTENSION_ID}: superseded by newer ${supersedingToolName} of ${normalizedPath} (call ${supersedingToolCallId})]`;
 }
@@ -1912,8 +1974,8 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 	propose(input: StrategyProposeInput): ProposedPrune[] {
 		if (input.config.strategies.supersededFileOps.enabled === false) return [];
 
-		const toolNames = resolveFileOpToolNames(input.config.strategies.supersededFileOps);
-		const occurrences = collectFileOpOccurrences(input.messages, input.cwd, toolNames);
+		const classification = resolveFileOpClassification(input.config.strategies.supersededFileOps);
+		const occurrences = collectFileOpOccurrences(input.messages, input.cwd, classification);
 		const byPath = new Map<string, FileOpOccurrence[]>();
 		for (const occurrence of occurrences) {
 			const group = byPath.get(occurrence.normalizedPath);
@@ -1930,8 +1992,9 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 			// per index (O(k^2) allocations+scans for a group of size k), walk the
 			// group back-to-front and maintain:
 			//  - `nearestLaterSuccessfulWrite`: the nearest (chronologically first)
-			//    later successful write/edit, updated as we pass one going backward.
-			//    This is exactly equivalent to `later.find(non-read && !isError)`
+			//    later *effective* write/edit — one that provably changed the file (not
+			//    an error, not a configured no-op) — updated as we pass one going
+			//    backward. This is exactly equivalent to `later.find(non-read && mutated)`
 			//    because `later` preserves chronological order and `.find` returns
 			//    the first (nearest) match.
 			//  - `nearestCoveringReads`: later reads not yet known-redundant, nearest
@@ -1985,10 +2048,10 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 								});
 							}
 						}
-					} else if (nearestLaterSuccessfulWrite) {
-						// occurrence.kind is "write" or "edit": rule 4 — superseded only by a
-						// LATER *successful* write/edit (an errored later write/edit never
-						// supersedes; reads never supersede writes/edits).
+				} else if (nearestLaterSuccessfulWrite) {
+					// occurrence.opClass is "mutate": rule 4 — superseded only by a LATER
+					// *effective* write/edit (an errored or no-op later mutation never
+					// supersedes; reads never supersede writes/edits).
 						if (occurrence.resultTextLength > 0) {
 							proposals.push({
 								strategyId: SUPERSEDED_FILE_OPS_STRATEGY_ID,
@@ -2006,8 +2069,11 @@ export const supersededFileOpsStrategy: PruneStrategy = {
 				}
 
 				// Fold this occurrence into the tracking state for the next (earlier) iteration.
+				// Fold this occurrence into the tracking state for the next (earlier) iteration.
 				if (occurrence.opClass !== "read") {
-					if (!occurrence.isError) nearestLaterSuccessfulWrite = occurrence;
+					// Only a mutation that provably changed the file may invalidate
+					// earlier output; an errored or no-op mutation must not.
+					if (occurrence.mutated) nearestLaterSuccessfulWrite = occurrence;
 				} else if (occurrence.range !== undefined) {
 					const occurrenceRange = occurrence.range;
 					for (let j = nearestCoveringReads.length - 1; j >= 0; j--) {
@@ -2582,7 +2648,7 @@ export function formatStatusReport(input: StatusReportInput): string[] {
 		`  error-purge: ${config.strategies.errorPurge.enabled ? "on" : "off"} (minTurnsOld=${config.strategies.errorPurge.minTurnsOld})`,
 	);
 	lines.push(
-		`  superseded-file-ops: ${config.strategies.supersededFileOps.enabled ? "on" : "off"} (readTools=${config.strategies.supersededFileOps.readToolNames.join(",")}, writeTools=${config.strategies.supersededFileOps.writeToolNames.join(",")})`,
+		`  superseded-file-ops: ${config.strategies.supersededFileOps.enabled ? "on" : "off"} (readTools=${config.strategies.supersededFileOps.readToolNames.join(",")}, writeTools=${config.strategies.supersededFileOps.writeToolNames.join(",")}, noopMarkers=${config.strategies.supersededFileOps.noopMarkers.join("|")})`,
 	);
 	lines.push(
 		`Protections: recentTurns=${config.protections.recentTurns}, protectedTools=${config.protections.toolNames.length}, protectedPathGlobs=${config.protections.pathGlobs.length}`,
