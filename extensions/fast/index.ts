@@ -26,6 +26,10 @@ const OPENAI_SUPPORTED_MODELS = new Set([
 	"gpt-5.6-terra",
 	"gpt-5.6-luna",
 ]);
+const OPENAI_API_PROVIDER_ID = "openai";
+const OPENAI_API_IDS = new Set(["openai-responses", "openai-completions"]);
+const OPENAI_API_FAST_SERVICE_TIER = "fast";
+const OPENAI_API_SUPPORTED_MODELS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
 
 const DEFAULT_CONFIG: FastConfig = {
 	enabled: false,
@@ -69,6 +73,7 @@ type Eligibility = {
 	eligible: boolean;
 	modelKey: string;
 	provider?: FastProvider;
+	serviceTier?: string;
 	reason?: string;
 };
 
@@ -190,7 +195,37 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 			};
 		}
 
-		return { eligible: true, modelKey: key, provider: "openai" };
+		return {
+			eligible: true,
+			modelKey: key,
+			provider: "openai",
+			serviceTier: OPENAI_FAST_SERVICE_TIER,
+		};
+	}
+
+	if (model.provider === OPENAI_API_PROVIDER_ID) {
+		if (!OPENAI_API_IDS.has(model.api)) {
+			return {
+				eligible: false,
+				modelKey: key,
+				reason: `current API is ${model.api}, not openai-responses or openai-completions`,
+			};
+		}
+
+		if (!OPENAI_API_SUPPORTED_MODELS.has(model.id)) {
+			return {
+				eligible: false,
+				modelKey: key,
+				reason: "Fast mode is only enabled for GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
+			};
+		}
+
+		return {
+			eligible: true,
+			modelKey: key,
+			provider: "openai",
+			serviceTier: OPENAI_API_FAST_SERVICE_TIER,
+		};
 	}
 
 	return {
@@ -226,7 +261,7 @@ function getStatusMessage(ctx: ExtensionContext, state: SessionState): string {
 		const wireSetting =
 			eligibility.provider === "anthropic"
 				? `speed=${ANTHROPIC_FAST_SPEED}`
-				: `service_tier=${OPENAI_FAST_SERVICE_TIER}`;
+				: `service_tier=${eligibility.serviceTier}`;
 		return `Fast mode is ${describeMode(state)} and active for ${eligibility.modelKey}; requests will use ${wireSetting}.${injected}`;
 	}
 
@@ -317,9 +352,10 @@ function injectFastPayload(
 	}
 
 	if ("service_tier" in payload) return undefined;
+	if (!eligibility.serviceTier) return undefined;
 	state.lastInjectedAt = Date.now();
 	state.lastInjectedModel = eligibility.modelKey;
-	return { ...payload, service_tier: OPENAI_FAST_SERVICE_TIER };
+	return { ...payload, service_tier: eligibility.serviceTier };
 }
 
 export default function fastExtension(pi: ExtensionAPI) {
@@ -363,7 +399,7 @@ export default function fastExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("fast", {
-		description: "Toggle Fast mode for supported OpenAI Codex and Anthropic Claude models",
+		description: "Toggle Fast mode for supported direct OpenAI, OpenAI Codex, and Anthropic Claude models",
 		getArgumentCompletions: () => null,
 		handler: async (args, ctx) => {
 			const state = getState(ctx);
