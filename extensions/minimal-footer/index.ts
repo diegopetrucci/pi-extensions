@@ -33,11 +33,11 @@ const DEFAULT_CONFIG: MinimalFooterConfig = {
 		windows: {
 			primary: {
 				enabled: true,
-				label: "5h",
+				label: "auto",
 			},
 			secondary: {
 				enabled: true,
-				label: "7d",
+				label: "auto",
 			},
 		},
 	},
