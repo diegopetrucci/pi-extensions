@@ -1938,7 +1938,12 @@ function collectFileOpOccurrences(
 		const normalizedPath = normalizeFileOpsPath(rawPath, cwd);
 		if (!normalizedPath) continue;
 		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
-		const resultText = resultTextOf(resultMessage.content);
+		// Result text is only consumed by no-op matching, and only for mutations
+		// with configured markers — skip the traversal/allocation otherwise.
+		const resultText =
+			opClass === "mutate" && classification.noopMarkers.length > 0
+				? resultTextOf(resultMessage.content)
+				: "";
 		occurrences.push({
 			toolCallId: occurrence.toolCallId,
 			toolName,
