@@ -707,6 +707,209 @@ test('notify selects sound commands and falls back from canberra to paplay on li
   ]);
 });
 
+test('notify subscribes to permissions:ui_prompt in addition to agent_settled', async () => {
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, events } = createExtensionHarness();
+
+  notifyExtension(pi);
+
+  assert.ok(events.listeners.get('permissions:ui_prompt')?.size > 0);
+});
+
+test('notify fires desktop and sound channels on a permission prompt when enabled, using surface/value templating', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    channels: {
+      terminal: false,
+      desktop: false,
+      bell: false,
+      sound: false,
+    },
+    permissionPrompt: {
+      enabled: true,
+      title: 'Approval needed: {surface}',
+      body: '{value} ({pattern})',
+      channels: {
+        terminal: false,
+        desktop: true,
+        bell: false,
+        sound: true,
+      },
+    },
+    desktop: {
+      backend: 'linux',
+    },
+    sound: {
+      backend: 'command',
+      command: 'printf ok',
+    },
+  });
+
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers, events } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const sessionStart = handlers.get('session_start');
+  assert.equal(typeof sessionStart, 'function');
+  await sessionStart({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  events.emit('permissions:ui_prompt', {
+    surface: 'bash',
+    value: 'git push',
+    request: { matchedPattern: 'git *' },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(execCalls.map(({ command, args }) => ({ command, args })), [
+    { command: 'notify-send', args: ['Approval needed: bash', 'git push (git *)'] },
+    { command: process.env.SHELL || '/bin/sh', args: ['-lc', 'printf ok'] },
+  ]);
+});
+
+test('notify falls back to default permission templates when configured values are not strings', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    permissionPrompt: {
+      enabled: true,
+      title: null,
+      body: 42,
+      channels: {
+        terminal: false,
+        desktop: true,
+        bell: false,
+        sound: false,
+      },
+    },
+    desktop: {
+      backend: 'linux',
+    },
+  });
+
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers, events } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const sessionStart = handlers.get('session_start');
+  await sessionStart({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  events.emit('permissions:ui_prompt', {
+    surface: 'bash',
+    value: 'git push',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(execCalls.map(({ command, args }) => ({ command, args })), [
+    { command: 'notify-send', args: ['Pi permission request', 'bash: git push'] },
+  ]);
+});
+
+test('notify strips terminal controls from rendered permission prompt text before writing OSC', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+  setEnvVar(t, 'TMUX', undefined);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    permissionPrompt: {
+      enabled: true,
+      title: 'Permission\x1b]0;owned\x07 {surface}',
+      body: '{value}',
+      channels: {
+        terminal: true,
+        desktop: false,
+        bell: false,
+        sound: false,
+      },
+    },
+    terminal: {
+      backend: 'osc777',
+    },
+  });
+
+  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const writes = captureStdout(t);
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers, events } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const sessionStart = handlers.get('session_start');
+  await sessionStart({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  events.emit('permissions:ui_prompt', {
+    surface: 'bash',
+    value: 'git\x07 push\x1b]52;c;evil\n',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    writes.filter((write) => write.startsWith('\x1b]777;notify;')),
+    ['\x1b]777;notify;Permission]0;owned bash;git push]52;c;evil\x07'],
+  );
+});
+
+test('notify ignores permissions:ui_prompt when permissionPrompt.enabled is false (the default)', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+    enabled: true,
+    onlyWhenInteractive: false,
+    desktop: { backend: 'linux' },
+  });
+
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, handlers, events } = createExtensionHarness();
+  notifyExtension(pi);
+
+  const sessionStart = handlers.get('session_start');
+  await sessionStart({}, {
+    cwd: projectDir,
+    hasUI: true,
+    isProjectTrusted: () => true,
+  });
+
+  events.emit('permissions:ui_prompt', { surface: 'bash', value: 'git push' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(execCalls.length, 0);
+});
+
+test('notify ignores permissions:ui_prompt before any session context has been captured', async () => {
+  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const { pi, events } = createExtensionHarness();
+  notifyExtension(pi);
+
+  await assert.doesNotReject(async () => {
+    events.emit('permissions:ui_prompt', { surface: 'bash', value: 'git push' });
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+});
+
 test('notify falls back to valid config and warns when project config JSON is invalid', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);

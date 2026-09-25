@@ -37,6 +37,10 @@ Sound remains available as an opt-in option via config.
 
 The extension automatically picks the appropriate backend for the current environment.
 
+### Permission-prompt notifications
+
+When [`@gotgenes/pi-permission-system`](https://www.npmjs.com/package/@gotgenes/pi-permission-system) is also installed, this extension can additionally notify right before that package shows an interactive permission prompt (bash/path/tool approval, etc.) — not just when the whole agent turn settles. This is off by default, since it fires mid-turn rather than only when Pi goes idle.
+
 ## Install
 
 ### Standalone npm package
@@ -102,9 +106,42 @@ Example:
     "frequencyHz": 1000,
     "durationMs": 250,
     "command": ""
+  },
+  "permissionPrompt": {
+    "enabled": false,
+    "title": "Pi permission request",
+    "body": "{surface}: {value}",
+    "channels": {
+      "terminal": false,
+      "desktop": true,
+      "bell": false,
+      "sound": false
+    }
   }
 }
 ```
+
+### Notify on permission prompts
+
+Set `permissionPrompt.enabled` to `true` to also notify when [`@gotgenes/pi-permission-system`](https://www.npmjs.com/package/@gotgenes/pi-permission-system) is about to show an interactive prompt (its `permissions:ui_prompt` broadcast). This is independent of the top-level `channels`/`title`/`body` used for the settled notification — it has its own `channels`, `title`, and `body`, and reuses the same `terminal`/`desktop`/`sound` backend settings.
+
+`title` and `body` support `{surface}`, `{value}`, and `{pattern}` placeholders, filled in from the prompt's normalized display projection (for example `surface: "bash"`, `value: "git push"`, `pattern: "git *"`). A placeholder resolves to an empty string when the underlying field isn't a string for that particular ask.
+
+Minimal example (desktop + sound only, matching the top-level `notify.json` this repo ships by default):
+
+```json
+{
+  "permissionPrompt": {
+    "enabled": true,
+    "channels": {
+      "desktop": true,
+      "sound": true
+    }
+  }
+}
+```
+
+If `@gotgenes/pi-permission-system` isn't installed, this setting has no effect: the event it listens for is simply never emitted.
 
 ### Running inside tmux
 
@@ -172,10 +209,15 @@ You can also customize the sound backend and options if needed.
 - `sound.frequencyHz`: Windows beep frequency
 - `sound.durationMs`: Windows beep duration
 - `sound.command`: custom shell command when `sound.backend` is `command`
+- `permissionPrompt.enabled`: master on/off switch for permission-prompt notifications (default `false`)
+- `permissionPrompt.title`: notification title template; supports `{surface}`, `{value}`, `{pattern}`
+- `permissionPrompt.body`: notification body template; supports `{surface}`, `{value}`, `{pattern}`
+- `permissionPrompt.channels.terminal` / `.desktop` / `.bell` / `.sound`: enable channels for the permission-prompt notification independently from the settled notification's `channels`
 
 ## Notes
 
 - Hooks the `agent_settled` event so automatic retries, compaction retries, and queued follow-ups do not trigger intermediate notifications.
+- Optionally also hooks the `permissions:ui_prompt` event broadcast by `@gotgenes/pi-permission-system` (when installed) to notify right before an interactive permission prompt is shown; see [Notify on permission prompts](#notify-on-permission-prompts). Disabled by default.
 - Terminal notifications are wrapped for tmux when `$TMUX` is set, which also requires `set -g allow-passthrough all` in `tmux.conf`.
 - Default message is `Pi` / `Ready for input`.
 - Terminal, desktop, bell, and sound channels can be enabled independently.

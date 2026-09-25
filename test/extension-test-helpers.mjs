@@ -10,11 +10,33 @@ export async function loadExtension(relativePath) {
   return extensionModule.default;
 }
 
+function createEventBus() {
+  const listeners = new Map();
+
+  return {
+    on(channel, handler) {
+      const set = listeners.get(channel) ?? new Set();
+      set.add(handler);
+      listeners.set(channel, set);
+      return () => {
+        listeners.get(channel)?.delete(handler);
+      };
+    },
+    emit(channel, data) {
+      for (const handler of listeners.get(channel) ?? []) {
+        handler(data);
+      }
+    },
+    listeners,
+  };
+}
+
 export function createExtensionHarness({ execImpl } = {}) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
   const execCalls = [];
+  const events = createEventBus();
 
   return {
     pi: {
@@ -34,10 +56,12 @@ export function createExtensionHarness({ execImpl } = {}) {
         }
         return execImpl(...args);
       },
+      events,
     },
     handlers,
     tools,
     commands,
     execCalls,
+    events,
   };
 }
