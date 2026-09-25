@@ -126,6 +126,15 @@ function readConfigFile(path: string): Partial<NotifyConfig> {
 }
 
 function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): NotifyConfig {
+	const permissionPromptTitle =
+		typeof overrides.permissionPrompt?.title === "string"
+			? overrides.permissionPrompt.title
+			: base.permissionPrompt.title;
+	const permissionPromptBody =
+		typeof overrides.permissionPrompt?.body === "string"
+			? overrides.permissionPrompt.body
+			: base.permissionPrompt.body;
+
 	return {
 		...base,
 		...overrides,
@@ -148,6 +157,8 @@ function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): Noti
 		permissionPrompt: {
 			...base.permissionPrompt,
 			...overrides.permissionPrompt,
+			title: permissionPromptTitle,
+			body: permissionPromptBody,
 			channels: {
 				...base.permissionPrompt.channels,
 				...overrides.permissionPrompt?.channels,
@@ -275,13 +286,21 @@ function sendTerminalNotification(
 	backend: Exclude<TerminalBackend, "auto">,
 	wrap: boolean,
 ): void {
+	const safeTitle = sanitizeTerminalText(title);
+	const safeBody = sanitizeTerminalText(body);
+
 	if (backend === "osc99") {
-		notifyOSC99(title, body, wrap);
+		notifyOSC99(safeTitle, safeBody, wrap);
 		return;
 	}
 	if (backend === "osc777") {
-		notifyOSC777(title, body, wrap);
+		notifyOSC777(safeTitle, safeBody, wrap);
 	}
+}
+
+/** Strip C0/C1 controls that could terminate OSC or inject terminal commands. */
+function sanitizeTerminalText(value: string): string {
+	return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 }
 
 function appleScriptString(value: string): string {
