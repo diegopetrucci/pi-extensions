@@ -15,7 +15,7 @@ const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
 const CLAUDE_CODE_OAUTH_BETAS = ["claude-code-20250219", "oauth-2025-04-20"];
 const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
-const ANTHROPIC_SUPPORTED_MODELS = new Set(["claude-opus-4-8", "claude-opus-5"]);
+const ANTHROPIC_SUPPORTED_MODELS = new Set(["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"]);
 
 const OPENAI_PROVIDER_ID = "openai-codex";
 const OPENAI_API_ID = "openai-codex-responses";
@@ -163,7 +163,7 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 			return {
 				eligible: false,
 				modelKey: key,
-				reason: "Fast mode is only enabled for Claude Opus 4.8 and Claude Opus 5",
+				reason: "Fast mode is only enabled for Claude Opus 4.8, Claude Opus 5, and Claude Opus 5.5",
 			};
 		}
 

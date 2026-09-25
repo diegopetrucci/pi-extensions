@@ -480,7 +480,6 @@ test('specific frontier spellings precede ambiguous generations in every affecte
 test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', () => {
   const prohibitedModels = ['claude-opus-5-5', 'claude-opus-5.5', 'grok-4.7'];
   const unchangedAllowlists = [
-    ['extensions/fast/index.ts', 'ANTHROPIC_SUPPORTED_MODELS'],
     ['extensions/fast/index.ts', 'OPENAI_SUPPORTED_MODELS'],
     ['extensions/claude-fast/index.ts', 'SUPPORTED_MODELS'],
     ['extensions/openai-fast/index.ts', 'SUPPORTED_MODELS'],
@@ -489,6 +488,15 @@ test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', ()
   const directOpenAIAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_API_SUPPORTED_MODELS');
 
   assert.deepEqual([...directOpenAIAllowlist].sort(), confirmedDirectOpenAIModels);
+
+  // ANTHROPIC_SUPPORTED_MODELS intentionally includes claude-opus-5-5 (added by #92);
+  // verify GPT-6 models, grok-4.7, and claude-opus-5.5 (dot notation) still stay out.
+  const anthropicAllowlist = extractConst('extensions/fast/index.ts', 'ANTHROPIC_SUPPORTED_MODELS');
+  const anthropicProhibited = ['claude-opus-5.5', 'grok-4.7'];
+  for (const model of [...anthropicProhibited, ...confirmedDirectOpenAIModels]) {
+    assert.equal(anthropicAllowlist.has(model), false, `extensions/fast/index.ts unexpectedly fast-enabled ${model}`);
+  }
+
   for (const [file, constName] of unchangedAllowlists) {
     const allowlist = extractConst(file, constName);
     for (const model of [...prohibitedModels, ...confirmedDirectOpenAIModels]) {

@@ -53,7 +53,7 @@ Anthropic Fast mode requires all of the following:
 
 - Provider `anthropic`.
 - API `anthropic-messages`.
-- Model `claude-opus-4-8` or `claude-opus-5`.
+- Model `claude-opus-4-8`, `claude-opus-5`, or `claude-opus-5-5`.
 - No existing `speed` field in the request payload.
 
 Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.

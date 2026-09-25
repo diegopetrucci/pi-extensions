@@ -9,7 +9,7 @@ import { createExtensionHarness, loadExtension } from './extension-test-helpers.
 
 const OPENAI_CODEX_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
 const OPENAI_API_MODELS = ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'];
-const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5'];
+const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5'];
 const ANTHROPIC_FAST_BETA = 'fast-mode-2026-02-01';
 
 function setupTempDirs(t) {
