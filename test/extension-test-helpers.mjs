@@ -15,6 +15,7 @@ export function createExtensionHarness({ execImpl } = {}) {
   const tools = new Map();
   const commands = new Map();
   const execCalls = [];
+  const sentUserMessages = [];
 
   return {
     pi: {
@@ -26,6 +27,9 @@ export function createExtensionHarness({ execImpl } = {}) {
       },
       registerCommand(name, definition) {
         commands.set(name, definition);
+      },
+      sendUserMessage(message, options) {
+        sentUserMessages.push({ message, options });
       },
       async exec(...args) {
         execCalls.push(args);
@@ -39,5 +43,6 @@ export function createExtensionHarness({ execImpl } = {}) {
     tools,
     commands,
     execCalls,
+    sentUserMessages,
   };
 }

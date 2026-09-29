@@ -8,30 +8,92 @@ import { composeReviewPrompt } from "./prompt.js";
 import { openQuietGlimpse, type QuietGlimpseWindow } from "./quiet-glimpse.js";
 import { startReviewUiServer, type ReviewUiServer } from "./review-server.js";
 import type {
+	CommentSide,
+	DiffReviewComment,
 	ReviewCancelPayload,
 	ReviewClipboardReadPayload,
 	ReviewClipboardWritePayload,
+	ReviewCommitKind,
 	ReviewFile,
 	ReviewFileContents,
 	ReviewHostMessage,
 	ReviewRequestCommitPayload,
 	ReviewRequestFilePayload,
 	ReviewRequestReviewDataPayload,
+	ReviewScope,
 	ReviewSubmitPayload,
 	ReviewWindowMessage,
 } from "./types.js";
 import { createRepoChangeWatcher, type RepoChangeWatcher } from "./watch.js";
 
-function hasMessageType(value: unknown, type: ReviewWindowMessage["type"]): boolean {
-	return typeof value === "object" && value != null && "type" in value && value.type === type;
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
 }
 
-function isSubmitPayload(value: unknown): value is ReviewSubmitPayload {
-	return hasMessageType(value, "submit");
+function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isNullableString(value: unknown): value is string | null | undefined {
+	return value == null || typeof value === "string";
+}
+
+function isCommentSide(value: unknown): value is CommentSide {
+	return value === "original" || value === "modified" || value === "file";
+}
+
+function isReviewScope(value: unknown): value is ReviewScope {
+	return value === "branch" || value === "commits" || value === "all";
+}
+
+function isReviewCommitKind(value: unknown): value is ReviewCommitKind | null | undefined {
+	return value == null || value === "commit" || value === "working-tree";
+}
+
+function hasNullableInteger(value: Record<string, unknown>, key: string): boolean {
+	if (!Object.prototype.hasOwnProperty.call(value, key)) return false;
+	const field = value[key];
+	return field === null || (typeof field === "number" && Number.isInteger(field));
+}
+
+function isDiffReviewComment(value: unknown): value is DiffReviewComment {
+	if (!isRecord(value)) return false;
+	return (
+		isString(value.id) &&
+		isString(value.fileId) &&
+		isReviewScope(value.scope) &&
+		isNullableString(value.commitSha) &&
+		isNullableString(value.commitShort) &&
+		isReviewCommitKind(value.commitKind) &&
+		isCommentSide(value.side) &&
+		hasNullableInteger(value, "startLine") &&
+		hasNullableInteger(value, "endLine") &&
+		isString(value.body)
+	);
+}
+
+function parseSubmitPayload(value: unknown): ReviewSubmitPayload | null {
+	if (!isRecord(value) || value.type !== "submit") return null;
+	if (!isString(value.overallComment) || !Array.isArray(value.comments) || !value.comments.every(isDiffReviewComment)) {
+		return null;
+	}
+
+	// Fail-safe: only a literal false means the user explicitly clicked Submit.
+	// Missing, true, and malformed discriminator values remain editor-only drafts.
+	return {
+		type: "submit",
+		overallComment: value.overallComment,
+		comments: value.comments,
+		draft: value.draft !== false,
+	};
 }
 
 function isCancelPayload(value: unknown): value is ReviewCancelPayload {
-	return hasMessageType(value, "cancel");
+	return isRecord(value) && value.type === "cancel";
+}
+
+function hasMessageType(value: unknown, type: ReviewWindowMessage["type"]): boolean {
+	return isRecord(value) && value.type === type;
 }
 
 function isRequestFilePayload(value: unknown): value is ReviewRequestFilePayload {
@@ -380,7 +442,13 @@ export default function (pi: ExtensionAPI) {
 							handleClipboardWrite(message);
 							return;
 						}
-						if (isSubmitPayload(message) || isCancelPayload(message)) {
+						const submit = parseSubmitPayload(message);
+						if (submit != null) {
+							requestWindowClose();
+							settle(submit);
+							return;
+						}
+						if (isCancelPayload(message)) {
 							requestWindowClose();
 							settle(message);
 						}
@@ -415,7 +483,7 @@ export default function (pi: ExtensionAPI) {
 			void (async () => {
 				try {
 					const message = await terminalMessagePromise;
-					if (suppressedWindows.has(window)) return;
+					if (suppressedWindows.has(window) || attempt !== reviewAttempt) return;
 					if (message == null) return;
 					if (message.type === "cancel") {
 						ctx.ui.notify("Review cancelled.", "info");
@@ -424,10 +492,15 @@ export default function (pi: ExtensionAPI) {
 					if (!hasReviewFeedback(message)) return;
 
 					const prompt = composeReviewPrompt([...fileMap.values()], message);
-					appendReviewPrompt(ctx, prompt);
-					ctx.ui.notify("Appended review feedback to the editor.", "info");
+					if (message.draft === true) {
+						appendReviewPrompt(ctx, prompt);
+						ctx.ui.notify("Appended review feedback to the editor.", "info");
+					} else {
+						pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+						ctx.ui.notify("Review feedback sent to the agent.", "info");
+					}
 				} catch (error) {
-					if (suppressedWindows.has(window)) return;
+					if (suppressedWindows.has(window) || attempt !== reviewAttempt) return;
 					const message = error instanceof Error ? error.message : String(error);
 					ctx.ui.notify(`Review failed: ${message}`, "error");
 				}
@@ -435,6 +508,7 @@ export default function (pi: ExtensionAPI) {
 
 			ctx.ui.notify("Opened native review window.", "info");
 		} catch (error) {
+			if (attempt !== reviewAttempt) return;
 			closeActiveWindow({ suppressResults: true });
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(`Review failed: ${message}`, "error");

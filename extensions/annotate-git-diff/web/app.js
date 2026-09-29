@@ -1779,7 +1779,7 @@ function submitDraftOnClose() {
 	const payload = buildSubmitPayload();
 	if (!hasSubmitPayloadContent(payload)) return;
 	suppressAutoSubmitOnClose = true;
-	window.glimpse?.send?.(payload);
+	window.glimpse?.send?.({ ...payload, draft: true });
 }
 
 function updateCommentsUI() {
@@ -2265,7 +2265,7 @@ window.addEventListener("pagehide", submitDraftOnClose);
 submitButton.addEventListener("click", () => {
 	const payload = buildSubmitPayload();
 	suppressAutoSubmitOnClose = true;
-	window.glimpse.send(payload);
+	window.glimpse.send({ ...payload, draft: false });
 	window.glimpse.close();
 });
 

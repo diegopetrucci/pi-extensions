@@ -22,7 +22,11 @@ Run `/annotate-last-message` from an interactive pi session. The annotation wind
 - section comments for larger chunks of the message, and
 - inline notes tied to individual lines.
 
-When you submit, the extension appends a structured planning-oriented feedback prompt to the current editor buffer. It does not auto-apply changes or rewrite the previous assistant message in place.
+When you submit, the extension sends a structured planning-oriented feedback prompt directly to the agent as a follow-up message. Your existing editor text is left untouched. It does not auto-apply changes or rewrite the previous assistant message in place.
+
+## Rollback
+
+There is no runtime setting or toggle for submit behavior. To restore the prior editor-only Submit flow, reinstall the previous package version or revert this source change and rebuild/reinstall the package.
 
 ## Requirements
 
