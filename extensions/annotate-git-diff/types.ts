@@ -71,6 +71,12 @@ export interface ReviewSubmitPayload {
 	type: "submit";
 	overallComment: string;
 	comments: DiffReviewComment[];
+	/**
+	 * True means this is a close-recovery draft and must stay editor-only.
+	 * Only literal false permits an explicit submission to trigger an agent turn;
+	 * malformed or missing values are normalized to true by the host.
+	 */
+	draft: boolean;
 }
 
 export interface ReviewCancelPayload {

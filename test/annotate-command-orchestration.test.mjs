@@ -370,11 +370,12 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
   await t.test('guards UI access, blocks concurrent windows, and suppresses late results after shutdown', async () => {
     const firstWindow = createMockWindow('first-window');
     const secondWindow = createMockWindow('second-window');
+    const closedWindow = createMockWindow('closed-window');
     const state = createAnnotateLastMessageState({
-      windows: [firstWindow, secondWindow],
+      windows: [firstWindow, secondWindow, closedWindow],
     });
     const extension = await loadAnnotateLastMessageExtension(state);
-    const { pi, commands, handlers } = createExtensionHarness();
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
     extension(pi);
 
     const handler = commands.get('annotate-last-message').handler;
@@ -417,6 +418,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
       sectionComments: [],
     });
     await flushAsyncWork();
+    assert.deepEqual(sentUserMessages, []);
     assert.deepEqual(pasted, []);
     assert.equal(notifications.length, 2);
 
@@ -429,16 +431,53 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
       { message: 'Opened native annotation window.', level: 'info' },
       { message: 'Annotation cancelled.', level: 'info' },
     ]);
+
+    await handler({}, ctx);
+    closedWindow.emit('closed');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(sentUserMessages, []);
+    assert.deepEqual(pasted, []);
   });
 
-  await t.test('appends composed prompts on submit and reports blank submits without editing', async () => {
+  await t.test('suppresses a settled explicit result when shutdown races its delivery', async () => {
+    const raceWindow = createMockWindow('settled-before-shutdown-window');
+    const state = createAnnotateLastMessageState({ windows: [raceWindow] });
+    const extension = await loadAnnotateLastMessageExtension(state);
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-last-message').handler;
+    const shutdownHandler = handlers.get('session_shutdown');
+    const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Existing editor text' });
+
+    await handler({}, ctx);
+    raceWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'The result settled before shutdown.',
+      inlineComments: [],
+      sectionComments: [],
+    });
+    const shutdown = shutdownHandler({}, ctx);
+    await shutdown;
+    await flushAsyncWork();
+
+    assert.equal(raceWindow.closeCalls, 1);
+    assert.deepEqual(sentUserMessages, []);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(notifications, [
+      { message: 'Opened native annotation window.', level: 'info' },
+    ]);
+  });
+
+  await t.test('sends composed prompts once via follow-up and reports blank submits without editing', async () => {
     const submitWindow = createMockWindow('submit-window');
     const blankWindow = createMockWindow('blank-window');
+    const invalidWindow = createMockWindow('invalid-window');
     const state = createAnnotateLastMessageState({
-      windows: [submitWindow, blankWindow],
+      windows: [submitWindow, blankWindow, invalidWindow],
     });
     const extension = await loadAnnotateLastMessageExtension(state);
-    const { pi, commands, handlers } = createExtensionHarness();
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
     extension(pi);
 
     const handler = commands.get('annotate-last-message').handler;
@@ -453,9 +492,19 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
       sectionComments: [],
     });
     await flushAsyncWork();
+    submitWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Duplicate feedback must not send.',
+      inlineComments: [],
+      sectionComments: [],
+    });
+    await flushAsyncWork();
 
     assert.equal(submitWindow.closeCalls, 1);
-    assert.deepEqual(pasted, ['\n\nANNOTATE LAST MESSAGE PROMPT']);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE LAST MESSAGE PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
     assert.deepEqual(state.composeCalls, [
       {
         sourceData: state.findResult.data,
@@ -469,7 +518,7 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     ]);
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native annotation window.', level: 'info' },
-      { message: 'Appended annotation feedback to the editor.', level: 'info' },
+      { message: 'Annotation feedback sent to the agent.', level: 'info' },
     ]);
 
     await handler({}, ctx);
@@ -482,11 +531,28 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     await flushAsyncWork();
 
     assert.equal(blankWindow.closeCalls, 1);
-    assert.deepEqual(pasted, ['\n\nANNOTATE LAST MESSAGE PROMPT']);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE LAST MESSAGE PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native annotation window.', level: 'info' },
       { message: 'No annotation feedback submitted.', level: 'info' },
     ]);
+
+    await handler({}, ctx);
+    invalidWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Invalid inline comment must be ignored.',
+      inlineComments: [{ body: 'missing line number' }],
+      sectionComments: [],
+    });
+    await flushAsyncWork();
+    assert.equal(invalidWindow.closeCalls, 0);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE LAST MESSAGE PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.deepEqual(pasted, []);
 
     await shutdownHandler({}, ctx);
   });
@@ -627,7 +693,7 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
       ],
     });
     const extension = await loadAnnotateGitDiffExtension(state);
-    const { pi, commands, handlers } = createExtensionHarness();
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
     extension(pi);
 
     const handler = commands.get('annotate-git-diff').handler;
@@ -674,9 +740,11 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
       type: 'submit',
       overallComment: 'late feedback',
       comments: [],
+      draft: false,
     });
     await flushAsyncWork();
     assert.deepEqual(pasted, []);
+    assert.deepEqual(sentUserMessages, []);
     assert.equal(notifications.length, 2);
 
     await handler({}, ctx);
@@ -689,6 +757,36 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     assert.deepEqual(notifications.slice(-2), [
       { message: 'Opened native review window.', level: 'info' },
       { message: 'Review cancelled.', level: 'info' },
+    ]);
+  });
+
+  await t.test('suppresses a settled explicit result when shutdown races its delivery', async () => {
+    const raceWindow = createMockWindow('settled-before-shutdown-window');
+    const state = createAnnotateGitDiffState({ windows: [raceWindow] });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const shutdownHandler = handlers.get('session_shutdown');
+    const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Existing editor text' });
+
+    await handler({}, ctx);
+    raceWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'The result settled before shutdown.',
+      comments: [],
+      draft: false,
+    });
+    const shutdown = shutdownHandler({}, ctx);
+    await shutdown;
+    await flushAsyncWork();
+
+    assert.equal(raceWindow.closeCalls, 1);
+    assert.deepEqual(sentUserMessages, []);
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(notifications, [
+      { message: 'Opened native review window.', level: 'info' },
     ]);
   });
 
@@ -780,7 +878,7 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
       clipboardWriteError: new Error('clipboard unavailable'),
     });
     const extension = await loadAnnotateGitDiffExtension(state);
-    const { pi, commands, handlers } = createExtensionHarness();
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
     extension(pi);
 
     const handler = commands.get('annotate-git-diff').handler;
@@ -849,9 +947,11 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
           type: 'submit',
           overallComment: 'Please tighten the review summary.',
           comments: [],
+          draft: true,
         },
       },
     ]);
+    assert.deepEqual(sentUserMessages, []);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Appended review feedback to the editor.', level: 'info' },
     ]);
@@ -869,6 +969,94 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     assert.equal(state.disposedUiServers, 2);
     assert.deepEqual(notifications.slice(-1), [
       { message: 'Opened native review window.', level: 'info' },
+    ]);
+
+    await shutdownHandler({}, ctx);
+  });
+
+  await t.test('sends explicit submissions once and keeps invalid or draft payloads editor-only', async () => {
+    const explicitWindow = createMockWindow('explicit-submit-window');
+    const malformedDraftWindow = createMockWindow('malformed-draft-window');
+    const invalidWindow = createMockWindow('invalid-submit-window');
+    const draftWindow = createMockWindow('draft-submit-window');
+    const reviewData = createAnnotateGitDiffState().getReviewWindowDataResults[0];
+    const state = createAnnotateGitDiffState({
+      windows: [explicitWindow, malformedDraftWindow, invalidWindow, draftWindow],
+      getReviewWindowDataResults: [reviewData, reviewData, reviewData, reviewData],
+      composePromptResult: 'ANNOTATE GIT DIFF EXPLICIT PROMPT',
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const shutdownHandler = handlers.get('session_shutdown');
+    const { ctx, notifications, pasted } = createCommandContext({ editorText: 'Existing editor text' });
+
+    await handler({}, ctx);
+    explicitWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Send this review.',
+      comments: [],
+      draft: false,
+    });
+    await flushAsyncWork();
+    explicitWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Duplicate review must not send.',
+      comments: [],
+      draft: false,
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(pasted, []);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF EXPLICIT PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.equal(notifications.at(-1)?.message, 'Review feedback sent to the agent.');
+
+    await handler({}, ctx);
+    malformedDraftWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Malformed draft discriminator must stay local.',
+      comments: [],
+      draft: 'false',
+    });
+    await flushAsyncWork();
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF EXPLICIT PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.deepEqual(pasted, ['\n\nANNOTATE GIT DIFF EXPLICIT PROMPT']);
+
+    await handler({}, ctx);
+    invalidWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Invalid comment shape must be ignored.',
+      comments: [{ body: 'missing required fields' }],
+      draft: false,
+    });
+    await flushAsyncWork();
+    assert.equal(invalidWindow.closeCalls, 0);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF EXPLICIT PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.deepEqual(pasted, ['\n\nANNOTATE GIT DIFF EXPLICIT PROMPT']);
+
+    await shutdownHandler({}, ctx);
+    await handler({}, ctx);
+    draftWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Explicit draft payload must stay local.',
+      comments: [],
+      draft: true,
+    });
+    await flushAsyncWork();
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF EXPLICIT PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.deepEqual(pasted, [
+      '\n\nANNOTATE GIT DIFF EXPLICIT PROMPT',
+      '\n\nANNOTATE GIT DIFF EXPLICIT PROMPT',
     ]);
 
     await shutdownHandler({}, ctx);

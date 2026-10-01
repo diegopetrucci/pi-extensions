@@ -1,6 +1,6 @@
 # annotate-git-diff
 
-A standalone pi extension that adds `/annotate-git-diff`, a native Glimpse window for reviewing git changes and sending structured feedback back to the current editor buffer.
+A standalone pi extension that adds `/annotate-git-diff`, a native Glimpse window for reviewing git changes. Explicit **Submit to agent** sends structured feedback directly to the active agent; closing with unsent comments pastes an editor-only draft instead.
 
 ## Attribution
 
@@ -25,11 +25,15 @@ Run `/annotate-git-diff` inside a git repository. The command opens a native rev
 - Monaco-based diff viewing,
 - branch diff, per-commit including working tree, and all-files scopes,
 - inline, file-level, and overall review comments,
-- submit-to-editor feedback prompt insertion.
+- explicit Submit sends review feedback directly to the agent; closing the window with unsent comments pastes a draft prompt to the editor instead.
 
-Submitting feedback does not auto-apply code changes. The extension appends a structured prompt to the current editor buffer so you can send that feedback back to the active agent.
+Submitting feedback does not auto-apply code changes. Clicking **Submit to agent** sends a structured prompt directly to the active agent. If you close the window with comments not yet submitted, the extension pastes a draft prompt into the editor instead, so an accidental close cannot fire a new agent turn.
 
 The review UI does not fetch assets from a CDN. While the window is open, the extension serves its packaged Monaco graph from an ephemeral, tokenized HTTP server bound only to `127.0.0.1`; closing, cancelling, submitting, startup failure, or Pi shutdown stops that server.
+
+## Rollback
+
+There is no runtime setting or toggle for submit behavior. To restore the prior editor-only Submit flow, reinstall the previous package version or revert this source change and rebuild/reinstall the package.
 
 ## Requirements
 

@@ -3,20 +3,59 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { openQuietGlimpse, type QuietGlimpseWindow } from "./quiet-glimpse.js";
 import { composeAnnotateLastMessagePrompt, hasAnnotateLastMessageFeedback } from "./prompt.js";
 import { findLastAssistantMessage } from "./session.js";
-import type { AnnotateLastMessageCancelPayload, AnnotateLastMessageSubmitPayload, AnnotateLastMessageWindowMessage, LastAssistantMessageData } from "./types.js";
+import type {
+	AnnotateLastMessageCancelPayload,
+	AnnotateLastMessageInlineComment,
+	AnnotateLastMessageSectionComment,
+	AnnotateLastMessageSubmitPayload,
+	AnnotateLastMessageWindowMessage,
+	LastAssistantMessageData,
+} from "./types.js";
 import { buildAnnotateLastMessageHtml } from "./ui.js";
 
+function isInlineComment(value: unknown): value is AnnotateLastMessageInlineComment {
+	return (
+		typeof value === "object" &&
+		value != null &&
+		"line" in value &&
+		typeof value.line === "number" &&
+		Number.isInteger(value.line) &&
+		value.line > 0 &&
+		"body" in value &&
+		typeof value.body === "string"
+	);
+}
+
+function isSectionComment(value: unknown): value is AnnotateLastMessageSectionComment {
+	return (
+		typeof value === "object" &&
+		value != null &&
+		"sectionId" in value &&
+		typeof value.sectionId === "string" &&
+		"body" in value &&
+		typeof value.body === "string"
+	);
+}
+
 function isSubmitPayload(value: unknown): value is AnnotateLastMessageSubmitPayload {
-	return typeof value === "object" && value != null && "type" in value && value.type === "submit";
+	return (
+		typeof value === "object" &&
+		value != null &&
+		"type" in value &&
+		value.type === "submit" &&
+		"overallComment" in value &&
+		typeof value.overallComment === "string" &&
+		"inlineComments" in value &&
+		Array.isArray(value.inlineComments) &&
+		value.inlineComments.every(isInlineComment) &&
+		"sectionComments" in value &&
+		Array.isArray(value.sectionComments) &&
+		value.sectionComments.every(isSectionComment)
+	);
 }
 
 function isCancelPayload(value: unknown): value is AnnotateLastMessageCancelPayload {
 	return typeof value === "object" && value != null && "type" in value && value.type === "cancel";
-}
-
-function appendPrompt(ctx: ExtensionCommandContext, prompt: string): void {
-	const prefix = ctx.ui.getEditorText().trim().length > 0 ? "\n\n" : "";
-	ctx.ui.pasteToEditor(`${prefix}${prompt}`);
 }
 
 export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
@@ -143,7 +182,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 			void (async (windowMessageSource: QuietGlimpseWindow, sourceData: LastAssistantMessageData) => {
 				try {
 					const result = await terminalMessagePromise;
-					if (suppressedWindows.has(windowMessageSource)) return;
+					if (suppressedWindows.has(windowMessageSource) || attempt !== annotationAttempt) return;
 					if (result == null) return;
 					if (result.type === "cancel") {
 						ctx.ui.notify("Annotation cancelled.", "info");
@@ -155,10 +194,10 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 					}
 
 					const prompt = composeAnnotateLastMessagePrompt(sourceData, result);
-					appendPrompt(ctx, prompt);
-					ctx.ui.notify("Appended annotation feedback to the editor.", "info");
+					pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+					ctx.ui.notify("Annotation feedback sent to the agent.", "info");
 				} catch (error) {
-					if (suppressedWindows.has(windowMessageSource)) return;
+					if (suppressedWindows.has(windowMessageSource) || attempt !== annotationAttempt) return;
 					const message = error instanceof Error ? error.message : String(error);
 					ctx.ui.notify(`Annotation failed: ${message}`, "error");
 				}
@@ -166,6 +205,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 
 			ctx.ui.notify("Opened native annotation window.", "info");
 		} catch (error) {
+			if (attempt !== annotationAttempt) return;
 			closeActiveWindow({ suppressResults: true });
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(`Annotation failed: ${message}`, "error");

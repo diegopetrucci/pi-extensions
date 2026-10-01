@@ -40,7 +40,7 @@ function updateSubmitState() {
 	const count = feedbackCount();
 	elements.submitButton.disabled = count === 0;
 	if (count === 0) {
-		setStatus("Add any feedback you want to send back to the editor.");
+		setStatus("Add any feedback you want to send to the agent.");
 		return;
 	}
 	const noun = count === 1 ? "item" : "items";
