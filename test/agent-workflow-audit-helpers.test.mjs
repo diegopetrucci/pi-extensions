@@ -55,6 +55,37 @@ test('agent-workflow-audit builds execution and plan-only prompts with git-statu
   assert.match(report, /Git status check: changed \(1 dirty item\(s\) before, 2 dirty item\(s\) after\)\./);
 });
 
+test('agent-workflow-audit rejects provider errors, tool-only final turns, and missing final reports', async () => {
+  const { inspectFinalAssistant } = await loadAuditTestUtils();
+
+  assert.deepEqual(inspectFinalAssistant([
+    { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'stale' }] },
+    { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'read' }] },
+  ]), {
+    ok: false,
+    reason: 'Agent Workflow Audit subagent produced no final assistant text (stopReason: toolUse)',
+    stopReason: 'toolUse',
+  });
+
+  assert.deepEqual(inspectFinalAssistant([{
+    role: 'assistant',
+    stopReason: 'error',
+    errorMessage: 'provider unavailable',
+    content: [{ type: 'text', text: 'partial report' }],
+  }]), {
+    ok: false,
+    reason: 'Agent Workflow Audit subagent error: provider unavailable',
+    stopReason: 'error',
+    errorMessage: 'provider unavailable',
+  });
+
+  assert.deepEqual(inspectFinalAssistant([{
+    role: 'assistant',
+    stopReason: 'stop',
+    content: [{ type: 'text', text: 'final report' }],
+  }]), { ok: true, answer: 'final report', stopReason: 'stop' });
+});
+
 test('agent-workflow-audit formats tool calls and collapses reports at the line limit', async () => {
   const { formatToolCall, renderCollapsedReport } = await loadAuditTestUtils();
 

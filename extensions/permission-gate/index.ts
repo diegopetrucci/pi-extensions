@@ -26,6 +26,17 @@ const MAX_SHELL_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
 const POWERSHELL_ANALYSIS_TIMEOUT_MS = 5_000;
 
 type GuardDecision = { block: true; reason: string } | undefined;
+type ConfirmationContext = {
+	hasUI?: boolean;
+	signal?: AbortSignal;
+	ui?: {
+		select(
+			prompt: string,
+			choices: string[],
+			dialogOptions?: { signal?: AbortSignal },
+		): Promise<string | undefined>;
+	};
+};
 type NormalizedPath = {
 	original: string;
 	displayPath: string;
@@ -611,26 +622,40 @@ function validateEditInput(input: unknown): EditInput | undefined {
 	};
 }
 
+async function requestConfirmation(prompt: string, ctx: ConfirmationContext): Promise<GuardDecision> {
+	if (!ctx.hasUI || !ctx.ui) {
+		return { block: true, reason: "Confirmation unavailable (no UI)" };
+	}
+	if (ctx.signal?.aborted) {
+		return { block: true, reason: "Confirmation cancelled" };
+	}
+
+	try {
+		const choice = await ctx.ui.select(prompt, ["Yes", "No"], { signal: ctx.signal });
+		if (ctx.signal?.aborted) {
+			return { block: true, reason: "Confirmation cancelled" };
+		}
+		return choice === "Yes" ? undefined : { block: true, reason: "Blocked by user" };
+	} catch {
+		// A dismissed or failed UI must never turn a confirmation failure into an allow.
+		return { block: true, reason: "Confirmation unavailable" };
+	}
+}
+
 async function confirmProtectedPathAction(
 	toolName: "write" | "edit",
 	normalizedPath: NormalizedPath,
-	ctx: { hasUI?: boolean; ui?: { select(prompt: string, options: string[]): Promise<string | undefined> } },
+	ctx: ConfirmationContext,
 ): Promise<GuardDecision> {
 	if (!isProtectedPath(normalizedPath)) return undefined;
 	if (!ctx.hasUI || !ctx.ui) {
 		return { block: true, reason: `Protected path blocked (${toolName} without UI confirmation): ${normalizedPath.displayPath}` };
 	}
 
-	const choice = await ctx.ui.select(
+	return requestConfirmation(
 		`⚠️ Protected path ${toolName} request:\n\n  ${normalizedPath.displayPath}\n\nAllow?`,
-		["Yes", "No"],
+		ctx,
 	);
-
-	if (choice !== "Yes") {
-		return { block: true, reason: "Blocked by user" };
-	}
-
-	return undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -643,8 +668,8 @@ export default function (pi: ExtensionAPI) {
 			}
 			const { command } = input;
 
-				const isDangerous = shellToolName === "powershell"
-					? await hasDangerousPowerShellCommand(pi, command, ctx.signal)
+			const isDangerous = shellToolName === "powershell"
+				? await hasDangerousPowerShellCommand(pi, command, ctx.signal)
 				: hasDangerousRecursiveRm(command) || dangerousPatterns.some((pattern) => pattern.test(command));
 
 			if (isDangerous) {
@@ -652,11 +677,7 @@ export default function (pi: ExtensionAPI) {
 					return { block: true, reason: "Dangerous command blocked (no UI for confirmation)" };
 				}
 
-				const choice = await ctx.ui.select(`⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`, ["Yes", "No"]);
-
-				if (choice !== "Yes") {
-					return { block: true, reason: "Blocked by user" };
-				}
+				return requestConfirmation(`⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`, ctx);
 			}
 
 			return undefined;

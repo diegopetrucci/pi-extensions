@@ -148,14 +148,39 @@ function messageContentToText(content: unknown): string {
 	return parts.join("\n").trim();
 }
 
-function extractLastAssistantText(messages: unknown[]): string {
+type AuditAssistantOutcome =
+	| { ok: true; answer: string; stopReason?: string }
+	| { ok: false; reason: string; stopReason?: string; errorMessage?: string };
+
+function inspectFinalAssistant(messages: unknown[]): AuditAssistantOutcome {
 	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: string; content?: unknown };
+		const message = messages[i] as { role?: string; content?: unknown; stopReason?: unknown; errorMessage?: unknown };
 		if (message?.role !== "assistant") continue;
-		const text = messageContentToText(message.content);
-		if (text.trim()) return text.trim();
+		const stopReason = typeof message.stopReason === "string" ? message.stopReason.trim() : "";
+		const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+		const answer = messageContentToText(message.content);
+		if (stopReason === "error") {
+			return { ok: false, reason: `Agent Workflow Audit subagent error: ${errorMessage || "provider/model error"}`, stopReason, errorMessage };
+		}
+		if (stopReason === "aborted") {
+			return { ok: false, reason: "Agent Workflow Audit subagent aborted before producing a usable report", stopReason };
+		}
+		if (answer) return { ok: true, answer, stopReason: stopReason || undefined };
+		return {
+			ok: false,
+			reason: stopReason
+				? `Agent Workflow Audit subagent produced no final assistant text (stopReason: ${stopReason})`
+				: "Agent Workflow Audit subagent produced no final assistant text",
+			...(stopReason ? { stopReason } : {}),
+			...(errorMessage ? { errorMessage } : {}),
+		};
 	}
-	return "";
+	return { ok: false, reason: "Agent Workflow Audit subagent produced no assistant message" };
+}
+
+function extractLastAssistantText(messages: unknown[]): string {
+	const outcome = inspectFinalAssistant(messages);
+	return outcome.ok ? outcome.answer : "";
 }
 
 function isAbortLikeError(error: unknown): boolean {
@@ -1085,9 +1110,16 @@ async function runAudit(
 			await Promise.race([promptPromise, timeoutPromise]);
 		}
 
-		const answer = session ? extractLastAssistantText(session.state.messages) : "";
-		lastContent = answer || (aborted ? "Aborted" : "(no output)");
-		details.status = aborted ? "aborted" : "done";
+		const outcome = session ? inspectFinalAssistant(session.state.messages) : { ok: false as const, reason: "Agent Workflow Audit subagent produced no assistant message" };
+		if (outcome.ok) {
+			lastContent = outcome.answer;
+			details.status = "done";
+		} else if (aborted) {
+			lastContent = "Aborted";
+			details.status = "aborted";
+		} else {
+			throw new Error(outcome.reason);
+		}
 		details.endedAt = Date.now();
 		details.reportLength = lastContent.length;
 		emit();
@@ -1116,6 +1148,7 @@ export const __test__ = {
 	buildSystemPrompt,
 	buildUserPrompt,
 	createAuditRuntimeGuardExtension,
+	inspectFinalAssistant,
 	formatToolCall,
 	getBlockedBashReason,
 	parseArgs,

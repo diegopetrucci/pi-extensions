@@ -40,6 +40,7 @@ function writeConfig(filePath, config) {
 function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false, authToken }) {
   const statuses = [];
   const notifications = [];
+  const oauthCalls = [];
   const sessionManager = {};
   const ctx = {
     cwd,
@@ -58,7 +59,8 @@ function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false
       },
     },
     modelRegistry: {
-      isUsingOAuth() {
+      isUsingOAuth(currentModel) {
+        oauthCalls.push(currentModel);
         return oauth;
       },
       async getProviderAuth() {
@@ -67,7 +69,7 @@ function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false
       },
     },
   };
-  return { ctx, statuses, notifications };
+  return { ctx, statuses, notifications, oauthCalls };
 }
 
 function getHandler(harness, name) {
@@ -200,7 +202,7 @@ test('fast supports every legacy allowlisted model and preserves provider-specif
   assert.deepEqual(apiKeyOpenAI.statuses.at(-1), { key: 'fast', value: undefined });
 });
 
-test('fast supports only the confirmed direct OpenAI API models with the fast service tier', async (t) => {
+test('fast preserves direct OpenAI OAuth payload behavior without asserting remote Fast support', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDir(t, agentDir);
   writeConfig(path.join(agentDir, 'extensions', 'fast.json'), { enabled: true });
@@ -213,24 +215,28 @@ test('fast supports only the confirmed direct OpenAI API models with the fast se
 
   for (const api of ['openai-responses', 'openai-completions']) {
     for (const id of OPENAI_API_MODELS) {
-      const context = createContext({
-        cwd: projectDir,
-        model: { provider: 'openai', api, id },
-        oauth: false,
-      });
-      await sessionStart({}, context.ctx);
-      assert.deepEqual(await beforeRequest({ payload: { model: id, input: 'hello' } }, context.ctx), {
-        model: id,
-        input: 'hello',
-        service_tier: 'fast',
-      });
-      assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'fast' });
+      for (const oauth of [false, true]) {
+        const context = createContext({
+          cwd: projectDir,
+          model: { provider: 'openai', api, id },
+          oauth,
+        });
+        await sessionStart({}, context.ctx);
+        assert.deepEqual(await beforeRequest({ payload: { model: id, input: 'hello' } }, context.ctx), {
+          model: id,
+          input: 'hello',
+          service_tier: 'fast',
+        });
+        assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'fast' });
+        assert.deepEqual(context.oauthCalls, [], 'direct OpenAI auth must not be routed through Codex auth checks');
+      }
     }
   }
 
   const directApiContext = createContext({
     cwd: projectDir,
     model: { provider: 'openai', api: 'openai-responses', id: 'gpt-6-astra' },
+    oauth: true,
   });
   await sessionStart({}, directApiContext.ctx);
   const existingTierPayload = { model: 'gpt-6-astra', input: 'hello', service_tier: 'default' };

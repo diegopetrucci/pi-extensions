@@ -40,6 +40,8 @@ Options:
 - The current-context chart reconciles to pi's footer-compatible context total when pi knows it.
 - Immediately after compaction, pi may not know exact current context usage until the next model response.
 - The full branch tab includes old pre-compaction history for inspection; that history is not necessarily sent verbatim to the model.
+- When the selected model is virtual, the report labels it as a selection and shows the latest routed physical identity from an assistant response when available. It never treats virtual metadata as the provider's context limit; the context window is shown only from Pi's aggregate usage when known.
+- Bounded `nestedCalls` metadata is noted on its parent tool result but is not expanded or counted as transcript output, because Pi does not record child results in the model context.
 - `--keep` writes reports under `<pi-config-dir>/context-reports/`; avoid committing those reports because they can contain sensitive session data unless redacted.
 
 ## Install

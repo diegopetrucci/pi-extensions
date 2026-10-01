@@ -281,13 +281,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	fireworks: [
 		"accounts/fireworks/models/kimi-k3",
 		"accounts/fireworks/routers/kimi-k3-fast",
-		"accounts/fireworks/models/deepseek-v4-pro",
-		"accounts/fireworks/models/kimi-k2p7-code",
-		"accounts/fireworks/models/glm-5p2",
-		"accounts/fireworks/routers/glm-5p2-fast",
 		"accounts/fireworks/models/minimax-m3",
-		"accounts/fireworks/models/kimi-k2p6",
-		"accounts/fireworks/models/qwen3p7-plus",
 		"accounts/fireworks/models/gpt-oss-120b",
 	],
 	"github-copilot": [
@@ -466,17 +460,13 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"deepseek-v4-pro",
 		"glm-5.3",
 		"glm-5.2",
-		"glm-5.1",
-		"qwen3.7-max",
 		"qwen3.7-plus",
-		"qwen3.6-plus",
 		"mimo-v2.5-pro",
 		"mimo-v2.5",
 		"minimax-m3",
 		"minimax-m2.7",
 		"kimi-k3",
 		"kimi-k2.7-code",
-		"kimi-k2.6",
 		"grok-4.7 ",
 		"grok-4.7",
 		"grok-4.6",
@@ -582,9 +572,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5.4",
 		"gpt-5.3-codex",
 		"kimi-k3",
-		"deepseek-v4-pro",
 		"glm-5.3",
-		"kimi-k2.7-code",
 		"deepseek-v4.1-flash",
 		"gpt-5.4-mini",
 		"glm-5.3-flash",
@@ -594,8 +582,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"moonshotai/Kimi-K3",
 		"zai-org/GLM-5.3-Flash",
 		"zai-org/GLM-5.2",
-		"moonshotai/Kimi-K2.7-Code",
-		"moonshotai/Kimi-K2.6",
 		"Qwen/Qwen3.7-Max",
 		"Qwen/Qwen3.6-Plus",
 		"MiniMaxAI/MiniMax-M3",
@@ -605,6 +591,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"nvidia/nemotron-3-ultra-550b-a55b",
 		"google/gemma-4-31B-it",
 	],
+	typesafe: [],
 	"vercel-ai-gateway": [
 		"anthropic/claude-opus-5.5 ",
 		"anthropic/claude-opus-5.5",
@@ -1387,7 +1374,10 @@ async function runContrarian(
 			}
 
 			if (event.type === "message_start" && event.message?.role === "assistant") {
+				// A later assistant turn supersedes any earlier tool/intermediate answer.
+				// Keep only the current message so a tool-only final turn cannot return stale text.
 				currentText = "";
+				finalOutput = "";
 				emit();
 				return;
 			}
@@ -1400,7 +1390,8 @@ async function runContrarian(
 
 			if (event.type === "message_end" && event.message?.role === "assistant") {
 				const text = extractTextFromContent(event.message.content) || currentText;
-				if (text) finalOutput = text;
+				// message_end is authoritative, including an empty tool-only message.
+				finalOutput = text;
 				currentText = "";
 
 				const stopReason = event.message.stopReason;

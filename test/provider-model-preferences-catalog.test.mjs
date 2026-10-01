@@ -135,8 +135,96 @@ test('oracle provider matrix top picks stay aligned with the implementation', ()
 
   assert.equal(matrixRows.length, Object.keys(preferences).length);
   for (const { provider, topPick } of matrixRows) {
-    const firstMatch = firstCatalogMatchId(provider, preferences[provider]);
+    const patterns = preferences[provider];
+    assert.ok(patterns, `extensions/oracle/index.ts is missing ${provider}`);
+    if (patterns.length === 0) {
+      assert.equal(getBuiltinModels(provider).length, 0, `${provider} unexpectedly exposes chat models`);
+      assert.equal(topPick, '—', `docs/oracle-provider-matrix.md needs a no-chat-model marker for ${provider}`);
+      continue;
+    }
+    const firstMatch = firstCatalogMatchId(provider, patterns);
     assert.equal(firstMatch, topPick, `docs/oracle-provider-matrix.md drifted for ${provider}`);
+  }
+});
+
+test('Pi 0.99 TypeSafe classifier provider has no chat preference or selectable model', () => {
+  for (const role of ['oracle', 'contrarian']) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+    assert.deepEqual(preferences.typesafe, [], `${role} must not select a classifier as a chat model`);
+  }
+  assert.deepEqual(getBuiltinModels('typesafe'), [], 'TypeSafe exposes classifier models only, not chat models');
+  assert.equal(firstCatalogMatchId('typesafe', []), undefined);
+});
+
+test('Pi 0.99 dead-entry cleanup preserves the approved survivor order', () => {
+  const expected = {
+    fireworks: [
+      'accounts/fireworks/models/kimi-k3',
+      'accounts/fireworks/routers/kimi-k3-fast',
+      'accounts/fireworks/models/minimax-m3',
+      'accounts/fireworks/models/gpt-oss-120b',
+    ],
+    'opencode-go': [
+      'deepseek-v4-pro',
+      'glm-5.3',
+      'glm-5.2',
+      'qwen3.7-plus',
+      'mimo-v2.5-pro',
+      'mimo-v2.5',
+      'minimax-m3',
+      'minimax-m2.7',
+      'kimi-k3',
+      'kimi-k2.7-code',
+      'grok-4.7 ',
+      'grok-4.7',
+      'grok-4.6',
+    ],
+    radius: [
+      'gpt-6-astra ',
+      'gpt-6-astra',
+      'claude-opus-5-5 ',
+      'claude-opus-5-5',
+      'claude-opus-5',
+      'gpt-6-sol ',
+      'gpt-6-sol',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-6-luna ',
+      'gpt-6-luna',
+      'gpt-5.6-luna',
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.3-codex',
+      'kimi-k3',
+      'glm-5.3',
+      'deepseek-v4.1-flash',
+      'gpt-5.4-mini',
+      'glm-5.3-flash',
+    ],
+    together: [
+      'deepseek-ai/DeepSeek-V4-Pro',
+      'moonshotai/Kimi-K3',
+      'zai-org/GLM-5.3-Flash',
+      'zai-org/GLM-5.2',
+      'Qwen/Qwen3.7-Max',
+      'Qwen/Qwen3.6-Plus',
+      'MiniMaxAI/MiniMax-M3',
+      'MiniMaxAI/MiniMax-M2.7',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'nvidia/nemotron-3-ultra-550b-a55b',
+      'google/gemma-4-31B-it',
+    ],
+  };
+  for (const role of ['oracle', 'contrarian']) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+    for (const [provider, survivors] of Object.entries(expected)) {
+      assert.deepEqual(preferences[provider], survivors, `${role} changed survivor order for ${provider}`);
+    }
   }
 });
 

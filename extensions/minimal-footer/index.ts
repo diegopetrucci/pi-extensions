@@ -10,8 +10,12 @@ import {
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
 	fetchOpenAICodexUsage,
+	formatUsageStatus,
 	formatUsageSummary,
+	getOpenAICodexAccountId,
 	isOpenAICodexProvider,
+	isOpenAIProvider,
+	type UsageAvailability,
 	type UsageSnapshot,
 } from "./openai-usage.ts";
 
@@ -62,6 +66,12 @@ const DUMB_ZONE_COLORS = new Set<DumbZoneColor>([
 	"dim",
 ]);
 
+// Node treats delays above this value as 1ms. Clamp only the identity-check
+// schedule; the configured cache TTL remains the source of truth for lifecycle
+// usage-result caching.
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
+const ZERO_CACHE_IDENTITY_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 type RecursivePartial<T> = {
 	[P in keyof T]?: T[P] extends object ? RecursivePartial<T[P]> : T[P];
 };
@@ -106,14 +116,26 @@ interface MinimalFooterConfig {
 	};
 }
 
+type UsageIdentity = {
+	renderKey: string;
+	usageKey: string;
+	oauth: boolean;
+	accountId?: string;
+};
+
 type UsageSessionState = {
 	config: MinimalFooterConfig;
 	snapshot?: UsageSnapshot;
 	lastFetchedAt?: number;
 	loading: boolean;
 	error?: string;
+	availability?: UsageAvailability;
+	usageIdentity?: UsageIdentity;
+	requestVersion: number;
+	disposed: boolean;
 	inflight?: Promise<void>;
 	requestRender?: () => void;
+	usageRefreshTimer?: TimerHandle;
 	gitCache?: GitFooterCache;
 };
 
@@ -761,6 +783,7 @@ function renderFooterLines(options: {
 	thinkingLevel: string;
 	theme: { fg(color: DumbZoneColor | "dim", text: string): string };
 	usageSnapshot?: UsageSnapshot;
+	usageStatus?: UsageAvailability;
 }): string[] {
 	const repo = basename(options.cwd);
 	const branchText = options.gitStatus
@@ -773,9 +796,13 @@ function renderFooterLines(options: {
 	const dumbZone = options.config.context.dumbZone;
 	const inDumbZone = dumbZone.enabled
 		&& (options.contextUsage?.tokens ?? 0) > dumbZone.thresholdTokens;
-	const usageSummary = shouldShowCodexUsage(options.config)
-		&& isOpenAICodexProvider(options.modelProvider)
+	const usageEnabled = shouldShowCodexUsage(options.config);
+	const usageSummary = usageEnabled && isOpenAICodexProvider(options.modelProvider)
 		? formatUsageSummary(options.usageSnapshot, options.config.codexUsage.windows)
+		: undefined;
+	const usageStatus = usageEnabled
+		&& (isOpenAICodexProvider(options.modelProvider) || isOpenAIProvider(options.modelProvider))
+		? formatUsageStatus(options.usageStatus)
 		: undefined;
 
 	const model = options.modelId ?? "no-model";
@@ -789,6 +816,7 @@ function renderFooterLines(options: {
 	if (options.config.context.showPercent) contextParts.push(options.theme.fg("dim", context));
 	if (inDumbZone) contextParts.push(options.theme.fg(dumbZone.color, dumbZone.label));
 	if (usageSummary) contextParts.push(options.theme.fg("dim", usageSummary));
+	else if (usageStatus) contextParts.push(options.theme.fg("dim", usageStatus));
 	if (shouldShowExperimentalMarker(options.config)) {
 		const marker = options.config.experimentalMarker;
 		contextParts.push(options.theme.fg(marker.color, marker.label));
@@ -824,16 +852,147 @@ function clearUsageState(state: UsageSessionState): void {
 	state.lastFetchedAt = undefined;
 	state.loading = false;
 	state.error = undefined;
+	state.availability = undefined;
+}
+
+function isModelUsingOAuth(ctx: ExtensionContext): boolean {
+	if (!ctx.model) return false;
+	try {
+		return ctx.modelRegistry.isUsingOAuth(ctx.model);
+	} catch {
+		return false;
+	}
+}
+
+function buildUsageRenderKey(
+	model: NonNullable<ExtensionContext["model"]>,
+	oauth: boolean,
+): string {
+	return [model.provider, model.api, model.id, oauth ? "oauth" : "api-key"].join("/");
+}
+
+function getUsageRenderKey(ctx: ExtensionContext): string | undefined {
+	const model = ctx.model;
+	if (!model) return undefined;
+	return buildUsageRenderKey(model, isModelUsingOAuth(ctx));
+}
+
+/**
+ * Resolve account-bound identity only at lifecycle refresh boundaries. Footer
+ * renders use getUsageRenderKey instead so a streaming repaint never reads
+ * auth.json or otherwise reloads account metadata.
+ */
+function getUsageIdentity(ctx: ExtensionContext): UsageIdentity | undefined {
+	const model = ctx.model;
+	if (!model) return undefined;
+
+	const oauth = isModelUsingOAuth(ctx);
+	const renderKey = buildUsageRenderKey(model, oauth);
+	const accountId = isOpenAICodexProvider(model.provider) && oauth
+		? getOpenAICodexAccountId(ctx.modelRegistry)
+		: undefined;
+	return {
+		renderKey,
+		usageKey: [renderKey, accountId ?? "account-unknown"].join("/"),
+		oauth,
+		accountId,
+	};
+}
+
+type UsageMode = "codex" | UsageAvailability;
+
+function getUsageMode(
+	ctx: ExtensionContext,
+	config: MinimalFooterConfig,
+	identity?: UsageIdentity,
+): UsageMode | undefined {
+	if (!shouldShowCodexUsage(config)) return undefined;
+	const oauth = identity?.oauth ?? isModelUsingOAuth(ctx);
+	if (isOpenAICodexProvider(ctx.model?.provider)) {
+		return oauth ? "codex" : "unavailable";
+	}
+	if (isOpenAIProvider(ctx.model?.provider) && oauth) {
+		// Pi's new OpenAI ChatGPT OAuth flow targets api.openai.com. There is
+		// no documented account-usage contract for that token, so never reuse
+		// the legacy openai-codex WHAM request here.
+		return "unsupported";
+	}
+	return undefined;
+}
+
+function invalidateUsageState(
+	state: UsageSessionState,
+	usageIdentity?: UsageIdentity,
+): void {
+	state.requestVersion += 1;
+	state.snapshot = undefined;
+	state.lastFetchedAt = undefined;
+	state.loading = false;
+	state.error = undefined;
+	state.availability = undefined;
+	state.usageIdentity = usageIdentity;
+	// The previous promise may still be resolving. Clearing the reference lets
+	// a newly selected provider/account start its own request; requestVersion
+	// prevents the old promise from repainting this state when it settles.
+	state.inflight = undefined;
+}
+
+function usageRequestStillCurrent(
+	ctx: ExtensionContext,
+	state: UsageSessionState,
+	requestVersion: number,
+	requestUsageKey: string | undefined,
+): boolean {
+	if (
+		state.disposed
+		|| state.requestVersion !== requestVersion
+		|| state.usageIdentity?.usageKey !== requestUsageKey
+	) {
+		return false;
+	}
+
+	// Account-only login changes do not emit an extension event in Pi 0.99.
+	// Re-read the lifecycle identity before accepting a response, but never
+	// perform this check from render().
+	const currentIdentity = getUsageIdentity(ctx);
+	if (currentIdentity?.usageKey === requestUsageKey) return true;
+
+	invalidateUsageState(state, currentIdentity);
+	state.requestRender?.();
+	void refreshUsageIfNeeded(ctx, state, true, currentIdentity);
+	return false;
 }
 
 async function refreshUsageIfNeeded(
 	ctx: ExtensionContext,
 	state: UsageSessionState,
 	force = false,
+	usageIdentity?: UsageIdentity,
 ): Promise<void> {
+	if (state.disposed) return;
+
+	const resolvedUsageIdentity = usageIdentity ?? getUsageIdentity(ctx);
 	const config = state.config;
-	if (!shouldShowCodexUsage(config) || !isOpenAICodexProvider(ctx.model?.provider)) {
+	if (state.usageIdentity?.usageKey !== resolvedUsageIdentity?.usageKey) {
+		invalidateUsageState(state, resolvedUsageIdentity);
+		state.requestRender?.();
+	}
+
+	const mode = getUsageMode(ctx, config, resolvedUsageIdentity);
+	if (!mode) {
+		if (state.snapshot || state.availability || state.loading || state.error) {
+			clearUsageState(state);
+			state.requestRender?.();
+		}
+		return;
+	}
+
+	if (mode !== "codex") {
+		const status: UsageAvailability = mode;
+		if (!force && state.availability === status && state.lastFetchedAt !== undefined) return;
 		clearUsageState(state);
+		state.availability = status;
+		state.lastFetchedAt = Date.now();
 		state.requestRender?.();
 		return;
 	}
@@ -841,23 +1000,28 @@ async function refreshUsageIfNeeded(
 	const now = Date.now();
 	if (
 		!force &&
-		state.lastFetchedAt &&
+		state.lastFetchedAt !== undefined &&
 		now - state.lastFetchedAt < config.codexUsage.cacheTtlMs
 	) {
 		return;
 	}
 
-	if (state.inflight) {
-		return state.inflight;
-	}
+	if (state.inflight) return state.inflight;
 
+	const requestVersion = state.requestVersion;
+	const requestUsageKey = resolvedUsageIdentity?.usageKey;
 	state.loading = true;
+	state.availability = undefined;
 	state.requestRender?.();
-	state.inflight = (async () => {
+	const request = (async () => {
 		try {
 			const snapshot = await fetchOpenAICodexUsage(ctx.modelRegistry, {
 				timeoutMs: config.codexUsage.requestTimeoutMs,
+				// Passing the lifecycle-resolved identity avoids a second account
+				// lookup and binds the response to the account that was requested.
+				accountId: resolvedUsageIdentity?.accountId,
 			});
+			if (!usageRequestStillCurrent(ctx, state, requestVersion, requestUsageKey)) return;
 			if (snapshot) {
 				state.snapshot = snapshot;
 				state.lastFetchedAt = snapshot.fetchedAt;
@@ -866,17 +1030,63 @@ async function refreshUsageIfNeeded(
 				state.snapshot = undefined;
 				state.lastFetchedAt = Date.now();
 				state.error = undefined;
+				state.availability = "unavailable";
 			}
 		} catch (error) {
+			if (!usageRequestStillCurrent(ctx, state, requestVersion, requestUsageKey)) return;
+			state.snapshot = undefined;
+			state.lastFetchedAt = Date.now();
+			state.availability = "unavailable";
 			state.error = error instanceof Error ? error.message : String(error);
 		} finally {
+			if (state.disposed || state.requestVersion !== requestVersion || state.usageIdentity?.usageKey !== requestUsageKey) return;
 			state.loading = false;
 			state.inflight = undefined;
 			state.requestRender?.();
 		}
 	})();
 
-	return state.inflight;
+	state.inflight = request;
+	return request;
+}
+
+function checkUsageIdentity(ctx: ExtensionContext, state: UsageSessionState): void {
+	if (state.disposed) return;
+
+	const currentIdentity = getUsageIdentity(ctx);
+	if (state.usageIdentity?.usageKey === currentIdentity?.usageKey) return;
+
+	// The timer is deliberately identity-only. It performs no WHAM request for
+	// an unchanged account; an identity change uses the existing account-bound
+	// refresh path so token/header validation and late-result isolation remain in
+	// one place.
+	invalidateUsageState(state, currentIdentity);
+	state.requestRender?.();
+	void refreshUsageIfNeeded(ctx, state, true, currentIdentity);
+}
+
+function startUsageRefreshTimer(ctx: ExtensionContext, state: UsageSessionState): void {
+	const configuredIntervalMs = state.config.codexUsage.cacheTtlMs;
+	if (
+		state.usageRefreshTimer !== undefined
+		|| !shouldShowCodexUsage(state.config)
+	) {
+		return;
+	}
+
+	const requestedIntervalMs = configuredIntervalMs === 0
+		? ZERO_CACHE_IDENTITY_CHECK_INTERVAL_MS
+		: configuredIntervalMs;
+	const intervalMs = Math.min(requestedIntervalMs, MAX_NODE_TIMER_DELAY_MS);
+	const handle = setInterval(() => checkUsageIdentity(ctx, state), intervalMs);
+	(handle as { unref?: () => void }).unref?.();
+	state.usageRefreshTimer = handle;
+}
+
+function disposeUsageRefreshTimer(state: UsageSessionState): void {
+	if (state.usageRefreshTimer === undefined) return;
+	clearInterval(state.usageRefreshTimer as ReturnType<typeof setInterval>);
+	state.usageRefreshTimer = undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -885,6 +1095,21 @@ export default function (pi: ExtensionAPI) {
 	function disposeGitCache(state: UsageSessionState): void {
 		state.gitCache?.dispose();
 		state.gitCache = undefined;
+	}
+
+	function disposeState(state: UsageSessionState): void {
+		state.disposed = true;
+		state.requestVersion += 1;
+		state.snapshot = undefined;
+		state.lastFetchedAt = undefined;
+		state.loading = false;
+		state.error = undefined;
+		state.availability = undefined;
+		state.usageIdentity = undefined;
+		state.inflight = undefined;
+		state.requestRender = undefined;
+		disposeUsageRefreshTimer(state);
+		disposeGitCache(state);
 	}
 
 	function ensureGitCache(ctx: ExtensionContext, state: UsageSessionState): void {
@@ -905,9 +1130,14 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_event, ctx) => {
+		const previous = states.get(ctx.sessionManager);
+		if (previous) disposeState(previous);
+
 		const state: UsageSessionState = {
 			config: loadConfig(ctx),
 			loading: false,
+			requestVersion: 0,
+			disposed: false,
 		};
 		states.set(ctx.sessionManager, state);
 
@@ -920,12 +1150,15 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				dispose() {
-					if (state.requestRender) state.requestRender = undefined;
-					disposeGitCache(state);
+					disposeState(state);
 					unsub();
 				},
 				invalidate() {},
 				render(width: number): string[] {
+					// Keep repainting cheap: account-bound identity is resolved only
+					// by lifecycle refreshes, never while streaming output renders.
+					const usageRenderKey = getUsageRenderKey(ctx);
+					const usageStateMatchesModel = state.usageIdentity?.renderKey === usageRenderKey;
 					return renderFooterLines({
 						width,
 						cwd: ctx.cwd,
@@ -942,17 +1175,32 @@ export default function (pi: ExtensionAPI) {
 						modelProvider: ctx.model?.provider,
 						thinkingLevel: pi.getThinkingLevel(),
 						theme,
-						usageSnapshot: state.snapshot,
+						usageSnapshot: usageStateMatchesModel ? state.snapshot : undefined,
+						usageStatus: usageStateMatchesModel ? state.availability : undefined,
 					});
 				},
 			};
 		});
+		startUsageRefreshTimer(ctx, state);
 	});
 
 	pi.on("model_select", (_event, ctx) => {
 		const state = states.get(ctx.sessionManager);
 		if (!state) return;
-		void refreshUsageIfNeeded(ctx, state, true);
+		// A model-select event is also the boundary for an account reload. Do
+		// not let a prior provider/account's snapshot or promise survive it.
+		const usageIdentity = getUsageIdentity(ctx);
+		invalidateUsageState(state, usageIdentity);
+		state.requestRender?.();
+		void refreshUsageIfNeeded(ctx, state, true, usageIdentity);
+	});
+
+	pi.on("turn_start", (_event, ctx) => {
+		const state = states.get(ctx.sessionManager);
+		if (!state) return;
+		// Prompt boundaries provide an additional account-change check without
+		// forcing a usage request when the current cache is still fresh.
+		void refreshUsageIfNeeded(ctx, state);
 	});
 
 	pi.on("turn_end", (_event, ctx) => {
@@ -966,7 +1214,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", (_event, ctx) => {
 		const state = states.get(ctx.sessionManager);
 		if (!state) return;
-		disposeGitCache(state);
+		disposeState(state);
+		states.delete(ctx.sessionManager);
 	});
 }
 

@@ -40,7 +40,9 @@ function compactionEndEvent({ usage }) {
 
 function createSpawnQueue(scripts) {
   const calls = [];
-  const spawnImpl = () => {
+  const invocations = [];
+  const spawnImpl = (command, args, options) => {
+    invocations.push({ command, args, options });
     const script = scripts.shift();
     if (!script) throw new Error('unexpected spawn call');
     const proc = new EventEmitter();
@@ -58,7 +60,7 @@ function createSpawnQueue(scripts) {
     process.nextTick(() => script.start(proc));
     return proc;
   };
-  return { spawnImpl, calls };
+  return { spawnImpl, calls, invocations };
 }
 
 function endProcess(proc, { code = 0, signalCode = null, closeCode = code } = {}) {
@@ -276,6 +278,83 @@ test('contrarian aggregates usage across fallback attempts, exposes parent tool 
   assert.equal(result.details.usage.cacheWrite1h, 0, 'an explicitly reported detail cacheWrite1h zero is retained');
   assert.deepEqual(await toolResult({ toolName: 'contrarian', details: { exitCode: 1 } }), { isError: true });
   assert.equal(await toolResult({ toolName: 'contrarian', details: { exitCode: 0 } }), undefined);
+});
+
+test('oracle and contrarian preserve discovered resources and keep explicit tool allowlists', async () => {
+  const selection = {
+    modelRef: 'anthropic/claude-sonnet-5',
+    provider: 'anthropic',
+    modelId: 'claude-sonnet-5',
+    thinkingLevel: 'high',
+    autoSelected: true,
+    selectionReason: 'test',
+  };
+  const suppressedResourceFlags = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files'];
+
+  const oracle = await loadRoleTestUtils('oracle');
+  const oracleSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, [messageEndEvent({ text: 'oracle' })]); } }]);
+  const oracleResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, undefined, '/repo', oracleSpawn.spawnImpl);
+  assert.equal(oracleResult.ok, true);
+  const oracleArgs = oracleSpawn.invocations[0].args;
+  assert.ok(oracleArgs.includes('--no-session'));
+  assert.ok(suppressedResourceFlags.every((flag) => !oracleArgs.includes(flag)), 'oracle must not suppress discovered resources');
+  assert.deepEqual(oracleArgs.slice(oracleArgs.indexOf('--tools') + 1, oracleArgs.indexOf('--append-system-prompt')), ['read,grep,find,ls']);
+
+  const contrarian = await loadRoleTestUtils('contrarian');
+  const contrarianSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, [messageEndEvent({ text: 'contrarian' })]); } }]);
+  const contrarianResult = await contrarian.runContrarian(selection, { task: 'inspect', includeBash: true }, undefined, undefined, '/repo', contrarianSpawn.spawnImpl);
+  assert.equal(contrarianResult.ok, true);
+  const contrarianArgs = contrarianSpawn.invocations[0].args;
+  assert.ok(contrarianArgs.includes('--no-session'));
+  assert.ok(suppressedResourceFlags.every((flag) => !contrarianArgs.includes(flag)), 'contrarian must not suppress discovered resources');
+  assert.deepEqual(contrarianArgs.slice(contrarianArgs.indexOf('--tools') + 1, contrarianArgs.indexOf('--append-system-prompt')), ['read,grep,find,ls,bash']);
+});
+
+test('oracle and contrarian assemble the final assistant turn without leaking thinking or stale tool-only text', async () => {
+  const selection = {
+    modelRef: 'anthropic/claude-sonnet-5',
+    provider: 'anthropic',
+    modelId: 'claude-sonnet-5',
+    thinkingLevel: 'high',
+    autoSelected: true,
+    selectionReason: 'test',
+  };
+  const events = [
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'private reasoning' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'intermediate ' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0 } },
+    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"."}' } },
+    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }], stopReason: 'toolUse' } },
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'public final' } },
+    { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } },
+  ];
+  const oracle = await loadRoleTestUtils('oracle');
+  const oracleUpdates = [];
+  const oracleSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, events); } }]);
+  const oracleResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, (update) => oracleUpdates.push(update), '/repo', oracleSpawn.spawnImpl);
+  assert.equal(oracleResult.ok, true);
+  assert.equal(oracleResult.output, 'public final');
+  assert.equal(oracleUpdates.some((update) => update.content[0].text.includes('private reasoning')), false);
+
+  const contrarian = await loadRoleTestUtils('contrarian');
+  const contrarianSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, events); } }]);
+  const contrarianResult = await contrarian.runContrarian(selection, { task: 'inspect' }, undefined, undefined, '/repo', contrarianSpawn.spawnImpl);
+  assert.equal(contrarianResult.ok, true);
+  assert.equal(contrarianResult.output, 'public final');
+
+  const missingFinalEvents = [
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'stale answer' } },
+    { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } },
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }], stopReason: 'toolUse' } },
+  ];
+  const missingSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, missingFinalEvents); } }]);
+  const missingResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, undefined, '/repo', missingSpawn.spawnImpl);
+  assert.equal(missingResult.ok, false);
+  assert.match(missingResult.error, /without returning any text/);
 });
 
 test('oracle cancellation only escalates to SIGKILL when the child stays alive past the grace period', async (t) => {

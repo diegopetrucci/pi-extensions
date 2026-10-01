@@ -39,7 +39,14 @@ Direct OpenAI API Fast mode requires all of the following:
 - Provider `openai`.
 - API `openai-responses` or `openai-completions`.
 - Model `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
+- API-key auth or Pi's `openai` ChatGPT OAuth (`Sign in with ChatGPT`).
 - No existing `service_tier` field in the request payload.
+
+The direct OpenAI OAuth flow stays on OpenAI's direct API contract. It receives
+the same local payload treatment, but acceptance of `service_tier: "fast"` by
+the remote sign-in endpoint has not been live-verified; that check is deferred
+to manual gate `pel-71t6`. It is not forwarded to the legacy `openai-codex`
+provider or its subscription-usage endpoint.
 
 OpenAI Codex Fast mode requires all of the following:
 
@@ -130,6 +137,8 @@ The collection package loads this unified extension instead of `openai-fast` and
 
 - Anthropic Fast mode has separate rate limits, costs more than standard speed, and does not share prompt-cache prefixes with standard-speed requests.
 - Direct OpenAI Fast mode is limited to the confirmed, officially priced GPT-6 API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
+- Pi's provider catalog remains the source of reported model pricing, including any tiered pricing; this extension does not apply guessed discounts or rewrite cost metadata.
 - OpenAI Codex Fast mode intentionally does not affect API-key models.
+- The retired `openai-fast` and `claude-fast` packages remain legacy standalone boundaries; new provider/auth behavior belongs only to this unified extension.
 - Existing `speed` and `service_tier` fields are never overwritten.
 - Pi's model catalog may not include a Fast-mode premium. Cost accounting depends on the provider reporting the effective tier in its streamed response, and this extension does not patch usage totals.

@@ -49,10 +49,23 @@ async function importTsModule(relativePath) {
   return loaded
 }
 
+function fakeCodexToken(accountId, payload = {}) {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
+    ...payload,
+    'https://api.openai.com/auth': {
+      chatgpt_account_id: accountId,
+      ...(payload['https://api.openai.com/auth'] ?? {}),
+    },
+  })}.fixture-signature`
+}
+
 const {
   fetchOpenAICodexUsage,
+  formatUsageStatus,
   formatUsageSummary,
   isOpenAICodexProvider,
+  isOpenAIProvider,
 } = await importTsModule('extensions/minimal-footer/openai-usage.ts')
 
 function withPatchedFetch(mockFetch, run) {
@@ -69,6 +82,11 @@ test('minimal-footer openai usage detects provider and formats enabled usage win
   assert.equal(isOpenAICodexProvider('openai-codex'), true)
   assert.equal(isOpenAICodexProvider('openai'), false)
   assert.equal(isOpenAICodexProvider(undefined), false)
+  assert.equal(isOpenAIProvider('openai'), true)
+  assert.equal(isOpenAIProvider('openai-codex'), false)
+  assert.equal(formatUsageStatus('unsupported'), 'usage unsupported')
+  assert.equal(formatUsageStatus('unavailable'), 'usage unavailable')
+  assert.equal(formatUsageStatus(undefined), undefined)
 
   const snapshot = {
     primary: { usedPercent: 12.4, windowSeconds: 604_800 },
@@ -171,14 +189,14 @@ test('minimal-footer openai usage adds OAuth account header and normalizes usage
   const authStorage = {
     async getApiKey(providerId, options) {
       authCalls.push(['getApiKey', providerId, options])
-      return 'token-123'
+      return fakeCodexToken('acct-456')
     },
     reload() {
       authCalls.push(['reload'])
     },
     get(providerId) {
       authCalls.push(['get', providerId])
-      return { type: 'oauth', accountId: ' acct-456 ' }
+      return { type: 'oauth', accountId: 'acct-456' }
     },
   }
 
@@ -219,20 +237,18 @@ test('minimal-footer openai usage adds OAuth account header and normalizes usage
 
   assert.deepEqual(authCalls, [
     ['getApiKey', 'openai-codex', { includeFallback: false }],
-    ['reload'],
-    ['get', 'openai-codex'],
   ])
   assert.equal(fetchCalls.length, 1)
   assert.equal(fetchCalls[0].url, 'https://chatgpt.com/backend-api/wham/usage')
   assert.deepEqual(fetchCalls[0].init.headers, {
-    Authorization: 'Bearer token-123',
+    Authorization: `Bearer ${fakeCodexToken('acct-456')}`,
     Accept: 'application/json',
     'ChatGPT-Account-Id': 'acct-456',
   })
   assert.ok(fetchCalls[0].init.signal instanceof AbortSignal)
 })
 
-test('minimal-footer openai usage supports modelRegistry auth and stored OAuth account ids', async (t) => {
+test('minimal-footer openai usage binds modelRegistry auth to the token claim, not stale stored account ids', async (t) => {
   const authDir = await mkdtemp(path.join(repoRoot, '.tmp-openai-auth-'))
   const originalAgentDir = process.env.PI_CODING_AGENT_DIR
   process.env.PI_CODING_AGENT_DIR = authDir
@@ -247,17 +263,17 @@ test('minimal-footer openai usage supports modelRegistry auth and stored OAuth a
     JSON.stringify({
       'openai-codex': {
         type: 'oauth',
-        access: 'stored-token-should-not-be-used',
+        access: fakeCodexToken('acct-registry'),
         refresh: 'refresh-token',
         expires: Date.now() + 60_000,
-        accountId: ' acct-registry ',
+        accountId: 'stale-account-from-disk',
       },
     }),
   )
 
   const authCalls = []
   const modelRegistry = {
-    token: 'runtime-token-456',
+    token: fakeCodexToken('acct-registry'),
     async getProviderAuth(providerId) {
       authCalls.push([providerId, this.token])
       return { auth: { apiKey: this.token } }
@@ -266,7 +282,7 @@ test('minimal-footer openai usage supports modelRegistry auth and stored OAuth a
 
   await withPatchedFetch(async (_url, init) => {
     assert.deepEqual(init.headers, {
-      Authorization: 'Bearer runtime-token-456',
+      Authorization: `Bearer ${modelRegistry.token}`,
       Accept: 'application/json',
       'ChatGPT-Account-Id': 'acct-registry',
     })
@@ -285,39 +301,57 @@ test('minimal-footer openai usage supports modelRegistry auth and stored OAuth a
     })
   })
 
-  assert.deepEqual(authCalls, [['openai-codex', 'runtime-token-456']])
+  assert.deepEqual(authCalls, [['openai-codex', modelRegistry.token]])
 })
 
-test('minimal-footer openai usage omits the account header for non-oauth credentials', async () => {
+test('minimal-footer openai usage fails closed for a non-oauth token without a Codex account claim', async () => {
   const authStorage = {
     async getApiKey() {
-      return 'token-123'
+      return 'api-key-token'
     },
-    reload() {},
+    reload() {
+      throw new Error('stored account must not be consulted')
+    },
     get() {
-      return { type: 'api_key', accountId: 'acct-should-not-send' }
+      throw new Error('stored account must not be consulted')
     },
   }
+  let fetchCalls = 0
 
-  await withPatchedFetch(async (_url, init) => {
-    assert.deepEqual(init.headers, {
-      Authorization: 'Bearer token-123',
-      Accept: 'application/json',
-    })
-    return {
-      ok: true,
-      async json() {
-        return {}
-      },
-    }
+  await withPatchedFetch(async () => {
+    fetchCalls += 1
+    throw new Error('fetch must not be called without a token claim')
   }, async () => {
     const snapshot = await fetchOpenAICodexUsage(authStorage)
-    assert.deepEqual(snapshot, {
-      primary: undefined,
-      secondary: undefined,
-      fetchedAt: snapshot.fetchedAt,
-    })
+    assert.equal(snapshot, undefined)
   })
+  assert.equal(fetchCalls, 0)
+})
+
+test('minimal-footer openai usage rejects malformed, missing, and mismatched token identities before fetch', async () => {
+  const cases = [
+    ['malformed token', 'not-a-jwt'],
+    ['missing account claim', fakeCodexToken(undefined, { 'https://api.openai.com/auth': {} })],
+    ['mismatched lifecycle account', fakeCodexToken('acct-b')],
+  ]
+
+  for (const [label, token] of cases) {
+    let fetchCalls = 0
+    const authStorage = {
+      async getApiKey() {
+        return token
+      },
+    }
+
+    await withPatchedFetch(async () => {
+      fetchCalls += 1
+      throw new Error(`${label} must not reach fetch`)
+    }, async () => {
+      const options = label === 'mismatched lifecycle account' ? { accountId: 'acct-a' } : undefined
+      assert.equal(await fetchOpenAICodexUsage(authStorage, options), undefined)
+    })
+    assert.equal(fetchCalls, 0, label)
+  }
 })
 
 test('minimal-footer openai usage throws on non-ok responses and clears its timeout', async () => {
@@ -325,7 +359,7 @@ test('minimal-footer openai usage throws on non-ok responses and clears its time
   const cleared = []
   const authStorage = {
     async getApiKey() {
-      return 'token-123'
+      return fakeCodexToken('acct-errors')
     },
     reload() {},
     get() {
@@ -359,7 +393,7 @@ test('minimal-footer openai usage aborts on timeout and clears the scheduled tim
   let fetchSignal
   const authStorage = {
     async getApiKey() {
-      return 'token-123'
+      return fakeCodexToken('acct-timeout')
     },
     reload() {},
     get() {

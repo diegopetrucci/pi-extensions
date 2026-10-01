@@ -122,11 +122,14 @@ type MinimalMessage = {
 	timestamp?: number;
 	provider?: string;
 	model?: string;
+	api?: string;
 	stopReason?: string;
 	usage?: unknown;
 	toolCallId?: string;
 	toolName?: string;
 	details?: unknown;
+	/** Pi keeps nested tool calls here as bounded metadata; they are not transcript content. */
+	nestedCalls?: unknown;
 	customType?: string;
 	display?: boolean;
 	summary?: string;
@@ -240,6 +243,11 @@ type Dataset = {
 	stats: DatasetStats;
 };
 
+type RoutedModel = {
+	provider: string;
+	id: string;
+};
+
 type ReportData = {
 	generatedAt: string;
 	cwd: string;
@@ -253,6 +261,8 @@ type ReportData = {
 		id?: string;
 		contextWindow?: number;
 		thinkingLevel?: string;
+		virtual?: boolean;
+		routed?: RoutedModel;
 	};
 	contextUsage: {
 		tokens: number | null;
@@ -369,6 +379,18 @@ function safeJson(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
+}
+
+function isKnownPositiveNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isKnownNonNegativeNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isVirtualModel(model: unknown): boolean {
+	return isRecord(model) && model.api === "pi-virtual";
 }
 
 function getContentBlocks(content: unknown): MinimalContentBlock[] {
@@ -577,11 +599,22 @@ function analyzeAssistantContent(state: AnalyzerState, message: MinimalMessage, 
 	}
 }
 
+function nestedCallsNote(message: MinimalMessage): string | undefined {
+	const nested = message.nestedCalls;
+	if (!isRecord(nested) || !Array.isArray(nested.calls)) return undefined;
+	const count = nested.calls.length;
+	if (nested.complete === false) {
+		return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"} incompletely; nested results are not transcript context and are excluded from attribution.`;
+	}
+	return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"}; nested results are not transcript context and are excluded from attribution.`;
+}
+
 function analyzeToolResult(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
 	const timestamp = isoTimestamp(message, entry);
 	const entryId = entry?.id;
 	const toolName = message.toolName ?? "tool";
 	const blocks = getContentBlocks(message.content);
+	const nestedNote = nestedCallsNote(message);
 	for (const block of blocks) {
 		if (block.type === "text" && typeof block.text === "string") {
 			const noteParts: string[] = [];
@@ -589,6 +622,7 @@ function analyzeToolResult(state: AnalyzerState, message: MinimalMessage, entry?
 				if (isRecord(message.details.truncation) && message.details.truncation.truncated) noteParts.push("Result was truncated before entering context.");
 				if (typeof message.details.fullOutputPath === "string") noteParts.push(`Full output: ${message.details.fullOutputPath}`);
 			}
+			if (nestedNote) noteParts.push(nestedNote);
 			addTextSegment(state, "toolResults", `Tool result: ${toolName}`, block.text, {
 				source: "tool-result",
 				role: "toolResult",
@@ -801,10 +835,14 @@ function resolveSessionProjection(ctx: ExtensionCommandContext): MinimalSessionP
 			messages: candidate.messages,
 		});
 	}
+	// `entries` is the provenance-bearing canonical projection. Keep validating
+	// the optional flattened field for compatibility, but derive the list used by
+	// the report from entries so a stale/invented flattened list cannot reintroduce
+	// omitted history or nested metadata as transcript messages.
 	if ("messages" in projection && (!Array.isArray(projection.messages) || !projection.messages.every(isProjectionMessage))) return undefined;
 	return {
 		entries,
-		messages: Array.isArray(projection.messages) ? projection.messages : entries.flatMap((entry) => entry.messages),
+		messages: entries.flatMap((entry) => entry.messages),
 	};
 }
 
@@ -1005,15 +1043,41 @@ function getSessionName(ctx: ExtensionCommandContext): string | undefined {
 	return safeCall(() => ctx.sessionManager.getSessionName()) ?? safeCall(() => (ctx as unknown as { getSessionName?: () => string | undefined }).getSessionName?.());
 }
 
+function latestRoutedModel(messages: MinimalMessage[]): RoutedModel | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message?.role !== "assistant") continue;
+		if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+		if (message.api === "pi-virtual") continue;
+		if (typeof message.provider !== "string" || !message.provider || typeof message.model !== "string" || !message.model) continue;
+		return { provider: message.provider, id: message.model };
+	}
+	return undefined;
+}
+
 function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: CommandOptions): ReportData {
 	const branchEntries = ctx.sessionManager.getBranch() as MinimalEntry[];
+	const projection = resolveSessionProjection(ctx);
 	const overhead = buildOverheadSegments(pi, ctx, options.redact);
-	const currentAnalysis = resolveCurrentContextAnalysis(ctx, branchEntries, options.redact);
+	const currentAnalysis = projection
+		? analyzeProjection(projection, options.redact)
+		: analyzeEntries(resolveCurrentContextEntries(ctx, branchEntries), options.redact);
 	const fullAnalysis = analyzeEntries(branchEntries, options.redact);
 	const usage = ctx.getContextUsage();
-	const contextTokens = usage?.tokens ?? null;
-	const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? null;
-	const contextPercent = usage?.percent ?? (contextTokens != null && contextWindow ? (contextTokens / contextWindow) * 100 : null);
+	const contextTokens = isKnownNonNegativeNumber(usage?.tokens) ? usage.tokens : null;
+	const reportedContextWindow = isKnownPositiveNumber(usage?.contextWindow) ? usage.contextWindow : undefined;
+	const selectedContextWindow = isKnownPositiveNumber(ctx.model?.contextWindow) ? ctx.model.contextWindow : undefined;
+	const virtualSelection = isVirtualModel(ctx.model);
+	const contextWindow = reportedContextWindow ?? (virtualSelection ? null : selectedContextWindow ?? null);
+	const reportedPercent = isKnownNonNegativeNumber(usage?.percent) ? usage.percent : undefined;
+	const contextPercent = reportedPercent ?? (contextTokens != null && contextWindow ? (contextTokens / contextWindow) * 100 : null);
+	const projectedMessages = projection
+		? projection.entries.flatMap((entry) => entry.messages)
+		: branchEntries.flatMap((entry) => {
+			const message = contextEntryToMessage(entry);
+			return message ? [message] : [];
+		});
+	const routed = virtualSelection ? latestRoutedModel(projectedMessages) : undefined;
 
 	const currentSegments = [...overhead, ...currentAnalysis.segments];
 	const fullSegments = [...overhead, ...fullAnalysis.segments];
@@ -1041,8 +1105,18 @@ function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options
 	if (options.redact) {
 		notes.push("Redaction is enabled: message contents, paths, commands, session identifiers, and timestamps are hidden in this report.");
 	}
-	if (usage?.tokens == null) {
+	if (contextTokens == null) {
 		notes.push("Current context usage is unknown, usually because compaction just ran and no model response has arrived yet.");
+	}
+	if (virtualSelection) {
+		const selected = [ctx.model?.provider, ctx.model?.id].filter(Boolean).join("/") || "virtual selection";
+		if (routed) {
+			notes.push(`Model selection ${selected} is virtual. Latest routed physical response: ${routed.provider}/${routed.id}. The context window shown below is provider-reported usage when available; it is not inferred from the virtual selection.`);
+		} else {
+			notes.push(`Model selection ${selected} is virtual. Pi has not exposed a routed physical response here, so no provider context window is inferred.`);
+		}
+	} else if (contextWindow == null) {
+		notes.push("The selected model's context window is unknown because pi did not provide a finite positive limit.");
 	}
 	if (currentDataset.stats.estimatorOverageTokens > 0) {
 		notes.push(`Local component estimates exceed pi's footer total by ${formatTokens(currentDataset.stats.estimatorOverageTokens)} tokens, so chart slices are scaled down proportionally.`);
@@ -1062,8 +1136,10 @@ function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options
 		model: {
 			provider: ctx.model?.provider,
 			id: ctx.model?.id,
-			contextWindow: ctx.model?.contextWindow,
+			contextWindow: selectedContextWindow,
 			thinkingLevel: safeCall(() => pi.getThinkingLevel()),
+			virtual: virtualSelection,
+			routed,
 		},
 		contextUsage: {
 			tokens: contextTokens,
@@ -1384,12 +1460,17 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; 
 	function renderCards(ds) {
 		const cards = $('cards'); cards.replaceChildren();
 		const usage = data.contextUsage;
-		const model = [data.model.provider, data.model.id].filter(Boolean).join('/') || 'no model';
+		const selectedModel = [data.model.provider, data.model.id].filter(Boolean).join('/') || 'no model';
+		const routedModel = data.model.virtual && data.model.routed ? [data.model.routed.provider, data.model.routed.id].join('/') : '';
+		const model = routedModel && routedModel !== selectedModel ? selectedModel + ' → ' + routedModel : selectedModel;
+		const modelHint = data.model.virtual
+			? (routedModel ? 'virtual selection → latest routed physical response' : 'virtual selection; routed physical model unavailable')
+			: (data.model.thinkingLevel ? 'thinking: ' + data.model.thinkingLevel : '');
 		const cardData = [
 			['Context used', usage.tokens == null ? fmt(ds.stats.tokens) : fmt(usage.tokens), usage.percent == null ? 'Footer percent is currently unknown.' : pct(usage.percent) + ' of ' + fmt(usage.contextWindow) + ' tokens'],
 			['Dataset total', fmt(ds.stats.tokens), ds.id === 'current' ? 'Reconciled to pi footer when available.' : 'Full branch is shown as raw local estimates.'],
 			['Biggest bucket', ds.stats.categories[0]?.label || '—', ds.stats.categories[0] ? fmt(ds.stats.categories[0].displayTokens) + ' tokens' : 'No context-bearing entries found.'],
-			['Model', model, data.model.thinkingLevel ? 'thinking: ' + data.model.thinkingLevel : ''],
+			['Model', model, modelHint],
 		];
 		for (const [label, value, hint] of cardData) {
 			cards.append(el('div', { class: 'card' }, [

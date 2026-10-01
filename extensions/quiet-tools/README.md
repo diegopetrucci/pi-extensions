@@ -4,7 +4,7 @@ A pi extension that makes collapsed built-in tool rows much quieter in the TUI.
 
 When enabled, each collapsed tool row renders as one invocation line plus a separate `(Ctrl+O to expand)` hint line. Tool output is hidden until expanded. Expanding with `Ctrl+O` still shows pi's full rendered output.
 
-`quiet-tools` only changes the visual renderer. It does not truncate, summarize, or rewrite the actual tool results sent to the model.
+`quiet-tools` only changes the visual renderer. It does not truncate, summarize, or rewrite the actual tool results sent to the model. On Pi 0.99, its replacement definitions retain the upstream schemas, labels, descriptions, exposure/namespace metadata, `outputSchema`, execution function, abort signal, update callback, execution context, details, structured content, error status, and bounded output behavior. Expanded rendering delegates back to Pi's renderer.
 
 ## Covered tools
 

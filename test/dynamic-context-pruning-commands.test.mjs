@@ -390,6 +390,20 @@ test('sessionEntriesToMessages uses canonical projection omission/replacement an
   assert.equal(items[0].estimatedTokens, Math.ceil('replacement result'.length / 4));
 });
 
+test('canonical projection derives its flattened messages from provenance entries', () => {
+  const { entries, projection, omittedResult, replacementResult } = contextEditProjectionFixture();
+  const stale = {
+    ...projection,
+    messages: [omittedResult, { role: 'user', content: 'invented flattened record' }],
+  };
+  const normalized = normalizeSessionProjection(stale);
+  assert.ok(normalized);
+  const projectedMessages = sessionEntriesToMessages(entries, normalized);
+  assert.equal(projectedMessages.includes(omittedResult), false);
+  assert.equal(projectedMessages.some((message) => message.content === 'invented flattened record'), false);
+  assert.ok(projectedMessages.includes(replacementResult));
+});
+
 test('malformed canonical projection is rejected so session reconstruction falls back to raw messages', () => {
   const { entries, projection, omittedResult } = contextEditProjectionFixture();
   const malformedSource = structuredClone(projection);

@@ -27,11 +27,23 @@ and why it hasn't been built yet.
   key wins when replaying history, so a decision can be pruned, restored, and
   re-pruned any number of times.
 - **Recomputed every call, not on a timer.** All three automatic strategies run
-  fresh on every `context` event, over the current message array. Nothing is
-  pruned "once and forgotten"; if a tool result would no longer qualify (e.g.
-  it's now within the protected recency window), it isn't proposed again, but
-  an already-applied, persisted decision still applies until explicitly
-  restored.
+  fresh on every `context` event, over the current message array. Pi 0.99's
+  `context` hook intentionally receives the mutable conversation without system
+  messages; Pi restores its system prompt and tool state after the handler. The
+  extension does not try to rebuild that request-only envelope.
+- **Canonical picker input.** `/prune` uses Pi's canonical session projection when
+  available, so context omissions and replacements, branch selection, and tool
+  pairing match the provider-visible conversation. Older hosts retain the raw
+  message-entry fallback.
+- **Nested calls stay metadata.** Pi records bounded `nestedCalls` metadata on a
+  parent tool result, but nested results are not transcript messages. Strategies
+  count and prune only the parent transcript tool result; they never materialize
+  child entries, double-count child output, or infer complete history from a
+  truncated/incomplete record.
+- **Persisted decisions remain branch-local.** Nothing is pruned "once and
+  forgotten"; if a tool result would no longer qualify (e.g. it's now within the
+  protected recency window), it isn't proposed again, but an already-applied,
+  persisted decision still applies until explicitly restored.
 
 ## Strategies
 

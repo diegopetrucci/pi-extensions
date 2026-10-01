@@ -10,35 +10,37 @@ export async function loadExtension(relativePath) {
   return extensionModule.default;
 }
 
-export function createExtensionHarness({ execImpl } = {}) {
+export function createExtensionHarness({ execImpl, getSettings } = {}) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
   const execCalls = [];
   const sentUserMessages = [];
+  const pi = {
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+    },
+    registerTool(definition) {
+      tools.set(definition.name, definition);
+    },
+    registerCommand(name, definition) {
+      commands.set(name, definition);
+    },
+    sendUserMessage(message, options) {
+      sentUserMessages.push({ message, options });
+    },
+    async exec(...args) {
+      execCalls.push(args);
+      if (!execImpl) {
+        throw new Error('pi.exec should not have been called');
+      }
+      return execImpl(...args);
+    },
+  };
+  if (getSettings) pi.getSettings = getSettings;
 
   return {
-    pi: {
-      on(eventName, handler) {
-        handlers.set(eventName, handler);
-      },
-      registerTool(definition) {
-        tools.set(definition.name, definition);
-      },
-      registerCommand(name, definition) {
-        commands.set(name, definition);
-      },
-      sendUserMessage(message, options) {
-        sentUserMessages.push({ message, options });
-      },
-      async exec(...args) {
-        execCalls.push(args);
-        if (!execImpl) {
-          throw new Error('pi.exec should not have been called');
-        }
-        return execImpl(...args);
-      },
-    },
+    pi,
     handlers,
     tools,
     commands,
