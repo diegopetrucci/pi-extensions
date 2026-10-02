@@ -100,7 +100,7 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 		const attempt = ++annotationAttempt;
 
 		try {
-			const html = buildAnnotateLastMessageHtml(messageData);
+			const html = buildAnnotateLastMessageHtml(messageData, ctx.ui.theme);
 			const window = await openQuietGlimpse(html, {
 				width: 1440,
 				height: 980,

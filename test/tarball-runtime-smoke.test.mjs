@@ -60,6 +60,25 @@ function getRuntimeDeclarations(manifest) {
   return declarations;
 }
 
+function assertAnnotateLastMessageAssets(manifest, packageDir) {
+  const isRootCollection = manifest.name === '@diegopetrucci/pi-extensions';
+  const isAnnotatePackage = manifest.name === '@diegopetrucci/pi-annotate-last-message';
+  if (!isRootCollection && !isAnnotatePackage) return;
+
+  const prefix = isRootCollection ? 'extensions/annotate-last-message' : '';
+  const expectedAssets = [
+    `${prefix}${prefix ? '/' : ''}theme.ts`,
+    `${prefix}${prefix ? '/' : ''}web/md-renderer.js`,
+    `${prefix}${prefix ? '/' : ''}web/app.js`,
+    `${prefix}${prefix ? '/' : ''}web/index.html`,
+  ];
+
+  for (const relativeAsset of expectedAssets) {
+    const assetPath = path.join(packageDir, relativeAsset);
+    assert.ok(existsSync(assetPath), `${manifest.name} packed annotation asset is missing: ${relativeAsset}`);
+  }
+}
+
 function getDeclaredRuntimeDependencyNames(manifest) {
   return [
     ...new Set([
@@ -223,6 +242,7 @@ test('publishable tarballs install offline and Pi loads their declared runtime e
         assert.ok(existsSync(installedManifestPath), `${manifest.name} should be installed from its tarball`);
 
         const installedManifest = readJson(installedManifestPath);
+        assertAnnotateLastMessageAssets(installedManifest, packageDir);
         const declarations = getRuntimeDeclarations(installedManifest);
         const extensionEntries = declarations
           .filter(({ kind }) => kind === 'extension')

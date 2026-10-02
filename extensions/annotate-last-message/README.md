@@ -22,11 +22,15 @@ Run `/annotate-last-message` from an interactive pi session. The annotation wind
 - section comments for larger chunks of the message, and
 - inline notes tied to individual lines.
 
+The message preview renders headings, lists, blockquotes, emphasis, inline code, strikethrough, links, and fenced code while preserving the original one-based source-line coordinates. Raw HTML is displayed as text. Link destinations are shown as inert text beside the label; the window never navigates to an assistant-provided URL.
+
+The window follows the active Pi theme through `ctx.ui.theme`, including Markdown colors and dark/light appearance, with readable local fallbacks when a theme token is unavailable. Opening the window does not change Pi's host theme or settings.
+
 When you submit, the extension sends a structured planning-oriented feedback prompt directly to the agent as a follow-up message. Your existing editor text is left untouched. It does not auto-apply changes or rewrite the previous assistant message in place.
 
 ## Rollback
 
-There is no runtime setting or toggle for submit behavior. To restore the prior editor-only Submit flow, reinstall the previous package version or revert this source change and rebuild/reinstall the package.
+There is no runtime setting or toggle for submit behavior. To roll back the rendering/theme change, reinstall the previous package version or revert this source change and rebuild/reinstall the package; no Pi theme or host setting needs to be restored.
 
 ## Requirements
 
