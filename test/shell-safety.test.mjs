@@ -1756,9 +1756,9 @@ return results.map((entry) => entry.status === "fulfilled" ? entry.value : Strin
       ),
     ],
   });
-  mkdirSync(path.join(fixture.cwd, '.git'));
 
   try {
+    mkdirSync(path.join(fixture.cwd, '.git'));
     await fixture.session.agent.prompt('run nested fixture');
 
     const parentResult = fixture.session.agent.state.messages.find(

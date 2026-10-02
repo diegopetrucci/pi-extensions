@@ -147,13 +147,19 @@ test('context-cap skips virtual and incompatible windows without fabricating a r
   const sessionStart = getHandler(harness, 'session_start');
   const command = getCommand(harness, 'context-cap');
   const virtualModel = { provider: 'pi', api: 'pi-virtual', id: 'router', contextWindow: 1_000_000 };
-  const missingWindow = { provider: 'anthropic', id: 'unknown-window' };
+  const missingWindow = { provider: 'anthropic', id: 'missing-window' };
   const invalidWindow = { provider: 'openai', id: 'invalid-window', contextWindow: Number.NaN };
 
   for (const model of [virtualModel, missingWindow, invalidWindow]) {
     const { ctx, notifications } = createContextCapContext({ model, registryModels: [model] });
     await sessionStart({}, ctx);
-    assert.equal(model.contextWindow, model === virtualModel ? 1_000_000 : model.contextWindow);
+    if (model === virtualModel) {
+      assert.equal(model.contextWindow, 1_000_000);
+    } else if (model === missingWindow) {
+      assert.equal(Object.hasOwn(model, 'contextWindow'), false);
+    } else {
+      assert.ok(Number.isNaN(model.contextWindow));
+    }
     await command.handler('status', ctx);
     assert.match(notifications.at(-1).message, model === virtualModel ? /virtual selection/ : /unknown/);
   }
