@@ -20,6 +20,7 @@
     "prompt.ts",
     "quiet-glimpse.ts",
     "session.ts",
+    "theme.ts",
     "types.ts",
     "ui.ts",
     "web",

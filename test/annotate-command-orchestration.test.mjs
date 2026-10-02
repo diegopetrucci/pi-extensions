@@ -56,7 +56,7 @@ function createMockWindow(name = 'window') {
   return new MockWindow();
 }
 
-function createCommandContext({ hasUI = true, mode = 'tui', editorText = '', branch = [], cwd = '/repo' } = {}) {
+function createCommandContext({ hasUI = true, mode = 'tui', editorText = '', branch = [], cwd = '/repo', theme = { appearance: 'dark', colors: {} } } = {}) {
   const notifications = [];
   const pasted = [];
 
@@ -68,6 +68,7 @@ function createCommandContext({ hasUI = true, mode = 'tui', editorText = '', bra
       mode,
       cwd,
       ui: {
+        theme,
         notify(message, level) {
           notifications.push({ message, level });
         },
@@ -241,8 +242,8 @@ function annotateLastMessageStubs(stateKey) {
     `,
     './ui.js': `
       const state = globalThis[${JSON.stringify(stateKey)}];
-      export function buildAnnotateLastMessageHtml(data) {
-        state.buildHtmlCalls.push(data);
+      export function buildAnnotateLastMessageHtml(data, theme) {
+        state.buildHtmlCalls.push({ data, theme });
         return state.htmlResult;
       }
     `,
@@ -400,6 +401,9 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
       html: '<html>annotate-last-message</html>',
       options: { width: 1440, height: 980, title: 'annotate last message' },
     });
+    assert.equal(state.buildHtmlCalls.length, 1);
+    assert.equal(state.buildHtmlCalls[0].data, state.findResult.data);
+    assert.equal(state.buildHtmlCalls[0].theme, ctx.ui.theme);
     assert.deepEqual(notifications, [{ message: 'Opened native annotation window.', level: 'info' }]);
 
     await handler({}, ctx);
