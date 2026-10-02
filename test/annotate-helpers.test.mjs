@@ -361,6 +361,7 @@ test('annotate-git-diff commit file helper sorts files and preserves rename meta
         '--name-status',
         '--no-commit-id',
         '-r',
+        '--end-of-options',
         'abc123',
       ]);
       assert.deepEqual(options, { cwd: '/repo' });

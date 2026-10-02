@@ -9,35 +9,12 @@ import ts from 'typescript';
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..');
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'pi-quiet-glimpse-'));
-const fakeHostPath = path.join(tempRoot, 'fake-glimpse-host.mjs');
-const nonExecutableHostPath = path.join(tempRoot, 'non-executable-host');
 
 after(async () => {
   await rm(tempRoot, { recursive: true, force: true });
 });
 
-await writeFile(
-  fakeHostPath,
-  `
-    import { createInterface } from 'node:readline';
-    setTimeout(() => process.stdout.write(JSON.stringify({ type: 'ready' }) + '\\n'), 40);
-    const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-    lines.on('line', (line) => {
-      const message = JSON.parse(line);
-      if (message.type === 'html') {
-        process.stdout.write(JSON.stringify({ type: 'message', data: { type: 'fixture-terminal' } }) + '\\n');
-        setTimeout(() => process.stdout.write('malformed protocol output\\n'), 10);
-        setTimeout(() => {
-          process.stdout.write(JSON.stringify({ type: 'closed' }) + '\\n');
-          process.exit(0);
-        }, 30);
-      }
-    });
-  `,
-);
-await writeFile(nonExecutableHostPath, 'not executable\n');
-
-async function compileQuietGlimpse(sourceRelativePath, name) {
+async function compileQuietGlimpse(sourceRelativePath, name, fakeHostPath) {
   const packageRoot = path.join(tempRoot, name);
   const modulePath = path.join(packageRoot, 'quiet-glimpse.js');
   const sourcePath = path.join(repoRoot, sourceRelativePath);
@@ -81,8 +58,40 @@ for (const [name, source] of [
   ['annotate-git-diff', 'extensions/annotate-git-diff/quiet-glimpse.ts'],
   ['annotate-last-message', 'extensions/annotate-last-message/quiet-glimpse.ts'],
 ]) {
-  test(`${name} buffers native failures and keeps late error events non-fatal`, { concurrency: false }, async () => {
-    const { openQuietGlimpse } = await compileQuietGlimpse(source, name);
+  test(`${name} ignores non-object protocol lines and keeps native failures non-fatal`, { concurrency: false }, async () => {
+    const fakeHostPath = path.join(tempRoot, `${name}-fake-glimpse-host.mjs`);
+    const nonExecutableHostPath = path.join(tempRoot, `${name}-non-executable-host`);
+    await writeFile(
+      fakeHostPath,
+      `
+        import { createInterface } from 'node:readline';
+        const protocolLines = [
+          'null',
+          'true',
+          'false',
+          '42',
+          JSON.stringify('primitive'),
+          JSON.stringify([1, 2]),
+          JSON.stringify({ type: 'ready' }),
+        ];
+        setTimeout(() => process.stdout.write(protocolLines.join('\\n') + '\\n'), 40);
+        const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+        lines.on('line', (line) => {
+          const message = JSON.parse(line);
+          if (message.type === 'html') {
+            process.stdout.write(JSON.stringify({ type: 'message', data: { type: 'fixture-terminal' } }) + '\\n');
+            setTimeout(() => process.stdout.write('malformed protocol output\\n'), 10);
+            setTimeout(() => {
+              process.stdout.write(JSON.stringify({ type: 'closed' }) + '\\n');
+              process.exit(0);
+            }, 30);
+          }
+        });
+      `,
+    );
+    await writeFile(nonExecutableHostPath, 'not executable\n');
+
+    const { openQuietGlimpse } = await compileQuietGlimpse(source, name, fakeHostPath);
     const window = await openQuietGlimpse('<html>fixture</html>');
     let terminalMessage = null;
     let observedErrors = 0;

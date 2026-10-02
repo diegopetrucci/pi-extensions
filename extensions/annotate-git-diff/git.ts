@@ -248,7 +248,7 @@ function buildCommitFileId(sha: string, comparison: ReviewFileComparison): strin
 }
 
 async function getRevisionContent(pi: ExtensionAPI, repoRoot: string, revision: string, path: string): Promise<string> {
-	const result = await pi.exec("git", ["show", `${revision}:${path}`], { cwd: repoRoot });
+	const result = await pi.exec("git", ["show", "--end-of-options", `${revision}:${path}`], { cwd: repoRoot });
 	if (result.code !== 0) {
 		return "";
 	}
@@ -327,7 +327,7 @@ async function getRevisionBytes(
 	path: string,
 ): Promise<Buffer | null> {
 	const spec = shellQuote(`${revision}:${path}`);
-	const result = await pi.exec("bash", ["-lc", `git show ${spec} | base64 | tr -d '\\n'`], { cwd: repoRoot });
+	const result = await pi.exec("bash", ["-lc", `git show --end-of-options ${spec} | base64 | tr -d '\\n'`], { cwd: repoRoot });
 	if (result.code !== 0) return null;
 	const encoded = (result.stdout ?? "").trim();
 	try {
@@ -706,6 +706,7 @@ export async function getCommitFiles(pi: ExtensionAPI, repoRoot: string, sha: st
 		"--name-status",
 		"--no-commit-id",
 		"-r",
+		"--end-of-options",
 		sha,
 	]);
 	const changes = parseNameStatus(output).filter((change) =>
