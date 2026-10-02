@@ -150,8 +150,8 @@ export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 
 					const onMessage = (data: unknown): void => {
 						if (isSubmitPayload(data) || isCancelPayload(data)) {
-							requestWindowClose();
 							settle(data);
+							requestWindowClose();
 						}
 					};
 

@@ -846,6 +846,53 @@ function clearWorkingTreeCommitState() {
 	}
 }
 
+function clearCommitScopedErrors(sha) {
+	for (const key of Object.keys(state.fileErrors)) {
+		if (key.startsWith(`commits:${sha}:`)) delete state.fileErrors[key];
+	}
+}
+
+function reconcileCommitState(nextCommits) {
+	const retainedImmutableShas = new Set(
+		nextCommits.filter((commit) => commit.kind === "commit").map((commit) => commit.sha),
+	);
+
+	const knownShas = new Set([
+		...Object.keys(state.commitFilesBySha),
+		...Object.keys(state.commitErrors),
+		...Object.keys(state.commitRequestIds),
+	]);
+	for (const key of [
+		...Object.keys(state.fileContents),
+		...Object.keys(state.fileErrors),
+		...Object.keys(state.pendingRequestIds),
+	]) {
+		if (!key.startsWith("commits:")) continue;
+		const rest = key.slice("commits:".length);
+		const separator = rest.indexOf(":");
+		if (separator > 0) knownShas.add(rest.slice(0, separator));
+	}
+	for (const sha of knownShas) {
+		if (retainedImmutableShas.has(sha)) continue;
+		const previousFiles = state.commitFilesBySha[sha] ?? [];
+		for (const file of previousFiles) {
+			delete state.reviewedFiles[file.id];
+			delete state.scrollPositions[scrollKey("commits", file.id, sha)];
+		}
+		clearCommitScopedState(sha);
+		delete state.commitFilesBySha[sha];
+		delete state.commitErrors[sha];
+		delete state.commitRequestIds[sha];
+	}
+
+	for (const sha of retainedImmutableShas) {
+		// A failed immutable request is safe to retry after a successful refresh;
+		// successful immutable contents and in-flight requests remain untouched.
+		delete state.commitErrors[sha];
+		clearCommitScopedErrors(sha);
+	}
+}
+
 function requestLatestReviewData() {
 	if (!window.glimpse?.send) return;
 	if (state.reviewDataRequestId != null) return;
@@ -1924,8 +1971,11 @@ window.__reviewReceive = (message) => {
 		if (state.reviewDataRequestId !== message.requestId) return;
 		clearRefreshableFileState();
 		clearWorkingTreeCommitState();
-		reviewData.files = Array.isArray(message.files) ? message.files : [];
-		reviewData.commits = Array.isArray(message.commits) ? message.commits : [];
+		const nextFiles = Array.isArray(message.files) ? message.files : [];
+		const nextCommits = Array.isArray(message.commits) ? message.commits : [];
+		reconcileCommitState(nextCommits);
+		reviewData.files = nextFiles;
+		reviewData.commits = nextCommits;
 		reviewData.branchBaseRef = message.branchBaseRef ?? null;
 		reviewData.branchMergeBaseSha = message.branchMergeBaseSha ?? null;
 		reviewData.repositoryHasHead = message.repositoryHasHead === true;

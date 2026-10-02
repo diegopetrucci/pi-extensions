@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import { EventEmitter } from 'node:events';
+import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
@@ -50,6 +51,12 @@ function createMockWindow(name = 'window') {
 
     close() {
       this.closeCalls += 1;
+      if (this.closeError != null) {
+        const error = this.closeError;
+        this.closeError = null;
+        this.emit('error', error);
+        throw error;
+      }
     }
   }
 
@@ -189,6 +196,9 @@ function createAnnotateGitDiffState(overrides = {}) {
     clipboardReads: [],
     clipboardWrites: [],
     getReviewWindowDataCalls: [],
+    commitFilesCalls: [],
+    loadFileCalls: [],
+    loadFileMergeBases: [],
     getReviewWindowDataResults: [
       {
         repoRoot: '/repo',
@@ -274,6 +284,7 @@ function annotateGitDiffStubs(stateKey) {
         return next;
       }
       export async function getCommitFiles(pi, repoRoot, sha) {
+        state.commitFilesCalls.push({ repoRoot, sha });
         const next = state.commitFilesResults.get(sha);
         if (next instanceof Error) throw next;
         return next ?? [];
@@ -281,7 +292,9 @@ function annotateGitDiffStubs(stateKey) {
       export function isWorkingTreeCommitSha(sha) {
         return sha === '__tlh_working_tree__';
       }
-      export async function loadReviewFileContents(pi, repoRoot, file, scope, commitSha) {
+      export async function loadReviewFileContents(pi, repoRoot, file, scope, commitSha, branchMergeBaseSha) {
+        state.loadFileCalls.push({ fileId: file.id, scope, commitSha: commitSha ?? null });
+        state.loadFileMergeBases.push(branchMergeBaseSha);
         const key = [scope, commitSha ?? '', file.id].join(':');
         const next = state.loadFileResults.get(key);
         if (next instanceof Error) throw next;
@@ -365,6 +378,142 @@ async function loadAnnotateLastMessageExtension(state) {
 async function loadAnnotateGitDiffExtension(state) {
   const module = await importTsEntryWithStubs('extensions/annotate-git-diff/index.ts', annotateGitDiffStubs, state);
   return module.default;
+}
+
+function createReviewUiElement(id) {
+  const listeners = new Map();
+  return {
+    id,
+    textContent: '',
+    innerHTML: '',
+    value: '',
+    style: {},
+    dataset: {},
+    children: [],
+    disabled: false,
+    hidden: false,
+    className: '',
+    addEventListener(type, listener) {
+      const callbacks = listeners.get(type) ?? [];
+      callbacks.push(listener);
+      listeners.set(type, callbacks);
+    },
+    dispatchEvent(event) {
+      for (const listener of listeners.get(event.type) ?? []) listener(event);
+    },
+    click() {
+      this.dispatchEvent({ type: 'click' });
+    },
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+    setAttribute(name, value) {
+      this[name] = value;
+    },
+    querySelector() {
+      return null;
+    },
+    getBoundingClientRect() {
+      return { top: 0, left: 0, width: 0, height: 0 };
+    },
+  };
+}
+
+async function loadAnnotateGitDiffUiFixture(initialReviewData) {
+  const appSource = await readFile(path.join(repoRoot, 'extensions/annotate-git-diff/web/app.js'), 'utf8');
+  const elementIds = [
+    'annotate-git-diff-data',
+    'sidebar',
+    'sidebar-title',
+    'sidebar-search-input',
+    'toggle-sidebar-button',
+    'scope-branch-button',
+    'scope-commits-button',
+    'scope-all-button',
+    'commit-picker',
+    'commit-list',
+    'window-title',
+    'repo-root',
+    'file-tree',
+    'summary',
+    'current-file-label',
+    'mode-hint',
+    'file-comments-container',
+    'editor-container',
+    'diff-editor-host',
+    'single-editor-host',
+    'refresh-review-button',
+    'submit-button',
+    'cancel-button',
+    'overall-comment-button',
+    'file-comment-button',
+    'toggle-reviewed-button',
+    'toggle-unchanged-button',
+    'toggle-wrap-button',
+    'file-status-badge',
+    'file-diff-stats',
+    'editor-cover',
+    'binary-preview',
+    'asset-failure-panel',
+    'asset-failure-title',
+    'asset-failure-message',
+    'asset-failure-detail',
+  ];
+  const elements = new Map(elementIds.map((id) => [id, createReviewUiElement(id)]));
+  elements.get('annotate-git-diff-data').textContent = JSON.stringify(initialReviewData);
+  const createdElements = [];
+  const sentPayloads = [];
+  const windowListeners = new Map();
+  const window = {
+    __reviewAssetConfig: {},
+    glimpse: {
+      send(payload) {
+        sentPayloads.push(payload);
+      },
+      close() {},
+    },
+    addEventListener(type, listener) {
+      const callbacks = windowListeners.get(type) ?? [];
+      callbacks.push(listener);
+      windowListeners.set(type, callbacks);
+    },
+  };
+  const document = {
+    body: createReviewUiElement('body'),
+    getElementById(id) {
+      return elements.get(id) ?? null;
+    },
+    createElement(tagName) {
+      const element = createReviewUiElement(`${tagName}-${createdElements.length}`);
+      createdElements.push(element);
+      return element;
+    },
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    },
+  };
+  const context = vm.createContext({
+    window,
+    document,
+    alert() {},
+    requestAnimationFrame(callback) {
+      callback();
+    },
+    ResizeObserver: undefined,
+    setTimeout,
+    clearTimeout,
+  });
+  vm.runInContext(appSource, context, { filename: 'annotate-git-diff/web/app.js' });
+  return {
+    context,
+    window,
+    document,
+    elements,
+    sentPayloads,
+    state: vm.runInContext('state', context),
+  };
 }
 
 test('annotate-last-message command orchestration covers UI guards, shutdown cleanup, and prompt flows', { concurrency: false }, async (t) => {
@@ -471,6 +620,31 @@ test('annotate-last-message command orchestration covers UI guards, shutdown cle
     assert.deepEqual(notifications, [
       { message: 'Opened native annotation window.', level: 'info' },
     ]);
+  });
+
+  await t.test('settles accepted last-message submits before synchronous native close failures', async () => {
+    const window = createMockWindow('sync-close-error-last-message-window');
+    window.closeError = new Error('native close failed');
+    const state = createAnnotateLastMessageState({ windows: [window] });
+    const extension = await loadAnnotateLastMessageExtension(state);
+    const { pi, commands, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-last-message').handler;
+    const { ctx, notifications } = createCommandContext();
+    await handler({}, ctx);
+    window.emit('message', {
+      type: 'submit',
+      overallComment: 'Accepted despite close failure.',
+      inlineComments: [],
+      sectionComments: [],
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE LAST MESSAGE PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.equal(notifications.some((notification) => notification.level === 'error'), false);
   });
 
   await t.test('sends composed prompts once via follow-up and reports blank submits without editing', async () => {
@@ -792,6 +966,31 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     assert.deepEqual(notifications, [
       { message: 'Opened native review window.', level: 'info' },
     ]);
+  });
+
+  await t.test('settles accepted review submits before synchronous native close failures', async () => {
+    const window = createMockWindow('sync-close-error-review-window');
+    window.closeError = new Error('native close failed');
+    const state = createAnnotateGitDiffState({ windows: [window] });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx, notifications } = createCommandContext();
+    await handler({}, ctx);
+    window.emit('message', {
+      type: 'submit',
+      overallComment: 'Accepted despite close failure.',
+      comments: [],
+      draft: false,
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+    assert.equal(notifications.some((notification) => notification.level === 'error'), false);
   });
 
   await t.test('handles mocked window messages and only appends prompts for meaningful submissions', async () => {
@@ -1152,6 +1351,1024 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
     ]);
   });
 
+  await t.test('validates request fields and authorizes only advertised revisions before side effects', async () => {
+    const window = createMockWindow('request-validation-window');
+    const baseReviewData = createAnnotateGitDiffState().getReviewWindowDataResults[0];
+    const reviewFile = baseReviewData.files[0];
+    const branchOnlyFile = { ...reviewFile, id: 'branch-only-file', path: 'src/branch-only.ts' };
+    const commitOnlyFile = { ...reviewFile, id: 'commit-only-file', path: 'src/commit-only.ts' };
+    const advertisedCommit = {
+      sha: 'advertised-commit',
+      shortSha: 'advertis',
+      subject: 'Advertised commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const advertisedWorkingTree = {
+      sha: '__tlh_working_tree__',
+      shortSha: 'WT',
+      subject: 'Uncommitted changes',
+      authorName: '',
+      authorDate: '',
+      kind: 'working-tree',
+    };
+    const otherAdvertisedCommit = {
+      sha: 'other-advertised-commit',
+      shortSha: 'other-ad',
+      subject: 'Other advertised commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const refreshedCommit = {
+      sha: 'refreshed-commit',
+      shortSha: 'refresh',
+      subject: 'Refreshed commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-02',
+      kind: 'commit',
+    };
+    const refreshedReviewData = {
+      ...baseReviewData,
+      commits: [refreshedCommit],
+      branchMergeBaseSha: 'refreshed-base',
+    };
+    const fileContents = {
+      originalContent: 'before',
+      modifiedContent: 'after',
+      kind: 'text',
+      mimeType: null,
+      originalExists: true,
+      modifiedExists: true,
+      originalPreviewUrl: null,
+      modifiedPreviewUrl: null,
+    };
+    const state = createAnnotateGitDiffState({
+      windows: [window],
+      getReviewWindowDataResults: [{
+        ...baseReviewData,
+        files: [reviewFile, branchOnlyFile],
+        commits: [advertisedCommit, otherAdvertisedCommit, advertisedWorkingTree],
+      }, refreshedReviewData],
+      commitFilesResults: new Map([
+        [advertisedCommit.sha, [reviewFile]],
+        [otherAdvertisedCommit.sha, [commitOnlyFile]],
+        [advertisedWorkingTree.sha, [reviewFile]],
+        [refreshedCommit.sha, [reviewFile]],
+      ]),
+      loadFileResults: new Map([
+        [`commits:${advertisedCommit.sha}:file-1`, fileContents],
+        [`commits:${otherAdvertisedCommit.sha}:commit-only-file`, fileContents],
+        [`commits:${advertisedWorkingTree.sha}:file-1`, fileContents],
+        [`commits:${refreshedCommit.sha}:file-1`, fileContents],
+        ['branch::file-1', fileContents],
+        ['all::file-1', fileContents],
+      ]),
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx } = createCommandContext();
+    await handler({}, ctx);
+
+    const initialMessageCount = window.sendCalls.length;
+    const maliciousSha = '--output=/tmp/annotate-git-diff-sentinel';
+    for (const message of [
+      [],
+      { type: 'request-file', requestId: 42, fileId: 'file-1', scope: 'branch', commitSha: null },
+      { type: 'request-file', requestId: 'file-array', fileId: [], scope: 'branch', commitSha: null },
+      { type: 'request-file', requestId: 'scope-array', fileId: 'file-1', scope: [], commitSha: null },
+      { type: 'request-file', requestId: 'sha-array', fileId: 'file-1', scope: 'branch', commitSha: [] },
+      { type: 'request-commit', requestId: 'commit-array', sha: [] },
+      { type: 'request-review-data', requestId: [] },
+      { type: 'clipboard-read', requestId: [] },
+      { type: 'clipboard-write', text: [] },
+    ]) {
+      window.emit('message', message);
+    }
+    await flushAsyncWork();
+
+    assert.equal(window.sendCalls.length, initialMessageCount);
+    assert.deepEqual(state.commitFilesCalls, []);
+    assert.deepEqual(state.loadFileCalls, []);
+    assert.deepEqual(state.clipboardReads, []);
+    assert.deepEqual(state.clipboardWrites, []);
+
+    window.emit('message', { type: 'request-commit', requestId: 'unadvertised-commit', sha: maliciousSha });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'unadvertised-file',
+      fileId: 'file-1',
+      scope: 'commits',
+      commitSha: maliciousSha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'branch-with-commit',
+      fileId: 'file-1',
+      scope: 'branch',
+      commitSha: advertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'all-with-commit',
+      fileId: 'file-1',
+      scope: 'all',
+      commitSha: advertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'missing-commit',
+      fileId: 'file-1',
+      scope: 'commits',
+      commitSha: null,
+    });
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'advertised-commit',
+      sha: advertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'advertised-working-tree-commit',
+      sha: advertisedWorkingTree.sha,
+    });
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'other-advertised-commit',
+      sha: otherAdvertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'branch-file',
+      fileId: 'file-1',
+      scope: 'branch',
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'all-file',
+      fileId: 'file-1',
+      scope: 'all',
+    });
+    await flushAsyncWork();
+
+    // Commit-scoped file reads are authorized only after the exact commit's
+    // file map has been loaded; a branch/global file id is not sufficient.
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'advertised-file',
+      fileId: 'file-1',
+      scope: 'commits',
+      commitSha: advertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'advertised-working-tree-file',
+      fileId: 'file-1',
+      scope: 'commits',
+      commitSha: advertisedWorkingTree.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'cross-scope-file-id',
+      fileId: branchOnlyFile.id,
+      scope: 'commits',
+      commitSha: advertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'wrong-commit-file-id',
+      fileId: reviewFile.id,
+      scope: 'commits',
+      commitSha: otherAdvertisedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'cross-scope-commit-file-id',
+      fileId: commitOnlyFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'other-commit-file',
+      fileId: commitOnlyFile.id,
+      scope: 'commits',
+      commitSha: otherAdvertisedCommit.sha,
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(state.commitFilesCalls, [
+      { repoRoot: '/repo', sha: advertisedCommit.sha },
+      { repoRoot: '/repo', sha: advertisedWorkingTree.sha },
+      { repoRoot: '/repo', sha: otherAdvertisedCommit.sha },
+    ]);
+    assert.deepEqual(state.loadFileCalls, [
+      { fileId: 'file-1', scope: 'branch', commitSha: null },
+      { fileId: 'file-1', scope: 'all', commitSha: null },
+      { fileId: 'file-1', scope: 'commits', commitSha: advertisedCommit.sha },
+      { fileId: 'file-1', scope: 'commits', commitSha: advertisedWorkingTree.sha },
+      { fileId: commitOnlyFile.id, scope: 'commits', commitSha: otherAdvertisedCommit.sha },
+    ]);
+
+    const messages = window.sendCalls.map(parseReviewWindowMessage);
+    assert.deepEqual(messages.filter((message) => message.type === 'commit-error'), [
+      {
+        type: 'commit-error',
+        requestId: 'unadvertised-commit',
+        sha: maliciousSha,
+        message: 'Unknown commit requested.',
+      },
+    ]);
+    assert.deepEqual(
+      messages
+        .filter((message) => message.type === 'file-error')
+        .map(({ requestId, commitSha, message }) => ({ requestId, commitSha, message })),
+      [
+        { requestId: 'unadvertised-file', commitSha: maliciousSha, message: 'Unknown commit requested.' },
+        {
+          requestId: 'branch-with-commit',
+          commitSha: advertisedCommit.sha,
+          message: 'A commit SHA is only valid for commit-scoped file requests.',
+        },
+        {
+          requestId: 'all-with-commit',
+          commitSha: advertisedCommit.sha,
+          message: 'A commit SHA is only valid for commit-scoped file requests.',
+        },
+        {
+          requestId: 'missing-commit',
+          commitSha: null,
+          message: 'A commit SHA is required for commit-scoped file requests.',
+        },
+        { requestId: 'cross-scope-file-id', commitSha: advertisedCommit.sha, message: 'Unknown file requested.' },
+        { requestId: 'wrong-commit-file-id', commitSha: otherAdvertisedCommit.sha, message: 'Unknown file requested.' },
+        { requestId: 'cross-scope-commit-file-id', commitSha: null, message: 'Unknown file requested.' },
+      ],
+    );
+
+    window.emit('message', { type: 'request-review-data', requestId: 'refresh-1' });
+    await flushAsyncWork();
+    window.emit('message', { type: 'request-commit', requestId: 'old-after-refresh', sha: advertisedCommit.sha });
+    window.emit('message', { type: 'request-commit', requestId: 'new-after-refresh', sha: refreshedCommit.sha });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'working-tree-after-refresh',
+      fileId: 'file-1',
+      scope: 'commits',
+      commitSha: advertisedWorkingTree.sha,
+    });
+    await flushAsyncWork();
+
+    assert.deepEqual(state.commitFilesCalls, [
+      { repoRoot: '/repo', sha: advertisedCommit.sha },
+      { repoRoot: '/repo', sha: advertisedWorkingTree.sha },
+      { repoRoot: '/repo', sha: otherAdvertisedCommit.sha },
+      { repoRoot: '/repo', sha: refreshedCommit.sha },
+    ]);
+    const refreshedMessages = window.sendCalls.map(parseReviewWindowMessage);
+    assert.deepEqual(refreshedMessages.filter((message) => message.requestId === 'old-after-refresh'), [
+      {
+        type: 'commit-error',
+        requestId: 'old-after-refresh',
+        sha: advertisedCommit.sha,
+        message: 'Unknown commit requested.',
+      },
+    ]);
+    assert.deepEqual(refreshedMessages.filter((message) => message.requestId === 'working-tree-after-refresh'), [
+      {
+        type: 'file-error',
+        requestId: 'working-tree-after-refresh',
+        fileId: 'file-1',
+        scope: 'commits',
+        commitSha: advertisedWorkingTree.sha,
+        message: 'Unknown commit requested.',
+      },
+    ]);
+    assert.deepEqual(state.clipboardReads, []);
+    assert.deepEqual(state.clipboardWrites, []);
+
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  await t.test('isolates deferred reads across refresh while retaining immutable commit loads', async () => {
+    const window = createMockWindow('snapshot-refresh-window');
+    const oldRemovedContents = createDeferred();
+    const oldSharedContents = createDeferred();
+    const newSharedContents = createDeferred();
+    const keptCommitFiles = createDeferred();
+    const workingTreeCommitFiles = createDeferred();
+    const makeFile = (id, filePath, inGitDiff = true) => ({
+      id,
+      path: filePath,
+      worktreeStatus: inGitDiff ? 'modified' : null,
+      hasWorkingTreeFile: true,
+      inGitDiff,
+      gitDiff: inGitDiff ? {
+        status: 'modified',
+        oldPath: filePath,
+        newPath: filePath,
+        displayPath: filePath,
+        hasOriginal: true,
+        hasModified: true,
+      } : null,
+      kind: 'text',
+      mimeType: null,
+    });
+    const contents = (text) => ({
+      originalContent: `${text}-before`,
+      modifiedContent: `${text}-after`,
+      kind: 'text',
+      mimeType: null,
+      originalExists: true,
+      modifiedExists: true,
+      originalPreviewUrl: null,
+      modifiedPreviewUrl: null,
+    });
+    const oldRemovedFile = makeFile('removed-file', 'src/removed.ts');
+    const oldSharedFile = makeFile('shared-file', 'src/old-path.ts');
+    const newSharedFile = makeFile('shared-file', 'src/new-path.ts');
+    const keptCommit = {
+      sha: 'kept-commit',
+      shortSha: 'kept-co',
+      subject: 'Kept immutable commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const workingTreeCommit = {
+      sha: '__tlh_working_tree__',
+      shortSha: 'WT',
+      subject: 'Uncommitted changes',
+      authorName: '',
+      authorDate: '',
+      kind: 'working-tree',
+    };
+    const keptCommitFile = makeFile('kept-commit-file', 'src/kept.ts');
+    const workingTreeFile = makeFile('working-tree-file', 'src/live.ts');
+    const initialReviewData = {
+      repoRoot: '/repo',
+      files: [oldRemovedFile, oldSharedFile],
+      commits: [keptCommit, workingTreeCommit],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'old-base',
+      repositoryHasHead: true,
+    };
+    const refreshedReviewData = {
+      ...initialReviewData,
+      files: [newSharedFile],
+      commits: [keptCommit],
+      branchMergeBaseSha: 'new-base',
+    };
+    const state = createAnnotateGitDiffState({
+      windows: [window],
+      getReviewWindowDataResults: [initialReviewData, refreshedReviewData],
+      commitFilesResults: new Map([
+        [keptCommit.sha, keptCommitFiles.promise],
+        [workingTreeCommit.sha, workingTreeCommitFiles.promise],
+      ]),
+      loadFileResults: new Map([
+        ['branch::removed-file', oldRemovedContents.promise],
+        ['branch::shared-file', oldSharedContents.promise],
+      ]),
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers, sentUserMessages } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx } = createCommandContext();
+    await handler({}, ctx);
+
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'old-removed-file',
+      fileId: oldRemovedFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'old-shared-file',
+      fileId: oldSharedFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', { type: 'request-commit', requestId: 'kept-before-refresh', sha: keptCommit.sha });
+    window.emit('message', { type: 'request-commit', requestId: 'working-tree-before-refresh', sha: workingTreeCommit.sha });
+    await flushAsyncWork();
+
+    window.emit('message', { type: 'request-review-data', requestId: 'refresh-1' });
+    await flushAsyncWork();
+    state.loadFileResults.set('branch::shared-file', newSharedContents.promise);
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'new-shared-file',
+      fileId: newSharedFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'removed-after-refresh',
+      fileId: oldRemovedFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', { type: 'request-commit', requestId: 'kept-after-refresh', sha: keptCommit.sha });
+    await flushAsyncWork();
+
+    oldRemovedContents.resolve(contents('removed-old'));
+    oldSharedContents.reject(new Error('stale shared read failed'));
+    newSharedContents.resolve(contents('shared-new'));
+    keptCommitFiles.resolve([keptCommitFile]);
+    workingTreeCommitFiles.resolve([workingTreeFile]);
+    await flushAsyncWork();
+
+    const messages = window.sendCalls.map(parseReviewWindowMessage);
+    assert.equal(messages.some((message) => message.requestId === 'old-removed-file'), false);
+    assert.equal(messages.some((message) => message.requestId === 'old-shared-file'), false);
+    assert.equal(messages.some((message) => message.requestId === 'working-tree-before-refresh'), false);
+    assert.deepEqual(messages.find((message) => message.requestId === 'removed-after-refresh'), {
+      type: 'file-error',
+      requestId: 'removed-after-refresh',
+      fileId: oldRemovedFile.id,
+      scope: 'branch',
+      commitSha: null,
+      message: 'Unknown file requested.',
+    });
+    assert.deepEqual(messages.find((message) => message.requestId === 'new-shared-file'), {
+      type: 'file-data',
+      requestId: 'new-shared-file',
+      fileId: newSharedFile.id,
+      scope: 'branch',
+      commitSha: null,
+      ...contents('shared-new'),
+    });
+    assert.equal(messages.filter((message) => message.type === 'commit-data' && message.sha === keptCommit.sha).length, 2);
+    assert.deepEqual(state.commitFilesCalls, [
+      { repoRoot: '/repo', sha: keptCommit.sha },
+      { repoRoot: '/repo', sha: workingTreeCommit.sha },
+    ]);
+    assert.deepEqual(state.loadFileCalls, [
+      { fileId: oldRemovedFile.id, scope: 'branch', commitSha: null },
+      { fileId: oldSharedFile.id, scope: 'branch', commitSha: null },
+      { fileId: newSharedFile.id, scope: 'branch', commitSha: null },
+    ]);
+
+    window.emit('message', {
+      type: 'submit',
+      overallComment: '',
+      comments: [{
+        id: 'historical-comment',
+        fileId: oldSharedFile.id,
+        scope: 'branch',
+        commitSha: null,
+        commitShort: null,
+        commitKind: null,
+        side: 'modified',
+        startLine: 2,
+        endLine: 2,
+        body: 'Keep the historical path.',
+      }],
+      draft: false,
+    });
+    await flushAsyncWork();
+    assert.equal(state.composeCalls.length, 1);
+    assert.equal(state.composeCalls[0].files.find((file) => file.id === oldSharedFile.id)?.path, oldSharedFile.path);
+    assert.deepEqual(sentUserMessages, [
+      { message: 'ANNOTATE GIT DIFF PROMPT', options: { deliverAs: 'followUp' } },
+    ]);
+
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  await t.test('keeps the newest overlapping refresh snapshot and branch merge base', async () => {
+    const window = createMockWindow('overlapping-refresh-window');
+    const staleRefresh = createDeferred();
+    const newestRefresh = createDeferred();
+    const oldFile = {
+      ...createAnnotateGitDiffState().getReviewWindowDataResults[0].files[0],
+      id: 'overlap-file',
+      path: 'src/old.ts',
+    };
+    const newestFile = { ...oldFile, path: 'src/new.ts' };
+    const fileContents = {
+      originalContent: 'old base',
+      modifiedContent: 'new contents',
+      kind: 'text',
+      mimeType: null,
+      originalExists: true,
+      modifiedExists: true,
+      originalPreviewUrl: null,
+      modifiedPreviewUrl: null,
+    };
+    const baseReviewData = {
+      repoRoot: '/repo',
+      files: [oldFile],
+      commits: [],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'initial-base',
+      repositoryHasHead: true,
+    };
+    const staleReviewData = { ...baseReviewData, branchMergeBaseSha: 'stale-base' };
+    const newestReviewData = {
+      ...baseReviewData,
+      files: [newestFile],
+      branchMergeBaseSha: 'newest-base',
+    };
+    const state = createAnnotateGitDiffState({
+      windows: [window],
+      getReviewWindowDataResults: [baseReviewData, staleRefresh.promise, newestRefresh.promise],
+      loadFileResults: new Map([['branch::overlap-file', fileContents]]),
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx } = createCommandContext();
+    await handler({}, ctx);
+
+    window.emit('message', { type: 'request-review-data', requestId: 'stale-refresh' });
+    window.emit('message', { type: 'request-review-data', requestId: 'newest-refresh' });
+    newestRefresh.resolve(newestReviewData);
+    await flushAsyncWork();
+    staleRefresh.resolve(staleReviewData);
+    await flushAsyncWork();
+
+    const refreshMessages = window.sendCalls.map(parseReviewWindowMessage);
+    assert.deepEqual(refreshMessages.filter((message) => message.type === 'review-data'), [{
+      type: 'review-data',
+      requestId: 'newest-refresh',
+      files: newestReviewData.files,
+      commits: newestReviewData.commits,
+      branchBaseRef: newestReviewData.branchBaseRef,
+      branchMergeBaseSha: newestReviewData.branchMergeBaseSha,
+      repositoryHasHead: newestReviewData.repositoryHasHead,
+    }]);
+
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'newest-file',
+      fileId: newestFile.id,
+      scope: 'branch',
+    });
+    await flushAsyncWork();
+    assert.equal(state.loadFileMergeBases.at(-1), 'newest-base');
+    assert.deepEqual(window.sendCalls.map(parseReviewWindowMessage).find((message) => message.requestId === 'newest-file'), {
+      type: 'file-data',
+      requestId: 'newest-file',
+      fileId: newestFile.id,
+      scope: 'branch',
+      commitSha: null,
+      ...fileContents,
+    });
+
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  await t.test('retries rejected file and immutable commit loads without stale replacement eviction', async () => {
+    const window = createMockWindow('retry-refresh-window');
+    const oldFileContents = createDeferred();
+    const replacementFileContents = createDeferred();
+    const retainedCommitFailure = createDeferred();
+    const removedCommitFailure = createDeferred();
+    const replacementCommitFiles = createDeferred();
+    const makeFile = (id, filePath) => ({
+      id,
+      path: filePath,
+      worktreeStatus: 'modified',
+      hasWorkingTreeFile: true,
+      inGitDiff: true,
+      gitDiff: {
+        status: 'modified',
+        oldPath: filePath,
+        newPath: filePath,
+        displayPath: filePath,
+        hasOriginal: true,
+        hasModified: true,
+      },
+      kind: 'text',
+      mimeType: null,
+    });
+    const oldFile = makeFile('retry-file', 'src/old-retry.ts');
+    const refreshedFile = makeFile('retry-file', 'src/new-retry.ts');
+    const retainedCommit = {
+      sha: 'retained-immutable',
+      shortSha: 'retained',
+      subject: 'Retained immutable commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const removedCommit = {
+      sha: 'removed-then-readded',
+      shortSha: 'removed',
+      subject: 'Removed and re-added commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-02',
+      kind: 'commit',
+    };
+    const commitFile = makeFile('commit-file', 'src/commit.ts');
+    const initialReviewData = {
+      repoRoot: '/repo',
+      files: [oldFile],
+      commits: [retainedCommit, removedCommit],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'old-base',
+      repositoryHasHead: true,
+    };
+    const removedReviewData = {
+      ...initialReviewData,
+      files: [refreshedFile],
+      commits: [retainedCommit],
+      branchMergeBaseSha: 'refreshed-base',
+    };
+    const readdedReviewData = {
+      ...removedReviewData,
+      commits: [retainedCommit, removedCommit],
+      branchMergeBaseSha: 'readded-base',
+    };
+    const successfulFileContents = {
+      originalContent: 'before retry',
+      modifiedContent: 'after retry',
+      kind: 'text',
+      mimeType: null,
+      originalExists: true,
+      modifiedExists: true,
+      originalPreviewUrl: null,
+      modifiedPreviewUrl: null,
+    };
+    const state = createAnnotateGitDiffState({
+      windows: [window],
+      getReviewWindowDataResults: [initialReviewData, removedReviewData, readdedReviewData],
+      commitFilesResults: new Map([
+        [retainedCommit.sha, retainedCommitFailure.promise],
+        [removedCommit.sha, removedCommitFailure.promise],
+      ]),
+      loadFileResults: new Map([
+        ['branch::retry-file', oldFileContents.promise],
+      ]),
+    });
+    const extension = await loadAnnotateGitDiffExtension(state);
+    const { pi, commands, handlers } = createExtensionHarness();
+    extension(pi);
+
+    const handler = commands.get('annotate-git-diff').handler;
+    const { ctx } = createCommandContext();
+    await handler({}, ctx);
+
+    // Start old file and commit reads before replacing their authorization snapshot.
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'old-file-retry',
+      fileId: oldFile.id,
+      scope: 'branch',
+    });
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'retained-commit-failure',
+      sha: retainedCommit.sha,
+    });
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'removed-commit-old',
+      sha: removedCommit.sha,
+    });
+    await flushAsyncWork();
+
+    window.emit('message', { type: 'request-review-data', requestId: 'remove-commit' });
+    await flushAsyncWork();
+    state.loadFileResults.set('branch::retry-file', replacementFileContents.promise);
+    window.emit('message', {
+      type: 'request-file',
+      requestId: 'replacement-file-retry',
+      fileId: refreshedFile.id,
+      scope: 'branch',
+    });
+
+    oldFileContents.reject(new Error('old file rejection'));
+    retainedCommitFailure.reject(new Error('retained commit rejection'));
+    await flushAsyncWork();
+    replacementFileContents.resolve(successfulFileContents);
+    await flushAsyncWork();
+
+    // Re-add the removed commit so a replacement promise can occupy its cache key.
+    window.emit('message', { type: 'request-review-data', requestId: 'readd-commit' });
+    await flushAsyncWork();
+    state.commitFilesResults.set(removedCommit.sha, replacementCommitFiles.promise);
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'removed-commit-replacement',
+      sha: removedCommit.sha,
+    });
+    await flushAsyncWork();
+    removedCommitFailure.reject(new Error('old removed commit rejection'));
+    replacementCommitFiles.resolve([commitFile]);
+    await flushAsyncWork();
+
+    const messages = window.sendCalls.map(parseReviewWindowMessage);
+    assert.equal(messages.some((message) => message.requestId === 'old-file-retry'), false);
+    assert.equal(messages.some((message) => message.requestId === 'removed-commit-old'), false);
+    assert.deepEqual(messages.find((message) => message.requestId === 'replacement-file-retry'), {
+      type: 'file-data',
+      requestId: 'replacement-file-retry',
+      fileId: refreshedFile.id,
+      scope: 'branch',
+      commitSha: null,
+      ...successfulFileContents,
+    });
+    assert.deepEqual(messages.find((message) => message.requestId === 'retained-commit-failure'), {
+      type: 'commit-error',
+      requestId: 'retained-commit-failure',
+      sha: retainedCommit.sha,
+      message: 'retained commit rejection',
+    });
+    assert.deepEqual(messages.find((message) => message.requestId === 'removed-commit-replacement'), {
+      type: 'commit-data',
+      requestId: 'removed-commit-replacement',
+      sha: removedCommit.sha,
+      files: [commitFile],
+    });
+
+    // Both rejection paths evicted only their current promise, so a fresh
+    // request for the rejected retained commit can succeed.
+    state.commitFilesResults.set(retainedCommit.sha, [commitFile]);
+    window.emit('message', {
+      type: 'request-commit',
+      requestId: 'retained-commit-retry',
+      sha: retainedCommit.sha,
+    });
+    await flushAsyncWork();
+    assert.deepEqual(messages.concat(window.sendCalls.map(parseReviewWindowMessage)).find((message) => message.requestId === 'retained-commit-retry'), {
+      type: 'commit-data',
+      requestId: 'retained-commit-retry',
+      sha: retainedCommit.sha,
+      files: [commitFile],
+    });
+
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  await t.test('blocks closed and shutdown completions while preserving late draft recovery', async () => {
+    const closedWindow = createMockWindow('closed-grace-window');
+    const lateCommitFiles = createDeferred();
+    const lateRefresh = createDeferred();
+    const lateCommit = {
+      sha: 'late-commit',
+      shortSha: 'late-com',
+      subject: 'Late commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const lateFile = {
+      id: 'late-file',
+      path: 'src/late.ts',
+      worktreeStatus: null,
+      hasWorkingTreeFile: false,
+      inGitDiff: false,
+      gitDiff: null,
+      kind: 'text',
+      mimeType: null,
+    };
+    const initialReviewData = {
+      repoRoot: '/repo',
+      files: [],
+      commits: [lateCommit],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'initial-base',
+      repositoryHasHead: true,
+    };
+    const lateReviewData = {
+      ...initialReviewData,
+      files: [lateFile],
+      branchMergeBaseSha: 'late-base',
+    };
+    const closedState = createAnnotateGitDiffState({
+      windows: [closedWindow],
+      getReviewWindowDataResults: [initialReviewData, lateRefresh.promise],
+      commitFilesResults: new Map([[lateCommit.sha, lateCommitFiles.promise]]),
+    });
+    const closedExtension = await loadAnnotateGitDiffExtension(closedState);
+    const closedHarness = createExtensionHarness();
+    closedExtension(closedHarness.pi);
+    const closedHandler = closedHarness.commands.get('annotate-git-diff').handler;
+    const { ctx: closedCtx, pasted } = createCommandContext();
+    await closedHandler({}, closedCtx);
+
+    closedWindow.emit('message', {
+      type: 'request-commit',
+      requestId: 'late-commit-load',
+      sha: lateCommit.sha,
+    });
+    closedWindow.emit('message', { type: 'request-review-data', requestId: 'late-refresh' });
+    await flushAsyncWork();
+    const sendsBeforeClose = closedWindow.sendCalls.length;
+    const commitCallsBeforeClose = closedState.commitFilesCalls.length;
+    const reviewCallsBeforeClose = closedState.getReviewWindowDataCalls.length;
+
+    closedWindow.closed = true;
+    closedWindow.emit('closed');
+    closedWindow.emit('message', {
+      type: 'request-commit',
+      requestId: 'rejected-after-close',
+      sha: lateCommit.sha,
+    });
+    closedWindow.emit('message', { type: 'request-review-data', requestId: 'rejected-refresh-after-close' });
+    closedWindow.emit('message', { type: 'clipboard-read', requestId: 'rejected-clipboard-after-close' });
+    closedWindow.emit('message', { type: 'clipboard-write', text: 'must not write after close' });
+    lateCommitFiles.resolve([lateFile]);
+    lateRefresh.resolve(lateReviewData);
+    await flushAsyncWork();
+
+    assert.equal(closedWindow.sendCalls.length, sendsBeforeClose);
+    assert.equal(closedState.commitFilesCalls.length, commitCallsBeforeClose);
+    assert.equal(closedState.getReviewWindowDataCalls.length, reviewCallsBeforeClose);
+    assert.deepEqual(closedState.clipboardReads, []);
+    assert.deepEqual(closedState.clipboardWrites, []);
+
+    closedWindow.emit('message', {
+      type: 'submit',
+      overallComment: '',
+      comments: [{
+        id: 'late-draft-comment',
+        fileId: lateFile.id,
+        scope: 'commits',
+        commitSha: lateCommit.sha,
+        commitShort: lateCommit.shortSha,
+        commitKind: lateCommit.kind,
+        side: 'modified',
+        startLine: 1,
+        endLine: 1,
+        body: 'Recover this draft after native close.',
+      }],
+      draft: true,
+    });
+    await flushAsyncWork();
+    assert.deepEqual(closedState.composeCalls, [{
+      files: [],
+      payload: {
+        type: 'submit',
+        overallComment: '',
+        comments: [{
+          id: 'late-draft-comment',
+          fileId: lateFile.id,
+          scope: 'commits',
+          commitSha: lateCommit.sha,
+          commitShort: lateCommit.shortSha,
+          commitKind: lateCommit.kind,
+          side: 'modified',
+          startLine: 1,
+          endLine: 1,
+          body: 'Recover this draft after native close.',
+        }],
+        draft: true,
+      },
+    }]);
+    assert.deepEqual(pasted, ['ANNOTATE GIT DIFF PROMPT']);
+    assert.deepEqual(closedHarness.sentUserMessages, []);
+
+    const shutdownWindow = createMockWindow('shutdown-grace-window');
+    const shutdownCommitFiles = createDeferred();
+    const shutdownCommit = { ...lateCommit, sha: 'shutdown-commit' };
+    const shutdownState = createAnnotateGitDiffState({
+      windows: [shutdownWindow],
+      getReviewWindowDataResults: [{ ...initialReviewData, commits: [shutdownCommit] }],
+      commitFilesResults: new Map([[shutdownCommit.sha, shutdownCommitFiles.promise]]),
+    });
+    const shutdownExtension = await loadAnnotateGitDiffExtension(shutdownState);
+    const shutdownHarness = createExtensionHarness();
+    shutdownExtension(shutdownHarness.pi);
+    const shutdownHandler = shutdownHarness.commands.get('annotate-git-diff').handler;
+    const shutdown = shutdownHarness.handlers.get('session_shutdown');
+    const { ctx: shutdownCtx } = createCommandContext();
+    await shutdownHandler({}, shutdownCtx);
+    shutdownWindow.emit('message', {
+      type: 'request-commit',
+      requestId: 'shutdown-commit-load',
+      sha: shutdownCommit.sha,
+    });
+    await flushAsyncWork();
+    await shutdown({}, shutdownCtx);
+    shutdownWindow.emit('message', {
+      type: 'submit',
+      overallComment: 'Must not send after shutdown.',
+      comments: [],
+      draft: false,
+    });
+    shutdownCommitFiles.resolve([lateFile]);
+    await flushAsyncWork();
+
+    assert.deepEqual(shutdownState.commitFilesCalls, [{ repoRoot: '/repo', sha: shutdownCommit.sha }]);
+    assert.deepEqual(shutdownState.composeCalls, []);
+    assert.deepEqual(shutdownHarness.sentUserMessages, []);
+    assert.deepEqual(shutdownWindow.sendCalls, []);
+  });
+
+  await t.test('reconciles removed commit UI state through the live review-data handler while preserving comments', async () => {
+    const removedCommit = {
+      sha: 'ui-removed-commit',
+      shortSha: 'ui-remove',
+      subject: 'Removed UI commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-01',
+      kind: 'commit',
+    };
+    const retainedCommit = {
+      sha: 'ui-retained-commit',
+      shortSha: 'ui-retain',
+      subject: 'Retained UI commit',
+      authorName: 'TLH',
+      authorDate: '2026-01-02',
+      kind: 'commit',
+    };
+    const removedFile = { id: 'ui-removed-file', path: 'src/removed-ui.ts', kind: 'text', inGitDiff: true };
+    const retainedFile = { id: 'ui-retained-file', path: 'src/retained-ui.ts', kind: 'text', inGitDiff: true };
+    const initialReviewData = {
+      repoRoot: '/repo',
+      files: [],
+      commits: [removedCommit, retainedCommit],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'ui-initial-base',
+      repositoryHasHead: true,
+    };
+    const ui = await loadAnnotateGitDiffUiFixture(initialReviewData);
+    const { state } = ui;
+    const removedCommitFileKey = `commits:${removedCommit.sha}:${removedFile.id}`;
+    const retainedCommitFileKey = `commits:${retainedCommit.sha}:${retainedFile.id}`;
+    const retainedContents = {
+      originalContent: 'retained-before',
+      modifiedContent: 'retained-after',
+      kind: 'text',
+      mimeType: null,
+      originalExists: true,
+      modifiedExists: true,
+      originalPreviewUrl: null,
+      modifiedPreviewUrl: null,
+    };
+    const historicalComment = {
+      id: 'ui-historical-comment',
+      fileId: removedFile.id,
+      scope: 'commits',
+      commitSha: removedCommit.sha,
+      commitShort: removedCommit.shortSha,
+      commitKind: removedCommit.kind,
+      side: 'modified',
+      startLine: 2,
+      endLine: 2,
+      body: 'Keep this comment after the commit disappears.',
+    };
+
+    state.commitFilesBySha[removedCommit.sha] = [removedFile];
+    state.commitErrors[removedCommit.sha] = 'removed commit failed';
+    state.commitRequestIds[removedCommit.sha] = 'removed-pending';
+    state.fileContents[removedCommitFileKey] = { ...retainedContents };
+    state.fileErrors[removedCommitFileKey] = 'removed file failed';
+    state.pendingRequestIds[removedCommitFileKey] = 'removed-file-pending';
+    state.reviewedFiles[removedFile.id] = true;
+    state.scrollPositions[removedCommitFileKey] = { originalTop: 10, modifiedTop: 20 };
+
+    state.commitFilesBySha[retainedCommit.sha] = [retainedFile];
+    state.commitErrors[retainedCommit.sha] = 'retained commit can retry';
+    state.commitRequestIds[retainedCommit.sha] = 'retained-pending';
+    state.fileContents[retainedCommitFileKey] = retainedContents;
+    state.fileErrors[retainedCommitFileKey] = 'retained file can retry';
+    state.pendingRequestIds[retainedCommitFileKey] = 'retained-file-pending';
+    state.comments = [historicalComment];
+    state.selectedCommitSha = removedCommit.sha;
+    state.currentScope = 'commits';
+
+    ui.elements.get('refresh-review-button').click();
+    const requestId = state.reviewDataRequestId;
+    assert.ok(requestId);
+    ui.window.__reviewReceive({
+      type: 'review-data',
+      requestId,
+      files: [],
+      commits: [retainedCommit],
+      branchBaseRef: 'origin/main',
+      branchMergeBaseSha: 'ui-new-base',
+      repositoryHasHead: true,
+    });
+
+    assert.equal(state.commitFilesBySha[removedCommit.sha], undefined);
+    assert.equal(state.commitErrors[removedCommit.sha], undefined);
+    assert.equal(state.commitRequestIds[removedCommit.sha], undefined);
+    assert.equal(state.fileContents[removedCommitFileKey], undefined);
+    assert.equal(state.fileErrors[removedCommitFileKey], undefined);
+    assert.equal(state.pendingRequestIds[removedCommitFileKey], undefined);
+    assert.equal(state.reviewedFiles[removedFile.id], undefined);
+    assert.equal(state.scrollPositions[removedCommitFileKey], undefined);
+    assert.deepEqual(state.commitFilesBySha[retainedCommit.sha], [retainedFile]);
+    assert.equal(state.commitErrors[retainedCommit.sha], undefined);
+    assert.equal(state.commitRequestIds[retainedCommit.sha], 'retained-pending');
+    assert.deepEqual(state.fileContents[retainedCommitFileKey], retainedContents);
+    assert.equal(state.fileErrors[retainedCommitFileKey], undefined);
+    assert.equal(state.pendingRequestIds[retainedCommitFileKey], 'retained-file-pending');
+    assert.deepEqual(state.comments, [historicalComment]);
+    assert.equal(state.selectedCommitSha, retainedCommit.sha);
+  });
+
   await t.test('surfaces repository, request, watcher, and runtime errors while cleaning up watchers', async () => {
     const failingReviewWindow = createMockWindow('failing-review-window');
     const initialReviewData = {
@@ -1173,7 +2390,14 @@ test('annotate-git-diff command orchestration covers guards, watcher cleanup, pr
         kind: 'text',
         mimeType: null,
       }],
-      commits: [],
+      commits: [{
+        sha: 'deadbeef',
+        shortSha: 'deadbee',
+        subject: 'Fixture commit',
+        authorName: 'TLH',
+        authorDate: '2026-01-01',
+        kind: 'commit',
+      }],
       branchBaseRef: 'origin/main',
       branchMergeBaseSha: 'abc123',
       repositoryHasHead: true,
