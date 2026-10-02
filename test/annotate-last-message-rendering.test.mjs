@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
@@ -106,6 +107,52 @@ test('markdown renderer classifies representative blocks and keeps unsafe conten
   const linkTokens = jsonValue(tokenizeLine('[unsafe](javascript:alert)'));
   assert.equal(linkTokens[0].type, 'link');
   assert.equal(linkTokens[0].url, 'javascript:alert');
+});
+
+test('inline links preserve nested, adjacent, and escaped labels', () => {
+  const { tokenizeLine } = loadRenderer();
+
+  assert.deepEqual(jsonValue(tokenizeLine('[outer [inner](inner-url)](outer-url)[adjacent](adjacent-url)')), [
+    {
+      type: 'link',
+      labelTokens: [
+        { type: 'text', text: 'outer ' },
+        { type: 'link', labelTokens: [{ type: 'text', text: 'inner' }], url: 'inner-url' },
+      ],
+      url: 'outer-url',
+    },
+    { type: 'link', labelTokens: [{ type: 'text', text: 'adjacent' }], url: 'adjacent-url' },
+  ]);
+
+  assert.deepEqual(jsonValue(tokenizeLine('[escaped \\[label\\]](escaped-url)')), [
+    {
+      type: 'link',
+      labelTokens: [{ type: 'text', text: 'escaped [label\\]' }],
+      url: 'escaped-url',
+    },
+  ]);
+});
+
+test('large unmatched and balanced bracket runs preserve literal tokens within a generous bound', () => {
+  const { tokenizeLine } = loadRenderer();
+  const cases = [
+    { name: 'unmatched brackets', text: '['.repeat(80_000) },
+    {
+      name: 'balanced nested brackets without a destination',
+      text: '['.repeat(40_000) + ']'.repeat(40_000),
+    },
+  ];
+  const started = performance.now();
+
+  for (const { name, text } of cases) {
+    const tokens = tokenizeLine(text);
+    assert.equal(tokens.length, 1, `${name} should stay one literal token`);
+    assert.equal(tokens[0].type, 'text', `${name} should stay plain text`);
+    assert.equal(tokens[0].text, text, `${name} should preserve every source character`);
+  }
+
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 5_000, `bracket matching took ${elapsed.toFixed(1)}ms`);
 });
 
 test('full-message fence metadata preserves rows, coordinates, and section context across blank lines', () => {

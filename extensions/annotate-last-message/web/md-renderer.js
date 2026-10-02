@@ -276,6 +276,23 @@
     const tokens = [];
     let i = 0;
     let buf = "";
+    let bracketMatches = null;
+
+    // Match raw brackets once per parse call; suffix rescans make runs quadratic.
+    function getBracketMatches() {
+      if (bracketMatches !== null) return bracketMatches;
+
+      bracketMatches = new Map();
+      const stack = [];
+      for (let k = 0; k < text.length; k++) {
+        if (text[k] === "[") {
+          stack.push(k);
+        } else if (text[k] === "]" && stack.length > 0) {
+          bracketMatches.set(stack.pop(), k);
+        }
+      }
+      return bracketMatches;
+    }
 
     function flush() {
       if (buf.length > 0) {
@@ -310,18 +327,7 @@
 
       // Link: [label](url)
       if (ch === "[") {
-        let closeLabel = -1;
-        let depth = 0;
-        for (let k = i + 1; k < text.length; k++) {
-          if (text[k] === "[") depth++;
-          else if (text[k] === "]") {
-            if (depth === 0) {
-              closeLabel = k;
-              break;
-            }
-            depth--;
-          }
-        }
+        const closeLabel = getBracketMatches().get(i) ?? -1;
         if (closeLabel !== -1 && text[closeLabel + 1] === "(") {
           const urlStart = closeLabel + 2;
           const closeUrl = text.indexOf(")", urlStart);
