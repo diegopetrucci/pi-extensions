@@ -51,6 +51,8 @@ export interface MinimalToolResultMessage {
 	toolCallId: string;
 	toolName: string;
 	content: (MinimalTextContent | MinimalImageContent)[];
+	/** Bounded nested-call metadata; child calls have no transcript results to prune. */
+	nestedCalls?: unknown;
 	isError: boolean;
 	timestamp?: number;
 	[key: string]: unknown;
@@ -114,13 +116,16 @@ export function normalizeSessionProjection(value: unknown): MinimalSessionProjec
 		});
 	}
 
+	// Entries carry the provenance that Pi uses to apply omissions and
+	// replacements. Validate the optional flattened field for compatibility, but
+	// derive the messages used by pruning from entries so stale/invented records
+	// cannot bypass canonical context edits.
 	if ("messages" in value && (!Array.isArray(value.messages) || !value.messages.every(isMinimalMessage))) return undefined;
-	const messages = Array.isArray(value.messages) ? value.messages : entries.flatMap((entry) => entry.messages);
-	return { entries, messages };
+	return { entries, messages: entries.flatMap((entry) => entry.messages) };
 }
 
 export function sessionProjectionToMessages(projection: MinimalSessionProjection): MinimalMessage[] {
-	return projection.messages ?? projection.entries.flatMap((entry) => entry.messages);
+	return projection.entries.flatMap((entry) => entry.messages);
 }
 
 // ============================================================================
@@ -1598,7 +1603,13 @@ export interface ToolCallOccurrence {
 	isError: boolean;
 }
 
-/** Collect every assistant toolCall block that has a matching toolResult message, in message order. */
+/**
+ * Collect every transcript assistant toolCall block that has a matching
+ * transcript toolResult message, in message order. `nestedCalls` is deliberately
+ * not expanded: Pi keeps only bounded call metadata there and does not record
+ * child results as transcript messages, so expanding it would double-count or
+ * invent prune targets.
+ */
 export function collectCompletedToolCallOccurrences(messages: MinimalMessage[]): ToolCallOccurrence[] {
 	const resultIndexById = new Map<string, number>();
 	const isErrorById = new Map<string, boolean>();
@@ -2318,6 +2329,8 @@ export function buildPrunableItems(
 	const items: PrunableItem[] = [];
 	for (const occurrence of collectCompletedToolCallOccurrences(messages)) {
 		const resultMessage = messages[occurrence.resultIndex] as MinimalToolResultMessage;
+		// Only provider-visible transcript content is economically attributable;
+		// bounded nested-call metadata has no child result content to estimate.
 		const estimatedTokens = estimateTokensForContent(resultMessage.content);
 		const activeDecision = activeByToolCallId.get(occurrence.toolCallId);
 		const status: PrunableItemStatus = activeDecision

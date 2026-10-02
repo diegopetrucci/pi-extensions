@@ -73,6 +73,141 @@ test('quiet-tools formats focused call summaries for built-in tools without mult
   }
 });
 
+test('quiet-tools wrapper preserves Pi 0.99 metadata, execution context, structured results, and errors', async () => {
+  const parameters = { type: 'object', properties: { command: { type: 'string' } } };
+  const outputSchema = { type: 'object', properties: { output: { type: 'string' } } };
+  const constrainedSampling = { type: 'json_schema', strict: 'prefer' };
+  const annotations = { readOnlyHint: false, destructiveHint: true };
+  const namespace = { name: 'fixture', description: 'fixture namespace' };
+  const futureMetadata = { futureFlag: true };
+  const prepareArguments = (args) => args;
+  const prepareLoadout = () => undefined;
+  const updates = [];
+  const executeCalls = [];
+  const renderCalls = [];
+  const baseResultComponent = { type: 'base-result' };
+  const baseExecute = async (toolCallId, args, signal, onUpdate, ctx) => {
+    executeCalls.push({ toolCallId, args, signal, onUpdate, ctx });
+    onUpdate?.({ content: [{ type: 'text', text: 'partial' }], details: { phase: 'partial' } });
+    return {
+      content: [{ type: 'text', text: 'failure details' }],
+      details: { phase: 'final' },
+      structuredContent: { output: 'structured' },
+      isError: true,
+      usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 10, cost: { total: 0 } },
+    };
+  };
+  const base = {
+    name: 'fixture',
+    label: 'Fixture',
+    description: 'Fixture tool',
+    promptSnippet: 'fixture()',
+    promptGuidelines: ['keep fixture output bounded'],
+    parameters,
+    outputSchema,
+    constrainedSampling,
+    renderShell: 'self',
+    exposure: 'codemode',
+    namespace,
+    annotations,
+    futureMetadata,
+    defaultActive: false,
+    prepareArguments,
+    prepareLoadout,
+    executionMode: 'parallel',
+    execute: baseExecute,
+    renderResult(result, options, _theme, context) {
+      renderCalls.push({ result, options, context });
+      return baseResultComponent;
+    },
+  };
+  const quietTool = createQuietToolDefinition(base);
+
+  for (const key of [
+    'name', 'label', 'description', 'promptSnippet', 'promptGuidelines', 'parameters', 'outputSchema',
+    'constrainedSampling', 'renderShell', 'exposure', 'namespace', 'annotations', 'futureMetadata', 'defaultActive',
+    'prepareArguments', 'prepareLoadout', 'executionMode', 'execute',
+  ]) {
+    assert.equal(quietTool[key], base[key], `${key} should be retained by the renderer wrapper`);
+  }
+
+  const signal = new AbortController().signal;
+  const onUpdate = (partial) => updates.push(partial);
+  const ctx = { cwd: '/tmp/fixture', toolCallId: 'fixture-call' };
+  const result = await quietTool.execute('fixture-call', { command: 'printf safe' }, signal, onUpdate, ctx);
+  assert.deepEqual(result, {
+    content: [{ type: 'text', text: 'failure details' }],
+    details: { phase: 'final' },
+    structuredContent: { output: 'structured' },
+    isError: true,
+    usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 10, cost: { total: 0 } },
+  });
+  assert.deepEqual(executeCalls, [{ toolCallId: 'fixture-call', args: { command: 'printf safe' }, signal, onUpdate, ctx }]);
+  assert.deepEqual(updates, [{ content: [{ type: 'text', text: 'partial' }], details: { phase: 'partial' } }]);
+
+  const state = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
+  const errorResult = {
+    content: [{ type: 'text', text: 'line 1\nline 2' }],
+    details: { phase: 'streaming' },
+    structuredContent: { output: 'not rendered while collapsed' },
+    isError: true,
+  };
+  const partialCollapsed = quietTool.renderResult(
+    { ...errorResult, isError: false },
+    { expanded: false, isPartial: true },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.deepEqual(partialCollapsed.render(200), []);
+  assert.ok(state.interval, 'partial rendering must keep the timing update alive');
+
+  const finalCollapsed = quietTool.renderResult(
+    errorResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: true, lastComponent: partialCollapsed, state },
+  );
+  assert.deepEqual(finalCollapsed.render(200), []);
+  assert.equal(state.interval, undefined);
+  assert.ok(state.endedAt);
+
+  const emptyState = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
+  const emptyResult = { content: [], details: {}, isError: false };
+  const partialEmptyCollapsed = quietTool.renderResult(
+    emptyResult,
+    { expanded: false, isPartial: true },
+    theme,
+    { isError: false, lastComponent: undefined, state: emptyState },
+  );
+  assert.deepEqual(partialEmptyCollapsed.render(200), []);
+  assert.ok(emptyState.interval, 'partial empty rendering must keep the timing update alive');
+
+  const finalEmptyCollapsed = quietTool.renderResult(
+    emptyResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: false, lastComponent: partialEmptyCollapsed, state: emptyState },
+  );
+  assert.deepEqual(finalEmptyCollapsed.render(200), []);
+  assert.equal(emptyState.interval, undefined);
+  assert.ok(emptyState.endedAt);
+
+  assert.equal(
+    quietTool.renderResult(
+      errorResult,
+      { expanded: true, isPartial: false },
+      theme,
+      { isError: true, lastComponent: undefined, state: {} },
+    ),
+    baseResultComponent,
+  );
+  assert.deepEqual(renderCalls.at(-1), {
+    result: errorResult,
+    options: { expanded: true, isPartial: false },
+    context: { isError: true, lastComponent: undefined, state: {} },
+  });
+});
+
 test('quiet-tools collapsed render keeps summaries visible while hiding results until expanded', () => {
   const baseCall = { type: 'base-call' };
   const baseResult = { type: 'base-result' };

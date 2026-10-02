@@ -8,7 +8,7 @@ import { streamSimple as streamAnthropicSimple } from '@earendil-works/pi-ai/api
 import { createExtensionHarness, loadExtension } from './extension-test-helpers.mjs';
 
 const OPENAI_CODEX_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
-const OPENAI_API_MODELS = ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'];
+const OPENAI_API_MODELS = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'];
 const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5'];
 const ANTHROPIC_FAST_BETA = 'fast-mode-2026-02-01';
 
@@ -40,6 +40,7 @@ function writeConfig(filePath, config) {
 function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false, authToken }) {
   const statuses = [];
   const notifications = [];
+  const oauthCalls = [];
   const sessionManager = {};
   const ctx = {
     cwd,
@@ -58,7 +59,8 @@ function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false
       },
     },
     modelRegistry: {
-      isUsingOAuth() {
+      isUsingOAuth(currentModel) {
+        oauthCalls.push(currentModel);
         return oauth;
       },
       async getProviderAuth() {
@@ -67,7 +69,7 @@ function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false
       },
     },
   };
-  return { ctx, statuses, notifications };
+  return { ctx, statuses, notifications, oauthCalls };
 }
 
 function getHandler(harness, name) {
@@ -200,7 +202,7 @@ test('fast supports every legacy allowlisted model and preserves provider-specif
   assert.deepEqual(apiKeyOpenAI.statuses.at(-1), { key: 'fast', value: undefined });
 });
 
-test('fast supports only the confirmed direct OpenAI API models with the fast service tier', async (t) => {
+test('fast preserves direct OpenAI API-key and OAuth payload behavior without live certification', async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDir(t, agentDir);
   writeConfig(path.join(agentDir, 'extensions', 'fast.json'), { enabled: true });
@@ -213,24 +215,28 @@ test('fast supports only the confirmed direct OpenAI API models with the fast se
 
   for (const api of ['openai-responses', 'openai-completions']) {
     for (const id of OPENAI_API_MODELS) {
-      const context = createContext({
-        cwd: projectDir,
-        model: { provider: 'openai', api, id },
-        oauth: false,
-      });
-      await sessionStart({}, context.ctx);
-      assert.deepEqual(await beforeRequest({ payload: { model: id, input: 'hello' } }, context.ctx), {
-        model: id,
-        input: 'hello',
-        service_tier: 'fast',
-      });
-      assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'fast' });
+      for (const oauth of [false, true]) {
+        const context = createContext({
+          cwd: projectDir,
+          model: { provider: 'openai', api, id },
+          oauth,
+        });
+        await sessionStart({}, context.ctx);
+        assert.deepEqual(await beforeRequest({ payload: { model: id, input: 'hello' } }, context.ctx), {
+          model: id,
+          input: 'hello',
+          service_tier: 'fast',
+        });
+        assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'fast' });
+        assert.deepEqual(context.oauthCalls, [], 'direct OpenAI auth must not be routed through Codex auth checks');
+      }
     }
   }
 
   const directApiContext = createContext({
     cwd: projectDir,
     model: { provider: 'openai', api: 'openai-responses', id: 'gpt-6-astra' },
+    oauth: true,
   });
   await sessionStart({}, directApiContext.ctx);
   const existingTierPayload = { model: 'gpt-6-astra', input: 'hello', service_tier: 'default' };
@@ -243,6 +249,8 @@ test('fast supports only the confirmed direct OpenAI API models with the fast se
 
   for (const model of [
     { provider: 'openai', api: 'openai-responses', id: 'gpt-5.6-sol' },
+    { provider: 'openai', api: 'openai-responses', id: 'gpt-6.1-sol-fast' },
+    { provider: 'openai', api: 'openai-responses', id: 'gpt-6.1-sol-pro' },
     { provider: 'openai', api: 'openai-codex-responses', id: 'gpt-6-astra' },
     { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-6-astra' },
   ]) {
@@ -255,6 +263,57 @@ test('fast supports only the confirmed direct OpenAI API models with the fast se
     );
     assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: undefined });
   }
+});
+
+test('fast enables direct GPT-6.1 Sol only and keeps legacy Codex fail-closed', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const command = getCommand(harness);
+
+  const direct = createContext({
+    cwd: projectDir,
+    model: { provider: 'openai', api: 'openai-responses', id: 'gpt-6.1-sol' },
+    oauth: false,
+  });
+  await sessionStart({}, direct.ctx);
+  const disabledPayload = { model: 'gpt-6.1-sol', input: 'disabled' };
+  assert.equal(await beforeRequest({ payload: disabledPayload }, direct.ctx), undefined);
+  assert.deepEqual(disabledPayload, { model: 'gpt-6.1-sol', input: 'disabled' });
+  assert.deepEqual(direct.statuses.at(-1), { key: 'fast', value: undefined });
+  assert.deepEqual(direct.oauthCalls, [], 'API-key direct OpenAI auth must not use Codex OAuth checks');
+
+  await command.handler('', direct.ctx);
+  assert.match(
+    direct.notifications.at(-1).message,
+    /active for openai\/gpt-6\.1-sol; requests will use service_tier=fast\./,
+  );
+  assert.deepEqual(
+    await beforeRequest({ payload: { model: 'gpt-6.1-sol', input: 'enabled' } }, direct.ctx),
+    { model: 'gpt-6.1-sol', input: 'enabled', service_tier: 'fast' },
+  );
+
+  const codex = createContext({
+    cwd: projectDir,
+    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-6.1-sol' },
+    oauth: true,
+  });
+  await sessionStart({}, codex.ctx);
+  await command.handler('', codex.ctx);
+  assert.match(
+    codex.notifications.at(-1).message,
+    /inactive for openai-codex\/gpt-6\.1-sol: Fast mode is not enabled for this OpenAI Codex model/,
+  );
+  const codexPayload = { model: 'gpt-6.1-sol', input: 'deferred' };
+  assert.equal(await beforeRequest({ payload: codexPayload }, codex.ctx), undefined);
+  assert.deepEqual(codexPayload, { model: 'gpt-6.1-sol', input: 'deferred' });
+  assert.deepEqual(codex.statuses.at(-1), { key: 'fast', value: undefined });
+  assert.deepEqual(codex.oauthCalls, [], 'deferred Codex models must fail closed before auth inspection');
 });
 
 test('fast never overwrites provider fields or mutates malformed and mismatched payloads', async (t) => {

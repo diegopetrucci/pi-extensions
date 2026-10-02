@@ -14,6 +14,7 @@ for (const [role, method] of [['contrarian', 'selectContrarianModel'], ['code-re
       model: { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
       available: [
         { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true },
+        { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true },
         { provider: 'openai-codex', id: 'gpt-6-astra', reasoning: true },
       ],
     }));
@@ -74,6 +75,29 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.scopedModelSelectionCases) {
       : result.ordered.map((candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`);
 
     assert.deepEqual(actualModelRefs, fixture.expectedModelRefs);
+  });
+}
+
+for (const role of ['oracle', 'contrarian', 'code-reviewer']) {
+  test(`${role} honors session scope while keeping a GPT-6.1 Sol override explicit where supported`, async () => {
+    const utils = await loadRoleTestUtils(role);
+    const newer = { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true };
+    const scoped = { provider: 'openai', id: 'gpt-6-sol', reasoning: true };
+    const ctx = createModelSelectionContext({
+      model: scoped,
+      available: [newer, scoped],
+      scopedModels: [{ model: scoped }],
+    });
+    const method = role === 'oracle' ? 'selectOracleModel' : role === 'contrarian' ? 'selectContrarianModel' : 'selectCodeReviewerModel';
+    const automatic = await utils[method](ctx);
+    assert.equal(automatic.ok, true);
+    if (!automatic.ok) return;
+    assert.equal(automatic.selection.modelRef ?? `${automatic.selection.provider}/${automatic.selection.id}`, 'openai/gpt-6-sol');
+
+    if (role !== 'code-reviewer') {
+      const explicit = await utils.findAvailableModel(ctx, 'openai/gpt-6.1-sol');
+      assert.equal(`${explicit.provider}/${explicit.id}`, 'openai/gpt-6.1-sol');
+    }
   });
 }
 

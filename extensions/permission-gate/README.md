@@ -25,6 +25,12 @@ Non-Windows and custom/remote `powershell` tools receive the conservative lexica
 
 This is a targeted confirmation guard for the command classes listed above, not a shell sandbox or a proof that every unlisted executable/API is harmless.
 
+## Pi 0.99 dispatch boundary
+
+The policy is deliberately named-tool-only: it checks `bash`, `powershell`, `write`, and `edit` `tool_call` events. Pi 0.99 routes `ctx.executeTool()` calls (including calls made by `codemode`) through the same preflight tool-call pipeline and supplies `parentToolCallId`; the named checks therefore apply to nested calls too. Executed calls (including execution errors and `isError` results) reach the tool-result hook. Preflight-blocked, invalid, and unknown-tool calls instead produce Pi's host error result and, for nested calls, a bounded nested-call record without an after-execution `tool_result` event. Confirmation cancellation, UI failure, and missing UI fail closed.
+
+MCP calls also pass through Pi's host pipeline, but arbitrary `mcp__<server>__<tool>` names are outside this extension's existing guarantee. This extension does not authorize arbitrary MCP tools, infer policy from `readOnlyHint`/`destructiveHint` annotations, or provide a universal MCP security sandbox. Any annotation-based or broader MCP policy requires separate human approval. Custom tools, remote/overridden implementations, and later handlers must enforce their own final-input policy.
+
 ## Install
 
 ### Standalone npm package

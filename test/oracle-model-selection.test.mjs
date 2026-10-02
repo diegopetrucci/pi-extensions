@@ -121,6 +121,32 @@ test('Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 re
   assert.equal(resolveThinkingLevel(opus, undefined).effective, 'xhigh');
 });
 
+test('Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupported off reasoning', async () => {
+  const { resolveThinkingLevel } = await loadOracleTestUtils();
+  for (const provider of ['openai', 'azure-openai-responses', 'openai-codex']) {
+    const sol = getBuiltinModels(provider).find((model) => model.id === 'gpt-6.1-sol');
+    assert.ok(sol, `expected Pi 1.0 GPT-6.1 Sol in the pinned ${provider} catalog`);
+    assert.equal(sol.thinkingLevelMap?.off, null);
+    if (provider === 'openai-codex') assert.equal(sol.thinkingLevelMap?.minimal, 'low');
+
+    const automatic = resolveThinkingLevel(sol, undefined);
+    assert.deepEqual(automatic, { requested: 'high', effective: 'high', clamped: false });
+    assert.notEqual(automatic.effective, 'off');
+    assert.equal(resolveThinkingLevel(sol, 'high').effective, 'high', 'explicit high must remain authoritative');
+    assert.equal(resolveThinkingLevel(sol, 'off').effective, provider === 'openai-codex' ? 'minimal' : 'low');
+  }
+});
+
+test('Oracle does not apply the GPT-6.1 Sol high-thinking exception to Pro/Fast variants', async () => {
+  const { resolveThinkingLevel } = await loadOracleTestUtils();
+  const pro = getBuiltinModels('openrouter').find((model) => model.id === 'openai/gpt-6.1-sol-pro');
+  const fast = getBuiltinModels('vercel-ai-gateway').find((model) => model.id === 'openai/gpt-6.1-sol-fast');
+  assert.ok(pro && fast, 'expected Pi 1.0 GPT-6.1 Sol Pro/Fast variants in the pinned catalog');
+
+  assert.equal(resolveThinkingLevel(pro, undefined).requested, 'xhigh');
+  assert.equal(resolveThinkingLevel(fast, undefined).requested, 'xhigh');
+});
+
 test('oracle thinking-level resolution clamps unsupported levels for matched models', async () => {
   const { findAvailableModel, resolveThinkingLevel } = await loadOracleTestUtils();
   const matchedModel = {

@@ -10,6 +10,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import {
 	DefaultResourceLoader,
 	SessionManager,
+	SettingsManager,
 	createAgentSession,
 	getAgentDir,
 	getMarkdownTheme,
@@ -1434,9 +1435,14 @@ export default function librarianExtension(pi: ExtensionAPI) {
 					cacheRoot,
 				});
 
+				// Keep the research session from inheriting user/project tool, shell,
+				// retry, or provider-request settings. The host model runtime is still
+				// passed explicitly below so the selected provider/auth policy is kept.
+				const isolatedSettingsManager = SettingsManager.inMemory({});
 				const resourceLoader = new DefaultResourceLoader({
 					cwd: workspace,
 					agentDir: getAgentDir(),
+					settingsManager: isolatedSettingsManager,
 					noExtensions: true,
 					noSkills: true,
 					noPromptTemplates: true,
@@ -1469,6 +1475,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
 						cwd: workspace,
 						...getModelRuntimeOption(ctx),
 						resourceLoader,
+						settingsManager: isolatedSettingsManager,
 						sessionManager: SessionManager.inMemory(workspace),
 						model: candidate.model,
 						thinkingLevel: candidate.details.thinkingLevel,

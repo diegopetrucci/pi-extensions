@@ -40,4 +40,5 @@ Then reload pi:
 - Does not replace pi's built-in footer.
 - Uses `ctx.ui.setStatus()`, so pi renders the git summary with other extension statuses.
 - The current pi extension API does not support literally appending text inside the built-in footer's first `cwd (branch)` line without replacing the footer.
+- Status text is passed through Pi's active `dim` theme color; the extension does not embed terminal escape sequences, so theme changes remain host-controlled.
 - Git and GitHub CLI lookups run on a short background interval with timeouts.

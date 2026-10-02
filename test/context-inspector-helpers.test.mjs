@@ -31,6 +31,7 @@ function createContext({
   systemPrompt = '',
   cwd = '/repo',
   redactSessionGetters = false,
+  model,
 } = {}) {
   const sessionManager = {
     getBranch() {
@@ -58,7 +59,7 @@ function createContext({
 
   return {
     cwd,
-    model: {
+    model: model ?? {
       provider: 'anthropic',
       id: 'claude-opus-4-8',
       contextWindow: 100,
@@ -198,6 +199,39 @@ test('context-inspector classifies context segments and preserves useful metadat
 
   const compactionSegment = segments.find((segment) => segment.label === 'Compaction summary');
   assert.match(compactionSegment.note, /4\.3k earlier tokens/);
+});
+
+test('context-inspector excludes bounded nested-call metadata from attribution', () => {
+  const entries = [
+    {
+      type: 'message',
+      id: 'assistant-parent',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', name: 'codemode', id: 'parent-call', arguments: {} }],
+      },
+    },
+    {
+      type: 'message',
+      id: 'parent-result',
+      message: {
+        role: 'toolResult',
+        toolName: 'codemode',
+        toolCallId: 'parent-call',
+        content: [{ type: 'text', text: 'parent result only' }],
+        nestedCalls: {
+          complete: false,
+          calls: [{ id: 'parent-call/1', name: 'read', arguments: { path: '/secret' }, status: 'ok' }],
+        },
+      },
+    },
+  ];
+  const result = analyzeEntries(entries, false);
+  const toolResults = result.segments.filter((segment) => segment.category === 'toolResults');
+  assert.equal(toolResults.length, 1);
+  assert.match(toolResults[0].detail, /parent result only/);
+  assert.doesNotMatch(toolResults[0].detail, /\/secret/);
+  assert.match(toolResults[0].note, /bounded nested tool call.*incompletely/);
 });
 
 test('context-inspector redacts segment text and metadata consistently', () => {
@@ -545,6 +579,110 @@ test('context-inspector report data uses buildContextEntries for compacted curre
   assert.ok(report.datasets.current.stats.topSegments.every((segment) => !segment.preview.includes('early user message')));
   assert.ok(report.datasets.full.stats.topSegments.some((segment) => segment.preview.includes('early user message')));
   assert.ok(report.datasets.full.stats.topSegments.some((segment) => segment.preview.includes('early assistant response')));
+});
+
+test('context-inspector reports virtual selection and latest routed physical identity without inferring its limit', () => {
+  const routedAssistant = {
+    role: 'assistant',
+    provider: 'anthropic',
+    model: 'claude-routed',
+    content: [{ type: 'text', text: 'routed response' }],
+  };
+  const branchEntries = [{
+    type: 'message',
+    id: 'routed-assistant',
+    message: routedAssistant,
+  }];
+  const report = buildReportData(
+    createPi(),
+    createContext({
+      branchEntries,
+      model: { provider: 'router', api: 'pi-virtual', id: 'virtual-selection', contextWindow: 1_000_000 },
+      usage: { tokens: 40, contextWindow: 128_000, percent: 0.03125 },
+    }),
+    { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+  );
+
+  assert.equal(report.model.virtual, true);
+  assert.deepEqual(report.model.routed, { provider: 'anthropic', id: 'claude-routed' });
+  assert.equal(report.model.contextWindow, 1_000_000);
+  assert.equal(report.contextUsage.contextWindow, 128_000);
+  assert.ok(report.notes.some((note) => note.includes('Latest routed physical response: anthropic/claude-routed')));
+});
+
+test('context-inspector ignores failed or virtual responses and only labels routed identity for virtual selections', () => {
+  const failedVirtualResponse = {
+    role: 'assistant',
+    provider: 'router',
+    model: 'virtual-selection',
+    api: 'pi-virtual',
+    stopReason: 'error',
+    content: [{ type: 'text', text: 'routing failed' }],
+  };
+  const failedReport = buildReportData(
+    createPi(),
+    createContext({
+      branchEntries: [{ type: 'message', id: 'failed-route', message: failedVirtualResponse }],
+      model: { provider: 'router', api: 'pi-virtual', id: 'virtual-selection', contextWindow: 1_000_000 },
+      usage: { tokens: 40, contextWindow: 128_000, percent: 0.03125 },
+    }),
+    { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+  );
+  assert.equal(failedReport.model.routed, undefined);
+  assert.ok(failedReport.notes.some((note) => note.includes('no provider context window is inferred')));
+
+  const physicalReport = buildReportData(
+    createPi(),
+    createContext({
+      branchEntries: [{
+        type: 'message',
+        id: 'physical-response',
+        message: { role: 'assistant', provider: 'anthropic', model: 'previous-physical', content: [{ type: 'text', text: 'normal switch' }] },
+      }],
+      model: { provider: 'openai', api: 'openai-responses', id: 'new-physical', contextWindow: 200_000 },
+      usage: { tokens: 40, contextWindow: 200_000, percent: 0.02 },
+    }),
+    { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+  );
+  assert.equal(physicalReport.model.virtual, false);
+  assert.equal(physicalReport.model.routed, undefined);
+  assert.ok(physicalReport.notes.every((note) => !note.includes('Latest routed physical response')));
+});
+
+test('context-inspector skips physical error and aborted responses after an earlier routed response', () => {
+  const successfulRoutedResponse = {
+    role: 'assistant',
+    provider: 'anthropic',
+    model: 'successful-physical',
+    api: 'anthropic-messages',
+    content: [{ type: 'text', text: 'successful response' }],
+  };
+
+  for (const stopReason of ['error', 'aborted']) {
+    const failedPhysicalResponse = {
+      role: 'assistant',
+      provider: 'openai',
+      model: 'failed-physical',
+      api: 'openai-responses',
+      stopReason,
+      content: [{ type: 'text', text: `${stopReason} response` }],
+    };
+    const report = buildReportData(
+      createPi(),
+      createContext({
+        branchEntries: [
+          { type: 'message', id: 'successful-route', message: successfulRoutedResponse },
+          { type: 'message', id: `${stopReason}-physical-route`, message: failedPhysicalResponse },
+        ],
+        model: { provider: 'router', api: 'pi-virtual', id: 'virtual-selection', contextWindow: 1_000_000 },
+        usage: { tokens: 40, contextWindow: 128_000, percent: 0.03125 },
+      }),
+      { open: false, keep: false, redact: false, defaultDataset: 'current', help: false },
+    );
+
+    assert.deepEqual(report.model.routed, { provider: 'anthropic', id: 'successful-physical' });
+    assert.ok(report.notes.some((note) => note.includes('Latest routed physical response: anthropic/successful-physical')));
+  }
 });
 
 test('context-inspector report data handles unknown usage, estimator overage, provider delta, and redacted session info', () => {

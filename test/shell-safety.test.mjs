@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import {
+  createAgentSession,
+  createCodemodeExtension,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} from '@earendil-works/pi-coding-agent';
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai/providers/faux';
 
 import {
   analyzePowerShellAstPayload,
@@ -69,6 +80,114 @@ function createPowerShellPi() {
   return process.platform === 'win32'
     ? createPi({ execImpl: executePowerShellAnalyzer })
     : createPi();
+}
+
+function createToolEventRecorder(events) {
+  return (pi) => {
+    for (const eventName of ['tool_call', 'tool_result', 'tool_execution_start', 'tool_execution_update', 'tool_execution_end']) {
+      pi.on(eventName, async (event) => {
+        events.push({
+          type: event.type,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          parentToolCallId: event.parentToolCallId,
+          input: event.input,
+          args: event.args,
+          isError: event.isError,
+          content: event.content?.map((block) => block.type === 'text' ? block.text : `[${block.type}]`),
+          structuredContent: event.structuredContent,
+          resultStructuredContent: event.result?.structuredContent,
+        });
+      });
+    }
+  };
+}
+
+function createNestedChainTool() {
+  return {
+    name: 'chain_fixture',
+    label: 'chain_fixture',
+    description: 'Test-only nested tool chain',
+    parameters: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, { command }, _signal, _onUpdate, ctx) {
+      const outcome = await ctx.executeTool('bash', { command });
+      const text = outcome.result.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\\n');
+      return {
+        content: [{ type: 'text', text }],
+        details: { childIsError: outcome.isError },
+      };
+    },
+  };
+}
+
+async function createPi99HostFixture({ responses, tools, customTools = [] }) {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), 'pi-0-99-permission-fixture-'));
+  writeFileSync(path.join(cwd, 'fixture.txt'), 'nested-safe\\n');
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const settingsManager = SettingsManager.create(cwd, cwd);
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(cwd, 'auth.json'),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  const faux = fauxProvider({
+    provider: 'pi-0-99-fixture',
+    api: 'faux',
+    models: [{ id: 'fixture', name: 'fixture' }],
+  });
+  modelRuntime.registerNativeProvider(faux.provider);
+  faux.setResponses(responses);
+  const events = [];
+  const resourceLoader = new DefaultResourceLoader({
+    cwd,
+    agentDir: cwd,
+    settingsManager,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    extensionFactories: [
+      createToolEventRecorder(events),
+      permissionGate,
+      createCodemodeExtension(),
+    ],
+  });
+  await resourceLoader.reload();
+
+  try {
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir: cwd,
+      modelRuntime,
+      model: faux.getModel(),
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(),
+      settingsManager,
+      tools,
+      customTools,
+    });
+    return {
+      cwd,
+      events,
+      session,
+      dispose() {
+        session.dispose();
+        rmSync(cwd, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    rmSync(cwd, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 test('inline-bash skips extension-origin input before any shell expansion', async () => {
@@ -345,6 +464,97 @@ test('permission-gate ignores non-shell tool events', async () => {
 
   assert.equal(result, undefined);
   assert.equal(prompted, false);
+});
+
+test('permission-gate keeps arbitrary MCP names outside the named-tool policy boundary', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+
+  const toolCallHandler = handlers.get('tool_call');
+  const result = await toolCallHandler(
+    {
+      toolName: 'mcp__fixture__delete_everything',
+      input: { command: 'rm -rf /tmp/example' },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    { hasUI: false },
+  );
+
+  assert.equal(result, undefined);
+});
+
+test('permission-gate passes Pi dialog cancellation through and fails closed on UI failure', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+  const toolCallHandler = handlers.get('tool_call');
+  const controller = new AbortController();
+  let dialogOptions;
+
+  const cancelled = await toolCallHandler(
+    { toolName: 'bash', input: { command: 'sudo rm -rf /tmp/example' } },
+    {
+      hasUI: true,
+      signal: controller.signal,
+      ui: {
+        async select(_prompt, _choices, options) {
+          dialogOptions = options;
+          controller.abort();
+          return 'Yes';
+        },
+      },
+    },
+  );
+
+  assert.equal(dialogOptions.signal, controller.signal);
+  assert.deepEqual(cancelled, { block: true, reason: 'Confirmation cancelled' });
+
+  const rejected = await toolCallHandler(
+    { toolName: 'write', input: { path: '.env', content: 'SECRET=1' } },
+    {
+      hasUI: true,
+      ui: {
+        async select() {
+          throw new Error('fixture dialog closed');
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(rejected, { block: true, reason: 'Confirmation unavailable' });
+});
+
+test('permission-gate keeps concurrent confirmation decisions correlated to their own calls', async () => {
+  const permissionGate = await loadExtension('extensions/permission-gate/index.ts');
+  const { pi, handlers } = createPi();
+  permissionGate(pi);
+  const toolCallHandler = handlers.get('tool_call');
+  const prompts = [];
+  const ui = {
+    async select(prompt) {
+      prompts.push(prompt);
+      await Promise.resolve();
+      return prompt.includes('alpha') ? 'No' : 'Yes';
+    },
+  };
+
+  const [alpha, beta] = await Promise.all([
+    toolCallHandler(
+      { toolCallId: 'parallel-alpha', toolName: 'bash', input: { command: 'sudo rm -rf alpha' } },
+      { hasUI: true, ui },
+    ),
+    toolCallHandler(
+      { toolCallId: 'parallel-beta', toolName: 'bash', input: { command: 'sudo rm -rf beta' } },
+      { hasUI: true, ui },
+    ),
+  ]);
+
+  assert.deepEqual(alpha, { block: true, reason: 'Blocked by user' });
+  assert.equal(beta, undefined);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.some((prompt) => prompt.includes('alpha')));
+  assert.ok(prompts.some((prompt) => prompt.includes('beta')));
 });
 
 test('PowerShell fallback analysis covers native syntax and keeps quoted/commented text benign', () => {
@@ -1482,4 +1692,118 @@ test('permission-gate distinguishes safe and dangerous command boundaries', asyn
     block: true,
     reason: 'Dangerous command blocked (no UI for confirmation)',
   });
+});
+
+test('Pi 0.99 host dispatch guards direct dangerous calls and preserves benign structured results', async () => {
+  const fixture = await createPi99HostFixture({
+    tools: ['bash'],
+    responses: [
+      fauxAssistantMessage([
+        fauxToolCall('bash', { command: 'printf direct-safe' }, { id: 'direct-safe' }),
+        fauxToolCall('bash', { command: 'rm -rf ./pi-dzb7-direct-no-exec' }, { id: 'direct-danger' }),
+      ]),
+    ],
+  });
+
+  try {
+    await fixture.session.agent.prompt('run direct fixture');
+
+    const toolResults = fixture.session.agent.state.messages.filter((message) => message.role === 'toolResult');
+    assert.equal(toolResults.length, 2);
+    const safeResult = toolResults.find((result) => result.toolCallId === 'direct-safe');
+    const blockedResult = toolResults.find((result) => result.toolCallId === 'direct-danger');
+    assert.equal(safeResult.isError, false);
+    const safeEvent = fixture.events.find(
+      (event) => event.type === 'tool_result' && event.toolCallId === 'direct-safe',
+    );
+    assert.equal(safeEvent.structuredContent.output, 'direct-safe');
+    assert.equal(blockedResult.isError, true);
+    assert.match(blockedResult.content[0].text, /Dangerous command blocked/);
+
+    const directCalls = fixture.events.filter((event) => event.type === 'tool_call');
+    assert.deepEqual(directCalls.map((event) => event.toolCallId).sort(), ['direct-danger', 'direct-safe']);
+    assert.ok(directCalls.every((event) => event.parentToolCallId === undefined));
+    const directResults = fixture.events.filter((event) => event.type === 'tool_result');
+    // Blocked calls have no post-execution tool_result hook; the host still emits
+    // their error tool result and tool_execution_end event.
+    assert.deepEqual(directResults.map((event) => event.toolCallId), ['direct-safe']);
+    const directEnds = fixture.events.filter((event) => event.type === 'tool_execution_end');
+    assert.equal(directEnds.length, 2);
+    assert.ok(directEnds.some((event) => event.toolCallId === 'direct-danger' && event.isError === true));
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('Pi 0.99 codemode host dispatch guards nested shell/file calls, correlates parallel results, and preserves reentrant output', async () => {
+  const nestedCode = `
+const results = await Promise.allSettled([
+  tools.bash({ command: "rm -rf ./pi-dzb7-nested-no-exec" }),
+  tools.write({ path: ".git/pi-dzb7-no-write", content: "no" }),
+  tools.edit({ path: ".git/pi-dzb7-no-edit", edits: [{ oldText: "x", newText: "y" }] }),
+  tools.bash({ command: "printf nested-safe" }),
+  tools.read({ path: "fixture.txt" }),
+  tools.chain_fixture({ command: "printf chain-safe" })
+]);
+return results.map((entry) => entry.status === "fulfilled" ? entry.value : String(entry.reason));
+`;
+  const fixture = await createPi99HostFixture({
+    tools: ['bash', 'read', 'write', 'edit', 'codemode', 'chain_fixture'],
+    customTools: [createNestedChainTool()],
+    responses: [
+      fauxAssistantMessage(
+        fauxToolCall('codemode', { code: nestedCode }, { id: 'codemode-root' }),
+      ),
+    ],
+  });
+
+  try {
+    mkdirSync(path.join(fixture.cwd, '.git'));
+    await fixture.session.agent.prompt('run nested fixture');
+
+    const parentResult = fixture.session.agent.state.messages.find(
+      (message) => message.role === 'toolResult' && message.toolCallId === 'codemode-root',
+    );
+    assert.equal(parentResult.isError, false);
+    assert.ok(parentResult.nestedCalls);
+    assert.equal(parentResult.nestedCalls.complete, true);
+    assert.equal(parentResult.nestedCalls.calls.length, 7);
+
+    const nestedCalls = new Map(parentResult.nestedCalls.calls.map((call) => [call.id, call]));
+    assert.equal(nestedCalls.get('codemode-root/1').status, 'error');
+    assert.equal(nestedCalls.get('codemode-root/2').status, 'error');
+    assert.equal(nestedCalls.get('codemode-root/3').status, 'error');
+    assert.equal(nestedCalls.get('codemode-root/4').status, 'ok');
+    assert.equal(nestedCalls.get('codemode-root/5').status, 'ok');
+    assert.equal(nestedCalls.get('codemode-root/6').status, 'ok');
+    assert.equal(nestedCalls.get('codemode-root/6/1').status, 'ok');
+    assert.match(nestedCalls.get('codemode-root/1').error, /Dangerous command blocked/);
+    assert.match(nestedCalls.get('codemode-root/2').error, /Protected path blocked/);
+    assert.match(nestedCalls.get('codemode-root/3').error, /Protected path blocked/);
+    assert.equal(existsSync(path.join(fixture.cwd, '.git', 'pi-dzb7-no-write')), false);
+    assert.equal(existsSync(path.join(fixture.cwd, '.git', 'pi-dzb7-no-edit')), false);
+
+    const nestedToolCalls = fixture.events.filter(
+      (event) => event.type === 'tool_call' && event.parentToolCallId,
+    );
+    assert.equal(nestedToolCalls.length, 7);
+    assert.ok(nestedToolCalls.every((event) => event.toolCallId.startsWith(`${event.parentToolCallId}/`)));
+    assert.ok(nestedToolCalls.some((event) => event.toolCallId === 'codemode-root/6/1' && event.parentToolCallId === 'codemode-root/6'));
+
+    const nestedToolResults = fixture.events.filter(
+      (event) => event.type === 'tool_result' && event.parentToolCallId,
+    );
+    // Pi emits tool_result after successful execution; blocked calls still emit
+    // tool_execution_end and remain represented in the bounded nestedCalls record.
+    assert.equal(nestedToolResults.length, 4);
+    const safeBashResult = nestedToolResults.find((event) => event.toolCallId === 'codemode-root/4');
+    assert.equal(safeBashResult.structuredContent.output, 'nested-safe');
+    const executionEnds = fixture.events.filter(
+      (event) => event.type === 'tool_execution_end' && event.parentToolCallId,
+    );
+    assert.equal(executionEnds.length, 7);
+    assert.ok(executionEnds.some((event) => event.toolCallId === 'codemode-root/1' && event.isError === true));
+  } finally {
+    fixture.dispose();
+  }
 });

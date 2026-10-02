@@ -135,8 +135,96 @@ test('oracle provider matrix top picks stay aligned with the implementation', ()
 
   assert.equal(matrixRows.length, Object.keys(preferences).length);
   for (const { provider, topPick } of matrixRows) {
-    const firstMatch = firstCatalogMatchId(provider, preferences[provider]);
+    const patterns = preferences[provider];
+    assert.ok(patterns, `extensions/oracle/index.ts is missing ${provider}`);
+    if (patterns.length === 0) {
+      assert.equal(getBuiltinModels(provider).length, 0, `${provider} unexpectedly exposes chat models`);
+      assert.equal(topPick, '—', `docs/oracle-provider-matrix.md needs a no-chat-model marker for ${provider}`);
+      continue;
+    }
+    const firstMatch = firstCatalogMatchId(provider, patterns);
     assert.equal(firstMatch, topPick, `docs/oracle-provider-matrix.md drifted for ${provider}`);
+  }
+});
+
+test('Pi 0.99 TypeSafe classifier provider has no chat preference or selectable model', () => {
+  for (const role of ['oracle', 'contrarian']) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+    assert.deepEqual(preferences.typesafe, [], `${role} must not select a classifier as a chat model`);
+  }
+  assert.deepEqual(getBuiltinModels('typesafe'), [], 'TypeSafe exposes classifier models only, not chat models');
+  assert.equal(firstCatalogMatchId('typesafe', []), undefined);
+});
+
+test('Pi 0.99 dead-entry cleanup preserves the approved survivor order', () => {
+  const expected = {
+    fireworks: [
+      'accounts/fireworks/models/kimi-k3',
+      'accounts/fireworks/routers/kimi-k3-fast',
+      'accounts/fireworks/models/minimax-m3',
+      'accounts/fireworks/models/gpt-oss-120b',
+    ],
+    'opencode-go': [
+      'deepseek-v4-pro',
+      'glm-5.3',
+      'glm-5.2',
+      'qwen3.7-plus',
+      'mimo-v2.5-pro',
+      'mimo-v2.5',
+      'minimax-m3',
+      'minimax-m2.7',
+      'kimi-k3',
+      'kimi-k2.7-code',
+      'grok-4.7 ',
+      'grok-4.7',
+      'grok-4.6',
+    ],
+    radius: [
+      'gpt-6-astra ',
+      'gpt-6-astra',
+      'claude-opus-5-5 ',
+      'claude-opus-5-5',
+      'claude-opus-5',
+      'gpt-6-sol ',
+      'gpt-6-sol',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-6-luna ',
+      'gpt-6-luna',
+      'gpt-5.6-luna',
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-4-8',
+      'claude-sonnet-5',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.3-codex',
+      'kimi-k3',
+      'glm-5.3',
+      'deepseek-v4.1-flash',
+      'gpt-5.4-mini',
+      'glm-5.3-flash',
+    ],
+    together: [
+      'deepseek-ai/DeepSeek-V4-Pro',
+      'moonshotai/Kimi-K3',
+      'zai-org/GLM-5.3-Flash',
+      'zai-org/GLM-5.2',
+      'Qwen/Qwen3.7-Max',
+      'Qwen/Qwen3.6-Plus',
+      'MiniMaxAI/MiniMax-M3',
+      'MiniMaxAI/MiniMax-M2.7',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'nvidia/nemotron-3-ultra-550b-a55b',
+      'google/gemma-4-31B-it',
+    ],
+  };
+  for (const role of ['oracle', 'contrarian']) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+    for (const [provider, survivors] of Object.entries(expected)) {
+      assert.deepEqual(preferences[provider], survivors, `${role} changed survivor order for ${provider}`);
+    }
   }
 });
 
@@ -295,6 +383,79 @@ for (const { provider, modelIds, expected } of CODE_REVIEWER_GPT6_CATALOG_CASES)
   });
 }
 
+const GPT61_SOL_CATALOG_CASES = [
+  {
+    provider: 'amazon-bedrock',
+    roles: ['oracle', 'contrarian'],
+    normalIds: ['global.openai.gpt-6.1-sol', 'openai.gpt-6.1-sol', 'us.openai.gpt-6.1-sol'],
+    olderId: 'global.openai.gpt-5.6-sol',
+    expected: 'global.openai.gpt-6.1-sol',
+  },
+  ...['azure-openai-responses', 'github-copilot', 'openai', 'openai-codex', 'opencode'].map((provider) => ({
+    provider,
+    normalIds: ['gpt-6.1-sol'],
+    olderId: 'gpt-6-sol',
+    expected: 'gpt-6.1-sol',
+  })),
+  {
+    provider: 'openrouter',
+    normalIds: ['openai/gpt-6.1-sol'],
+    olderId: 'openai/gpt-6-sol',
+    expected: 'openai/gpt-6.1-sol',
+  },
+  {
+    provider: 'vercel-ai-gateway',
+    normalIds: ['openai/gpt-6.1-sol'],
+    olderId: 'openai/gpt-6-sol',
+    expected: 'openai/gpt-6.1-sol',
+  },
+];
+
+for (const { provider, roles = ['oracle', 'contrarian', 'code-reviewer'], normalIds, olderId, expected } of GPT61_SOL_CATALOG_CASES) {
+  for (const role of roles) {
+    test(`${role} selects the published GPT-6.1 Sol slot on ${provider} before the older Sol and falls back without it`, async () => {
+      const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+      assert.ok(preferences[provider], `${role} is missing a provider preference ladder for ${provider}`);
+      for (const id of normalIds) {
+        assert.ok(preferences[provider].includes(`${id} `), `${role}/${provider} is missing the exact normal GPT-6.1 Sol pattern for ${id}`);
+        assert.equal(preferences[provider].includes(id), false, `${role}/${provider} must not use an unbounded GPT-6.1 Sol pattern for ${id}`);
+      }
+
+      const normalModels = normalIds.map((id) => {
+        const model = getBuiltinModels(provider).find((candidate) => candidate.id === id);
+        assert.ok(model, `missing pinned catalog model ${provider}/${id}`);
+        return model;
+      });
+      const older = getBuiltinModels(provider).find((model) => model.id === olderId);
+      assert.ok(older, `missing pinned catalog model ${provider}/${olderId}`);
+
+      const available = [...normalModels, older];
+      const selected = await selectRoleModel(role, provider, available);
+      const reversed = await selectRoleModel(role, provider, [...available].reverse());
+      assert.equal(selected.modelId, expected);
+      assert.equal(reversed.modelId, expected);
+
+      const fallback = await selectRoleModel(role, provider, [older]);
+      assert.equal(fallback.modelId, olderId);
+    });
+  }
+}
+
+for (const { provider, variantId, olderId } of [
+  { provider: 'openrouter', variantId: 'openai/gpt-6.1-sol-pro', olderId: 'openai/gpt-6-sol' },
+  { provider: 'vercel-ai-gateway', variantId: 'openai/gpt-6.1-sol-fast', olderId: 'openai/gpt-6-sol' },
+]) {
+  for (const role of ['oracle', 'contrarian', 'code-reviewer']) {
+    test(`${role} does not treat the GPT-6.1 Sol Pro/Fast variant as the normal Sol slot on ${provider}`, async () => {
+      const variant = getBuiltinModels(provider).find((model) => model.id === variantId);
+      const older = getBuiltinModels(provider).find((model) => model.id === olderId);
+      assert.ok(variant && older, `missing pinned catalog variant models for ${provider}`);
+      const result = await selectRoleModel(role, provider, [variant, older]);
+      assert.equal(result.modelId, olderId);
+    });
+  }
+}
+
 const CROSS_PROVIDER_CATALOG_CASES = [
   {
     kind: 'Opus 5.5',
@@ -312,6 +473,14 @@ const CROSS_PROVIDER_CATALOG_CASES = [
       ['openai', 'gpt-6-luna'],
     ],
     expected: 'gpt-6-astra',
+  },
+  {
+    kind: 'GPT-6.1 Sol',
+    models: [
+      ['openai', 'gpt-6-sol'],
+      ['openai', 'gpt-6.1-sol'],
+    ],
+    expected: 'gpt-6.1-sol',
   },
   {
     kind: 'Grok 4.7',
@@ -484,7 +653,7 @@ test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', ()
     ['extensions/claude-fast/index.ts', 'SUPPORTED_MODELS'],
     ['extensions/openai-fast/index.ts', 'SUPPORTED_MODELS'],
   ];
-  const confirmedDirectOpenAIModels = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol'];
+  const confirmedDirectOpenAIModels = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol'];
   const directOpenAIAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_API_SUPPORTED_MODELS');
 
   assert.deepEqual([...directOpenAIAllowlist].sort(), confirmedDirectOpenAIModels);

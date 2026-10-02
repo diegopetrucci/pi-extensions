@@ -45,13 +45,22 @@ When context usage is above 200k tokens, the bottom-left line includes a red war
 44.1% · DUMB ZONE
 ```
 
-When using `openai-codex`, the bottom-left line also includes subscription usage. A typical account with both windows looks like:
+When using legacy `openai-codex`, the bottom-left line also includes subscription usage. A typical account with both windows looks like:
 
 ```text
 44.1% · 5h 12% · 7d 38%
 ```
 
 Window labels come from OpenAI's reported durations, so an account that reports only a weekly primary window is shown correctly (for example, `7d 38%`) instead of being assumed to have a 5-hour window.
+
+Pi's `openai` ChatGPT OAuth uses the direct OpenAI API and has no documented
+account-usage endpoint compatible with this legacy WHAM reader. In that case,
+the footer shows `usage unsupported` and does not send the new token to
+`chatgpt.com/backend-api/wham/usage`. Direct OpenAI API-key users have no
+subscription-usage line. Legacy Codex fetch failures, missing OAuth, or a
+malformed/mismatched token account claim show `usage unavailable` rather than
+retaining an older account's snapshot; the request is not sent until the token
+claim and lifecycle identity agree.
 
 When `PI_EXPERIMENTAL=1`, the bottom-left line also includes an experimental marker:
 
@@ -203,8 +212,8 @@ Disable git dirty/ahead/PR status:
 - `context.dumbZone.thresholdTokens`: token threshold for `DUMB ZONE`
 - `context.dumbZone.label`: warning text
 - `context.dumbZone.color`: theme color for the warning (`error`, `warning`, `accent`, `text`, or `dim`)
-- `codexUsage.enabled`: show OpenAI Codex session-limit usage when using `openai-codex`
-- `codexUsage.cacheTtlMs`: in-memory usage cache duration
+- `codexUsage.enabled`: show OpenAI Codex session-limit usage when using `openai-codex`; also controls the explicit unsupported/unavailable status for account usage
+- `codexUsage.cacheTtlMs`: in-memory usage-result cache duration and account-only login detection interval; provider/model/account changes invalidate the cached snapshot. The timer only compares identity and does not fetch unchanged-account usage. The default is 5 minutes; `0` disables usage-result caching but keeps identity checks every 5 minutes. Positive values above Node's `2,147,483,647` ms timer limit use that maximum only for scheduling; the configured TTL still controls lifecycle cache semantics.
 - `codexUsage.requestTimeoutMs`: usage request timeout
 - `codexUsage.windows.primary.enabled`: show the primary usage window
 - `codexUsage.windows.primary.label`: `"auto"` derives the primary label from OpenAI's reported duration; any other value overrides it
@@ -224,6 +233,7 @@ Disable git dirty/ahead/PR status:
 - **Top right:** current repo directory name
 - **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 200k context tokens
 - **Bottom left on `openai-codex`:** current context usage percentage plus the Codex usage windows reported for the account
+- **Bottom left on `openai` ChatGPT OAuth:** current context usage percentage plus `usage unsupported`; no legacy WHAM request is attempted
 - **Bottom left with `PI_EXPERIMENTAL=1`:** current context usage percentage plus `xp`
 - **Bottom right:** model id and thinking level
 
@@ -240,4 +250,6 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 - Shows the model id rather than a provider-specific display label.
 - Shows `xp` when `PI_EXPERIMENTAL=1`.
 - For `openai-codex`, reads pi's stored OAuth login and fetches usage from ChatGPT's backend usage endpoint. Window labels are inferred from each window's reported duration; missing or unrecognized durations use neutral `usage` labels rather than guessing from window position.
-- Usage is cached briefly in memory and refreshed after turns.
+- For direct `openai` ChatGPT OAuth, no usage endpoint is assumed: the footer marks usage unsupported and never calls the legacy WHAM endpoint. API-key requests do not use subscription usage.
+- Usage is cached briefly in memory and refreshed after turns. A provider/model/account boundary clears the old snapshot, and late results from an earlier request are ignored. Because Pi 0.99 emits no auth-change event, account-only logins are detected by one per-session identity-only timer: it uses `cacheTtlMs` when positive, checks every five minutes when `cacheTtlMs: 0`, and clamps larger schedules to Node's `2,147,483,647` ms maximum. Unchanged-account ticks make no WHAM request; an account change uses the normal safe refresh. The timer is disposed on shutdown/restart, and no credential file is read during footer rendering.
+- Footer colors continue to come from Pi's active theme; the extension does not embed ANSI color codes.

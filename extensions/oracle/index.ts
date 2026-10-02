@@ -126,6 +126,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"us.openai.gpt-6-astra ",
 		"openai.gpt-6-astra ",
 		"gpt-6-astra",
+		"global.openai.gpt-6.1-sol ",
+		"us.openai.gpt-6.1-sol ",
+		"openai.gpt-6.1-sol ",
 		"openai.gpt-5.6-sol",
 		"openai.gpt-5.6-terra",
 		"openai.gpt-5.6-luna",
@@ -157,6 +160,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"azure-openai-responses": [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -236,13 +240,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	fireworks: [
 		"accounts/fireworks/models/kimi-k3",
 		"accounts/fireworks/routers/kimi-k3-fast",
-		"accounts/fireworks/models/deepseek-v4-pro",
-		"accounts/fireworks/models/kimi-k2p7-code",
-		"accounts/fireworks/models/glm-5p2",
-		"accounts/fireworks/routers/glm-5p2-fast",
 		"accounts/fireworks/models/minimax-m3",
-		"accounts/fireworks/models/kimi-k2p6",
-		"accounts/fireworks/models/qwen3p7-plus",
 		"accounts/fireworks/models/gpt-oss-120b",
 	],
 	"github-copilot": [
@@ -254,6 +252,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-opus-4.7",
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -341,6 +340,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	openai: [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -366,6 +366,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"openai-codex": [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -383,6 +384,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-fable-5",
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -421,17 +423,13 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"deepseek-v4-pro",
 		"glm-5.3",
 		"glm-5.2",
-		"glm-5.1",
-		"qwen3.7-max",
 		"qwen3.7-plus",
-		"qwen3.6-plus",
 		"mimo-v2.5-pro",
 		"mimo-v2.5",
 		"minimax-m3",
 		"minimax-m2.7",
 		"kimi-k3",
 		"kimi-k2.7-code",
-		"kimi-k2.6",
 		"grok-4.7 ",
 		"grok-4.7",
 		"grok-4.6",
@@ -449,6 +447,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"anthropic/claude-opus-4.1",
 		"openai/gpt-6-astra ",
 		"openai/gpt-6-astra",
+		"openai/gpt-6.1-sol ",
 		"openai/gpt-6-sol ",
 		"openai/gpt-6-sol",
 		"openai/gpt-5.6-sol-pro",
@@ -537,9 +536,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"gpt-5.4",
 		"gpt-5.3-codex",
 		"kimi-k3",
-		"deepseek-v4-pro",
 		"glm-5.3",
-		"kimi-k2.7-code",
 		"deepseek-v4.1-flash",
 		"gpt-5.4-mini",
 		"glm-5.3-flash",
@@ -549,8 +546,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"moonshotai/Kimi-K3",
 		"zai-org/GLM-5.3-Flash",
 		"zai-org/GLM-5.2",
-		"moonshotai/Kimi-K2.7-Code",
-		"moonshotai/Kimi-K2.6",
 		"Qwen/Qwen3.7-Max",
 		"Qwen/Qwen3.6-Plus",
 		"MiniMaxAI/MiniMax-M3",
@@ -560,6 +555,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"nvidia/nemotron-3-ultra-550b-a55b",
 		"google/gemma-4-31B-it",
 	],
+	typesafe: [],
 	"vercel-ai-gateway": [
 		"anthropic/claude-opus-5.5 ",
 		"anthropic/claude-opus-5.5",
@@ -573,6 +569,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"anthropic/claude-sonnet-4.6",
 		"openai/gpt-6-astra ",
 		"openai/gpt-6-astra",
+		"openai/gpt-6.1-sol ",
 		"openai/gpt-6-sol ",
 		"openai/gpt-6-sol",
 		"openai/gpt-5.6-sol",
@@ -1021,16 +1018,16 @@ function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingL
 	return "off";
 }
 
-function isGpt56SolModel(model: PiModel | undefined): boolean {
+function isGptSolModel(model: PiModel | undefined): boolean {
 	if (!model) return false;
-	return /\bgpt-(?:5\.6|6)-sol\b/i.test(`${model.id} ${model.name ?? ""}`);
+	return /(?:\bgpt-(?:5\.6|6)-sol\b|\bgpt-6\.1-sol(?:\s|$))/i.test(`${model.id} ${model.name ?? ""}`);
 }
 
 function resolveThinkingLevel(
 	model: PiModel | undefined,
 	override: ThinkingLevel | undefined,
 ): { requested: ThinkingLevel; effective: ThinkingLevel; clamped: boolean } {
-	const requested = override ?? (model?.reasoning ? (isGpt56SolModel(model) ? "high" : DEFAULT_THINKING_LEVEL) : "off");
+	const requested = override ?? (model?.reasoning ? (isGptSolModel(model) ? "high" : DEFAULT_THINKING_LEVEL) : "off");
 	const effective = model ? clampThinkingLevel(model, requested) : requested;
 	return { requested, effective, clamped: effective !== requested };
 }
@@ -1272,7 +1269,10 @@ async function runOracle(
 			}
 
 			if (event.type === "message_start" && event.message?.role === "assistant") {
+				// A later assistant turn supersedes any earlier tool/intermediate answer.
+				// Keep only the current message so a tool-only final turn cannot return stale text.
 				currentText = "";
+				finalOutput = "";
 				emit();
 				return;
 			}
@@ -1285,7 +1285,8 @@ async function runOracle(
 
 			if (event.type === "message_end" && event.message?.role === "assistant") {
 				const text = extractTextFromContent(event.message.content) || currentText;
-				if (text) finalOutput = text;
+				// message_end is authoritative, including an empty tool-only message.
+				finalOutput = text;
 				currentText = "";
 
 				const stopReason = event.message.stopReason;

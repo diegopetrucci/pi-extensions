@@ -13,6 +13,8 @@ const {
   applyPruneDecision,
   proposalToDecisionRecord,
   findToolCallPairIndices,
+  collectCompletedToolCallOccurrences,
+  buildPrunableItems,
   buildIdempotencyKey,
   classifyAgentStateFromMessages,
 } = dcp;
@@ -48,6 +50,22 @@ test('pipeline is a no-op when disabled', () => {
   });
   assert.equal(result.messages, messages);
   assert.deepEqual(result.newlyAppliedDecisions, []);
+});
+
+test('bounded nestedCalls remain metadata and do not create child prune targets or token attribution', () => {
+  const messages = toolCallMessages({ resultText: 'parent output' });
+  messages[2].nestedCalls = {
+    complete: false,
+    calls: [{ id: 'call_1/1', name: 'read', arguments: { path: '/not-transcript' }, status: 'ok' }],
+  };
+
+  const occurrences = collectCompletedToolCallOccurrences(messages);
+  assert.deepEqual(occurrences.map((occurrence) => occurrence.toolCallId), ['call_1']);
+  const items = buildPrunableItems(messages, new Map(), new Set());
+  assert.deepEqual(items.map((item) => item.toolCallId), ['call_1']);
+  assert.equal(items[0].estimatedTokens, Math.ceil('parent output'.length / 4));
+  assert.equal(messages.length, 4);
+  assert.equal(messages.filter((message) => message.toolCallId === 'call_1/1').length, 0);
 });
 
 test('applyPruneDecision replaces tool result content in place, preserving ids/order (pairing invariant)', () => {

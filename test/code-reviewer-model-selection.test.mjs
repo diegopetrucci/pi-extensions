@@ -162,6 +162,28 @@ test('code_reviewer auto-selection prefers an opposite provider and model family
   );
 });
 
+test('code_reviewer Bedrock selection keeps Sonnet 5 ahead of GPT-6.1 Sol', async () => {
+  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
+  const result = await selectCodeReviewerModel(
+    createModelSelectionContext({
+      model: { provider: 'amazon-bedrock', id: 'bedrock-current', reasoning: true },
+      available: [
+        { provider: 'amazon-bedrock', id: 'global.openai.gpt-6.1-sol', reasoning: true },
+        { provider: 'amazon-bedrock', id: 'claude-sonnet-5', reasoning: true },
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'amazon-bedrock/claude-sonnet-5');
+  assert.deepEqual(
+    result.ordered.map((model) => `${model.provider}/${model.id}`),
+    ['amazon-bedrock/claude-sonnet-5', 'amazon-bedrock/global.openai.gpt-6.1-sol'],
+  );
+});
+
 test('code_reviewer auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(

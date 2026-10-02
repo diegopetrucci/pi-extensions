@@ -3,6 +3,15 @@ import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PROVIDER_ID = "openai-codex";
+const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+
+/**
+ * Usage status is deliberately separate from a snapshot. A direct OpenAI
+ * ChatGPT OAuth credential is sent to api.openai.com by Pi, while this module
+ * only knows the legacy openai-codex WHAM contract. Keeping that distinction
+ * explicit prevents an unsupported account from reusing legacy data.
+ */
+export type UsageAvailability = "unsupported" | "unavailable";
 
 interface WhamUsageWindow {
 	limit_window_seconds?: number;
@@ -123,9 +132,33 @@ function getOAuthAccountId(authSource: unknown): string | undefined {
 
 	if (!isRecord(credential) || credential.type !== "oauth") return undefined;
 	const accountId = credential.accountId;
-	return typeof accountId === "string" && accountId.trim()
-		? accountId.trim()
-		: undefined;
+	return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
+}
+
+function getAccountIdFromAccessToken(accessToken: string): string | undefined {
+	try {
+		// Keep this parser aligned with Pi's openai-codex OAuth implementation:
+		// the account identity is the exact JWT claim used when credentials are
+		// created, not a separately loaded account option.
+		const parts = accessToken.split(".");
+		if (parts.length !== 3) return undefined;
+		const payload = JSON.parse(atob(parts[1] ?? "")) as unknown;
+		if (!isRecord(payload)) return undefined;
+		const auth = payload[JWT_CLAIM_PATH];
+		if (!isRecord(auth)) return undefined;
+		const accountId = auth.chatgpt_account_id;
+		return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function getOpenAICodexAccountId(authSource: unknown): string | undefined {
+	try {
+		return getOAuthAccountId(authSource);
+	} catch {
+		return undefined;
+	}
 }
 
 function formatUsagePercent(value?: number): string | undefined {
@@ -167,6 +200,16 @@ export function isOpenAICodexProvider(provider?: string): boolean {
 	return provider === PROVIDER_ID;
 }
 
+export function isOpenAIProvider(provider?: string): boolean {
+	return provider === "openai";
+}
+
+export function formatUsageStatus(status?: UsageAvailability): string | undefined {
+	if (status === "unsupported") return "usage unsupported";
+	if (status === "unavailable") return "usage unavailable";
+	return undefined;
+}
+
 export function formatUsageSummary(
 	snapshot: UsageSnapshot | undefined,
 	windows: UsageSummaryWindowsConfig,
@@ -195,12 +238,25 @@ export function formatUsageSummary(
 
 export async function fetchOpenAICodexUsage(
 	authSource: unknown,
-	options?: { timeoutMs?: number },
+	options?: { timeoutMs?: number; accountId?: string },
 ): Promise<UsageSnapshot | undefined> {
 	const accessToken = await getAccessToken(authSource);
 	if (!accessToken) return undefined;
 
-	const accountId = getOAuthAccountId(authSource);
+	// Pi derives the Codex credential's accountId from this access-token claim.
+	// Resolve it before constructing the request so a stale account option can
+	// never become the header, and reject credentials that cannot be bound to an
+	// account at all.
+	const tokenAccountId = getAccountIdFromAccessToken(accessToken);
+	if (!tokenAccountId) return undefined;
+
+	// A lifecycle caller may provide the account identity observed at the
+	// refresh boundary. It is only an expected identity: the token claim remains
+	// authoritative, and any mismatch fails closed before fetch is called.
+	if (options && "accountId" in options && options.accountId !== tokenAccountId) {
+		return undefined;
+	}
+
 	const controller = new AbortController();
 	const timeoutMs = options?.timeoutMs ?? 10_000;
 	const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -210,9 +266,7 @@ export async function fetchOpenAICodexUsage(
 			Authorization: `Bearer ${accessToken}`,
 			Accept: "application/json",
 		};
-		if (accountId) {
-			headers["ChatGPT-Account-Id"] = accountId;
-		}
+		headers["ChatGPT-Account-Id"] = tokenAccountId;
 
 		const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
 			headers,
