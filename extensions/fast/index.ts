@@ -29,7 +29,7 @@ const OPENAI_SUPPORTED_MODELS = new Set([
 const OPENAI_API_PROVIDER_ID = "openai";
 const OPENAI_API_IDS = new Set(["openai-responses", "openai-completions"]);
 const OPENAI_API_FAST_SERVICE_TIER = "fast";
-const OPENAI_API_SUPPORTED_MODELS = new Set(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
+const OPENAI_API_SUPPORTED_MODELS = new Set(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
 
 const DEFAULT_CONFIG: FastConfig = {
 	enabled: false,
@@ -216,7 +216,7 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 			return {
 				eligible: false,
 				modelKey: key,
-				reason: "Fast mode is only enabled for GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
+				reason: "Fast mode is only enabled for GPT-6.1 Sol, GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
 			};
 		}
 

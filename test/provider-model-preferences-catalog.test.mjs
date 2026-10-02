@@ -383,6 +383,79 @@ for (const { provider, modelIds, expected } of CODE_REVIEWER_GPT6_CATALOG_CASES)
   });
 }
 
+const GPT61_SOL_CATALOG_CASES = [
+  {
+    provider: 'amazon-bedrock',
+    roles: ['oracle', 'contrarian'],
+    normalIds: ['global.openai.gpt-6.1-sol', 'openai.gpt-6.1-sol', 'us.openai.gpt-6.1-sol'],
+    olderId: 'global.openai.gpt-5.6-sol',
+    expected: 'global.openai.gpt-6.1-sol',
+  },
+  ...['azure-openai-responses', 'github-copilot', 'openai', 'openai-codex', 'opencode'].map((provider) => ({
+    provider,
+    normalIds: ['gpt-6.1-sol'],
+    olderId: 'gpt-6-sol',
+    expected: 'gpt-6.1-sol',
+  })),
+  {
+    provider: 'openrouter',
+    normalIds: ['openai/gpt-6.1-sol'],
+    olderId: 'openai/gpt-6-sol',
+    expected: 'openai/gpt-6.1-sol',
+  },
+  {
+    provider: 'vercel-ai-gateway',
+    normalIds: ['openai/gpt-6.1-sol'],
+    olderId: 'openai/gpt-6-sol',
+    expected: 'openai/gpt-6.1-sol',
+  },
+];
+
+for (const { provider, roles = ['oracle', 'contrarian', 'code-reviewer'], normalIds, olderId, expected } of GPT61_SOL_CATALOG_CASES) {
+  for (const role of roles) {
+    test(`${role} selects the published GPT-6.1 Sol slot on ${provider} before the older Sol and falls back without it`, async () => {
+      const preferences = extractConst(`extensions/${role}/index.ts`, 'PROVIDER_MODEL_PREFERENCES');
+      assert.ok(preferences[provider], `${role} is missing a provider preference ladder for ${provider}`);
+      for (const id of normalIds) {
+        assert.ok(preferences[provider].includes(`${id} `), `${role}/${provider} is missing the exact normal GPT-6.1 Sol pattern for ${id}`);
+        assert.equal(preferences[provider].includes(id), false, `${role}/${provider} must not use an unbounded GPT-6.1 Sol pattern for ${id}`);
+      }
+
+      const normalModels = normalIds.map((id) => {
+        const model = getBuiltinModels(provider).find((candidate) => candidate.id === id);
+        assert.ok(model, `missing pinned catalog model ${provider}/${id}`);
+        return model;
+      });
+      const older = getBuiltinModels(provider).find((model) => model.id === olderId);
+      assert.ok(older, `missing pinned catalog model ${provider}/${olderId}`);
+
+      const available = [...normalModels, older];
+      const selected = await selectRoleModel(role, provider, available);
+      const reversed = await selectRoleModel(role, provider, [...available].reverse());
+      assert.equal(selected.modelId, expected);
+      assert.equal(reversed.modelId, expected);
+
+      const fallback = await selectRoleModel(role, provider, [older]);
+      assert.equal(fallback.modelId, olderId);
+    });
+  }
+}
+
+for (const { provider, variantId, olderId } of [
+  { provider: 'openrouter', variantId: 'openai/gpt-6.1-sol-pro', olderId: 'openai/gpt-6-sol' },
+  { provider: 'vercel-ai-gateway', variantId: 'openai/gpt-6.1-sol-fast', olderId: 'openai/gpt-6-sol' },
+]) {
+  for (const role of ['oracle', 'contrarian', 'code-reviewer']) {
+    test(`${role} does not treat the GPT-6.1 Sol Pro/Fast variant as the normal Sol slot on ${provider}`, async () => {
+      const variant = getBuiltinModels(provider).find((model) => model.id === variantId);
+      const older = getBuiltinModels(provider).find((model) => model.id === olderId);
+      assert.ok(variant && older, `missing pinned catalog variant models for ${provider}`);
+      const result = await selectRoleModel(role, provider, [variant, older]);
+      assert.equal(result.modelId, olderId);
+    });
+  }
+}
+
 const CROSS_PROVIDER_CATALOG_CASES = [
   {
     kind: 'Opus 5.5',
@@ -400,6 +473,14 @@ const CROSS_PROVIDER_CATALOG_CASES = [
       ['openai', 'gpt-6-luna'],
     ],
     expected: 'gpt-6-astra',
+  },
+  {
+    kind: 'GPT-6.1 Sol',
+    models: [
+      ['openai', 'gpt-6-sol'],
+      ['openai', 'gpt-6.1-sol'],
+    ],
+    expected: 'gpt-6.1-sol',
   },
   {
     kind: 'Grok 4.7',
@@ -572,7 +653,7 @@ test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', ()
     ['extensions/claude-fast/index.ts', 'SUPPORTED_MODELS'],
     ['extensions/openai-fast/index.ts', 'SUPPORTED_MODELS'],
   ];
-  const confirmedDirectOpenAIModels = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol'];
+  const confirmedDirectOpenAIModels = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol'];
   const directOpenAIAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_API_SUPPORTED_MODELS');
 
   assert.deepEqual([...directOpenAIAllowlist].sort(), confirmedDirectOpenAIModels);

@@ -126,6 +126,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"us.openai.gpt-6-astra ",
 		"openai.gpt-6-astra ",
 		"gpt-6-astra",
+		"global.openai.gpt-6.1-sol ",
+		"us.openai.gpt-6.1-sol ",
+		"openai.gpt-6.1-sol ",
 		"openai.gpt-5.6-sol",
 		"openai.gpt-5.6-terra",
 		"openai.gpt-5.6-luna",
@@ -157,6 +160,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"azure-openai-responses": [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -248,6 +252,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-opus-4.7",
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -335,6 +340,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	openai: [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -360,6 +366,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 	"openai-codex": [
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -377,6 +384,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"claude-fable-5",
 		"gpt-6-astra ",
 		"gpt-6-astra",
+		"gpt-6.1-sol ",
 		"gpt-6-sol ",
 		"gpt-6-sol",
 		"gpt-5.6-sol",
@@ -439,6 +447,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"anthropic/claude-opus-4.1",
 		"openai/gpt-6-astra ",
 		"openai/gpt-6-astra",
+		"openai/gpt-6.1-sol ",
 		"openai/gpt-6-sol ",
 		"openai/gpt-6-sol",
 		"openai/gpt-5.6-sol-pro",
@@ -560,6 +569,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 		"anthropic/claude-sonnet-4.6",
 		"openai/gpt-6-astra ",
 		"openai/gpt-6-astra",
+		"openai/gpt-6.1-sol ",
 		"openai/gpt-6-sol ",
 		"openai/gpt-6-sol",
 		"openai/gpt-5.6-sol",
@@ -1008,16 +1018,16 @@ function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingL
 	return "off";
 }
 
-function isGpt56SolModel(model: PiModel | undefined): boolean {
+function isGptSolModel(model: PiModel | undefined): boolean {
 	if (!model) return false;
-	return /\bgpt-(?:5\.6|6)-sol\b/i.test(`${model.id} ${model.name ?? ""}`);
+	return /(?:\bgpt-(?:5\.6|6)-sol\b|\bgpt-6\.1-sol(?:\s|$))/i.test(`${model.id} ${model.name ?? ""}`);
 }
 
 function resolveThinkingLevel(
 	model: PiModel | undefined,
 	override: ThinkingLevel | undefined,
 ): { requested: ThinkingLevel; effective: ThinkingLevel; clamped: boolean } {
-	const requested = override ?? (model?.reasoning ? (isGpt56SolModel(model) ? "high" : DEFAULT_THINKING_LEVEL) : "off");
+	const requested = override ?? (model?.reasoning ? (isGptSolModel(model) ? "high" : DEFAULT_THINKING_LEVEL) : "off");
 	const effective = model ? clampThinkingLevel(model, requested) : requested;
 	return { requested, effective, clamped: effective !== requested };
 }

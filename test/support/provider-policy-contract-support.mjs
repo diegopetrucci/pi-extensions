@@ -81,7 +81,7 @@ export const PROVIDER_POLICY_CONTRACT = {
     {
       role: 'oracle',
       method: 'selectOracleModel',
-      description: 'Oracle stays on the current provider, prefers the latest frontier tier, and defaults GPT-5.6/GPT-6 Sol to high thinking',
+      description: 'Oracle stays on the current provider, prefers GPT-6.1 Sol before older Sol, and defaults Sol to high thinking',
       ctx: {
         model: { provider: 'openai', id: 'gpt-5.4', reasoning: true },
         scopedModels: [],
@@ -89,12 +89,13 @@ export const PROVIDER_POLICY_CONTRACT = {
           { provider: 'openai', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
           { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
           { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+          { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: {}, medium: {}, high: {}, xhigh: {}, max: {} } },
           { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
         ],
       },
       expected: {
-        selectionModelRef: 'openai/gpt-5.6-sol',
-        orderedModelRefs: ['openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
+        selectionModelRef: 'openai/gpt-6.1-sol',
+        orderedModelRefs: ['openai/gpt-6.1-sol', 'openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
         selectionProperties: {
           thinkingLevel: 'high',
           requestedThinkingLevel: undefined,
@@ -394,7 +395,7 @@ export const PROVIDER_POLICY_CONTRACT = {
   thinkingLevelCases: [
     {
       role: 'oracle',
-      description: 'Oracle defaults GPT-5.6/GPT-6 Sol to high while other reasoning models default to xhigh',
+      description: 'Oracle defaults GPT-5.6/GPT-6/GPT-6.1 Sol to high while other reasoning models default to xhigh',
       method: 'resolveThinkingLevel',
       assertions: [
         {
@@ -403,6 +404,10 @@ export const PROVIDER_POLICY_CONTRACT = {
         },
         {
           args: [{ provider: 'openai', id: 'gpt-6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
+          expected: { requested: 'high', effective: 'high', clamped: false },
+        },
+        {
+          args: [{ provider: 'openai', id: 'gpt-6.1-sol', reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: {}, high: {}, xhigh: {}, max: {} } }, undefined],
           expected: { requested: 'high', effective: 'high', clamped: false },
         },
         {
