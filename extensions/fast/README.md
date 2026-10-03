@@ -69,10 +69,14 @@ completed normally for `gpt-6-astra` and `gpt-6.1-sol`; `gpt-6-sol` and
 `response.completed` always reported `service_tier: "default"`, with or without
 `priority`, so the response cannot confirm Fast was applied.
 
-Pi trusts the requested tier and applies a 2× cost multiplier for `priority`.
-This is Pi's estimate, not a documented real usage rate. The model list does not
-mention increased usage for `gpt-6-sol` or `gpt-6-luna`, so Pi's displayed cost
-may overestimate their usage.
+Pi trusts the requested tier and applies a 2× multiplier to its displayed cost
+estimate for `priority`; this does not measure included subscription allowance
+consumption or confirm Fast was applied. [OpenAI's Codex speed documentation](https://developers.openai.com/codex/speed),
+checked on 2026-10-03, lists `gpt-6-sol` and `gpt-6-luna` among supported Fast
+models where available. It specifies 2.5× the Standard rate for included
+subscription limits and 2× for purchased credits and Enterprise pay-as-you-go
+billing. Treating Pi's 2× estimate as a subscription-limit multiplier would
+understate the documented allowance consumption.
 
 Anthropic Fast mode requires all of the following:
 
