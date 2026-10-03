@@ -55,16 +55,19 @@ OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
-- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
+- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, or `gpt-6.1-sol`.
 - ChatGPT OAuth/subscription auth, not API-key auth.
 - No existing `service_tier` field in the request payload.
 
-GPT-6.1 Sol is intentionally unsupported on this legacy Codex route. The
-Codex speed documentation lists GPT-6.1 Sol Fast with `service_tier: "fast"`,
-but Pi's legacy Codex service-tier cost handling currently accounts for
-`priority` and `flex`, not `fast`. The direct OpenAI API's `priority` alias is
-not evidence for the legacy Codex endpoint, so this extension leaves the route
-fail-closed without patching upstream pricing.
+The [Codex models guide](https://developers.openai.com/codex/models) lists the
+exact IDs `gpt-6-astra` and `gpt-6.1-sol`, and the
+[Codex speed guide](https://developers.openai.com/codex/speed) lists both as
+Fast-capable where available. These additions retain this extension's existing
+`service_tier: "priority"` request shape. Eligibility and request hooks were
+tested with mocks only; acceptance of that shape on Pi's legacy Codex endpoint,
+account entitlement, effective speed, and billing remain unverified. The Codex
+guide documents `service_tier = "fast"` for its own client configuration;
+that does not certify this extension's wire behavior.
 
 Anthropic Fast mode requires all of the following:
 
@@ -74,6 +77,18 @@ Anthropic Fast mode requires all of the following:
 - No existing `speed` field in the request payload.
 
 Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.
+
+The [official Fast-mode supported-model list](https://platform.claude.com/docs/en/build-with-claude/fast-mode#supported-models)
+explicitly lists only the three Opus IDs above. Model availability is separate
+from Fast eligibility: [Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
+[Fable 5](https://platform.claude.com/docs/en/models/fable-5/overview), and
+[Fable 5.1](https://platform.claude.com/docs/en/models/fable-5-1/overview) have
+official model pages but are not listed as Fast-supported. They remain blocked.
+Fable 5.5 is not documented in the checked
+[model overview](https://platform.claude.com/docs/en/about-claude/models/overview)
+or Fast guide; future IDs remain blocked too. No family matching or wildcard
+eligibility is used. Opus 4.6 and 4.7 are explicitly unsupported for Fast in the
+guide, regardless of their availability at standard speed.
 
 ## Commands
 
@@ -148,9 +163,9 @@ The collection package loads this unified extension instead of `openai-fast` and
 - Anthropic Fast mode has separate rate limits, costs more than standard speed, and does not share prompt-cache prefixes with standard-speed requests.
 - Direct OpenAI Fast mode is limited to the confirmed GPT-6 API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
 - Authoritative support evidence: [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) explicitly uses `gpt-6.1-sol` with `service_tier: "fast"` and documents `priority` as an equivalent alias for supported API models; the [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents the model itself.
-- The [Codex speed guide](https://developers.openai.com/codex/speed/) documents GPT-6.1 Sol Fast for ChatGPT-signed-in Codex, but legacy Codex support remains pending separate wire and cost validation; this ticket makes no live-certification claim.
+- Codex Fast availability depends on plan, client, workspace settings, and rollout. Local eligibility is not live-provider certification.
 - Pi's provider catalog remains the source of reported model pricing, including any tiered pricing; this extension does not apply guessed discounts or rewrite cost metadata.
-- OpenAI Codex Fast mode intentionally does not affect API-key models, and GPT-6.1 Sol remains blocked on the legacy Codex route.
+- OpenAI Codex Fast mode intentionally does not affect API-key models.
 - The retired `openai-fast` and `claude-fast` packages remain legacy standalone boundaries; new provider/auth behavior belongs only to this unified extension.
 - Existing `speed` and `service_tier` fields are never overwritten.
 - Pi's model catalog may not include a Fast-mode premium. Cost accounting depends on the provider reporting the effective tier in its streamed response, and this extension does not patch usage totals.
