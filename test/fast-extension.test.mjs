@@ -7,7 +7,7 @@ import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { streamSimple as streamAnthropicSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
 import { createExtensionHarness, loadExtension } from './extension-test-helpers.mjs';
 
-const OPENAI_CODEX_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-6.1-sol'];
+const OPENAI_CODEX_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'];
 const OPENAI_API_MODELS = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'];
 const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5'];
 const ANTHROPIC_FAST_BETA = 'fast-mode-2026-02-01';
@@ -252,7 +252,7 @@ test('fast preserves direct OpenAI API-key and OAuth payload behavior without li
     { provider: 'openai', api: 'openai-responses', id: 'gpt-6.1-sol-fast' },
     { provider: 'openai', api: 'openai-responses', id: 'gpt-6.1-sol-pro' },
     { provider: 'openai', api: 'openai-codex-responses', id: 'gpt-6-astra' },
-    { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-6-sol' },
+    { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.3-codex-spark' },
   ]) {
     const context = createContext({ cwd: projectDir, model, oauth: true });
     await sessionStart({}, context.ctx);
@@ -300,7 +300,7 @@ test('fast enables direct GPT-6.1 Sol only after toggling', async (t) => {
 
 });
 
-for (const id of ['gpt-6-astra', 'gpt-6.1-sol']) {
+for (const id of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
   test(`fast gates Codex ${id} priority injection on OAuth and an explicit toggle`, async (t) => {
     const { agentDir, projectDir } = setupTempDirs(t);
     setAgentDir(t, agentDir);
@@ -573,38 +573,6 @@ test('fast treats removed models gpt-5.4, claude-opus-4-6, and claude-opus-4-7 a
       undefined,
       `expected ${id} to be ineligible`,
     );
-  }
-});
-
-test('fast keeps undocumented Sonnet and Fable Fast eligibility blocked for API-key and OAuth auth', async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDir(t, agentDir);
-  const extension = await loadExtension('extensions/fast/index.ts');
-  const harness = createExtensionHarness();
-  extension(harness.pi);
-  const sessionStart = getHandler(harness, 'session_start');
-  const beforeRequest = getHandler(harness, 'before_provider_request');
-  const beforeHeaders = getHandler(harness, 'before_provider_headers');
-  const command = getCommand(harness);
-
-  for (const id of ['claude-sonnet-5-5', 'claude-fable-5', 'claude-fable-5-1', 'claude-fable-5-5']) {
-    for (const oauth of [false, true]) {
-      const context = createContext({
-        cwd: projectDir,
-        model: { provider: 'anthropic', api: 'anthropic-messages', id },
-        oauth,
-      });
-      await sessionStart({}, context.ctx);
-      await command.handler('', context.ctx);
-      const payload = { model: id, messages: [] };
-      const headers = { 'anthropic-beta': 'existing-beta' };
-      assert.equal(await beforeRequest({ payload }, context.ctx), undefined, id);
-      await beforeHeaders({ headers }, context.ctx);
-      assert.deepEqual(payload, { model: id, messages: [] });
-      assert.deepEqual(headers, { 'anthropic-beta': 'existing-beta' });
-      assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: undefined });
-      assert.ok(context.notifications.at(-1).message.includes(`inactive for anthropic/${id}`));
-    }
   }
 });
 

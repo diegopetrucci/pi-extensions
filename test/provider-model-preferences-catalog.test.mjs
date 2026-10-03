@@ -646,10 +646,9 @@ test('specific frontier spellings precede ambiguous generations in every affecte
   }
 });
 
-test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', () => {
+test('unified direct API and Codex Fast mode allow GPT-6 while retired allowlists stay unchanged', () => {
   const prohibitedModels = ['claude-opus-5-5', 'claude-opus-5.5', 'grok-4.7'];
   const unchangedAllowlists = [
-    ['extensions/fast/index.ts', 'OPENAI_SUPPORTED_MODELS'],
     ['extensions/claude-fast/index.ts', 'SUPPORTED_MODELS'],
     ['extensions/openai-fast/index.ts', 'SUPPORTED_MODELS'],
   ];
@@ -657,6 +656,14 @@ test('only unified direct API Fast mode gains the confirmed GPT-6 allowlist', ()
   const directOpenAIAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_API_SUPPORTED_MODELS');
 
   assert.deepEqual([...directOpenAIAllowlist].sort(), confirmedDirectOpenAIModels);
+
+  const codexAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_SUPPORTED_MODELS');
+  for (const model of confirmedDirectOpenAIModels) {
+    assert.equal(codexAllowlist.has(model), true, `unified Codex Fast mode should allow ${model}`);
+  }
+  for (const model of prohibitedModels) {
+    assert.equal(codexAllowlist.has(model), false, `unified Codex Fast mode unexpectedly enabled ${model}`);
+  }
 
   // ANTHROPIC_SUPPORTED_MODELS intentionally includes claude-opus-5-5 (added by #92);
   // verify GPT-6 models, grok-4.7, and claude-opus-5.5 (dot notation) still stay out.

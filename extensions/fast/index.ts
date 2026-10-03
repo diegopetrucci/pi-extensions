@@ -27,6 +27,8 @@ const OPENAI_SUPPORTED_MODELS = new Set([
 	"gpt-5.6-luna",
 	"gpt-6-astra",
 	"gpt-6.1-sol",
+	"gpt-6-sol",
+	"gpt-6-luna",
 ]);
 const OPENAI_API_PROVIDER_ID = "openai";
 const OPENAI_API_IDS = new Set(["openai-responses", "openai-completions"]);

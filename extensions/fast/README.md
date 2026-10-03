@@ -55,19 +55,24 @@ OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
-- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, or `gpt-6.1-sol`.
+- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, or `gpt-6-luna`.
 - ChatGPT OAuth/subscription auth, not API-key auth.
 - No existing `service_tier` field in the request payload.
 
-The [Codex models guide](https://developers.openai.com/codex/models) lists the
-exact IDs `gpt-6-astra` and `gpt-6.1-sol`, and the
-[Codex speed guide](https://developers.openai.com/codex/speed) lists both as
-Fast-capable where available. These additions retain this extension's existing
-`service_tier: "priority"` request shape. Eligibility and request hooks were
-tested with mocks only; acceptance of that shape on Pi's legacy Codex endpoint,
-account entitlement, effective speed, and billing remain unverified. The Codex
-guide documents `service_tier = "fast"` for its own client configuration;
-that does not certify this extension's wire behavior.
+Codex evidence, 2026-10-03: the [maintainer's PR #103 review](https://github.com/diegopetrucci/pi-extensions/pull/103)
+reports that the Codex model list advertises Fast as `priority` for `gpt-6-astra`,
+`gpt-6.1-sol`, `gpt-6-sol`, and `gpt-6-luna`. The official Codex CLI
+[sends Fast as `priority`](https://github.com/openai/codex/blob/b741e480e203f037ca726bc2a76d99a8e8668e66/codex-rs/protocol/src/config_types.rs#L539-L553).
+The maintainer's live check through Pi 1.0.0 on that date returned HTTP 200 and
+completed normally for `gpt-6-astra` and `gpt-6.1-sol`; `gpt-6-sol` and
+`gpt-6-luna` are enabled based on the model list only. In that check,
+`response.completed` always reported `service_tier: "default"`, with or without
+`priority`, so the response cannot confirm Fast was applied.
+
+Pi trusts the requested tier and applies a 2× cost multiplier for `priority`.
+This is Pi's estimate, not a documented real usage rate. The model list does not
+mention increased usage for `gpt-6-sol` or `gpt-6-luna`, so Pi's displayed cost
+may overestimate their usage.
 
 Anthropic Fast mode requires all of the following:
 
@@ -77,18 +82,6 @@ Anthropic Fast mode requires all of the following:
 - No existing `speed` field in the request payload.
 
 Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.
-
-The [official Fast-mode supported-model list](https://platform.claude.com/docs/en/build-with-claude/fast-mode#supported-models)
-explicitly lists only the three Opus IDs above. Model availability is separate
-from Fast eligibility: [Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/overview),
-[Fable 5](https://platform.claude.com/docs/en/models/fable-5/overview), and
-[Fable 5.1](https://platform.claude.com/docs/en/models/fable-5-1/overview) have
-official model pages but are not listed as Fast-supported. They remain blocked.
-Fable 5.5 is not documented in the checked
-[model overview](https://platform.claude.com/docs/en/about-claude/models/overview)
-or Fast guide; future IDs remain blocked too. No family matching or wildcard
-eligibility is used. Opus 4.6 and 4.7 are explicitly unsupported for Fast in the
-guide, regardless of their availability at standard speed.
 
 ## Commands
 
