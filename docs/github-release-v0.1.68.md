@@ -7,6 +7,10 @@ Dynamic Context Pruning now uses a more conservative mid-loop pruning threshold 
 - **Existing controls preserved.** Manual prunes and persisted decisions still bypass the gate. Set `gate.breakEvenThresholdByState.mid_loop` to `22` to restore the previous threshold. Existing saved overrides remain in effect.
 - **Compatibility unchanged.** Fleet certification remains Pi 0.84.4; this release does not certify a new Pi version.
 
+## Contributors
+
+- [@yanfeatherai](https://github.com/yanfeatherai) — Dynamic Context Pruning threshold improvement ([PR #82](https://github.com/diegopetrucci/pi-extensions/pull/82))
+
 ## Packages
 
 - `pi-dynamic-context-pruning@0.1.9`
