@@ -27,7 +27,7 @@ After one complete OIDC release succeeds and its registry hashes and provenance 
 
 ## Release operation
 
-Before dispatching, the release tag and non-draft GitHub release must exist and `docs/github-release-<tag>.md` must match the public release body.
+Before dispatching, the release tag and non-draft GitHub release must exist and `docs/github-release-<tag>.md` must match the public release body. Save a copy of the public body as a rollback backup before making any release-body correction.
 
 1. Open **Actions → Publish npm release → Run workflow** on `main`.
 2. Enter the exact release tag in both fields, for example `v0.1.62`.
@@ -44,6 +44,10 @@ scripts/publish-release.mjs v0.1.62 --dry-run
 ```
 
 Local live publishing is intentionally rejected. The helper isolates npm's user/global configuration in every mode. In GitHub Actions mode it also rejects legacy npm token/OTP variables and repository `.npmrc` files, checks the workflow identity and `main` checkout, verifies the remote tag and published GitHub release, and confirms registry hashes plus the `latest` dist-tag after each publish.
+
+## Post-publication verification and rollback
+
+After publication, inspect the public GitHub release and verify that its published contributor credits match the audited `Contributors` section and that exact body parity holds with `docs/github-release-<tag>.md`. If rollback is needed, restore the saved public-body backup and reverse this docs-only diff in version control; do not change package versions, source, tags, or registry state.
 
 ## npm CLI policy
 

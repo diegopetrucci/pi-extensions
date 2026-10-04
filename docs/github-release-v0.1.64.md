@@ -7,6 +7,10 @@ Terminal notifications now reach the outer terminal when Notify runs inside tmux
 - tmux users should set `set -g allow-passthrough all` in `tmux.conf` so forwarded notifications reach the outer terminal.
 - Leaves desktop, bell, and sound notification channels unchanged.
 
+## Contributors
+
+- [@andy-cowley](https://github.com/andy-cowley) — tmux notification passthrough ([PR #70](https://github.com/diegopetrucci/pi-extensions/pull/70))
+
 ## Packages
 
 - `@diegopetrucci/pi-notify@0.1.16`

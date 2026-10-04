@@ -20,6 +20,10 @@ When walking through a release checklist, the agent should run all agent-safe re
 
 Keep `docs/github-release-*.md` as the exact public GitHub release body. Do not include internal document titles like `GitHub release body — ...` or redundant version headings; the release tag already supplies the version. Start with a short summary, then public sections such as `## Highlights`, `## Packages`, and `## Install`. Do not include an "Included docs" section in public release bodies. Use descriptive GitHub release titles instead of repeating the version.
 
+## Release Contributor Credits
+
+Future release authors must audit merged pull requests and commit/coauthor metadata in the tag range from the previous release to the target release. Credit external human contributors with linked GitHub handles, short contribution descriptions, and links to the relevant pull request or commit. Exclude bots and the repository owner, and omit the `## Contributors` section when it would be empty. Generated release-document scaffolds require this manual audit. Before publication, verify the checked-in credits; after publication, verify the published credits and exact body parity with `docs/github-release-<tag>.md`.
+
 ## Memory
 
 At the start of any task, run `gn help plan` and follow its instructions.

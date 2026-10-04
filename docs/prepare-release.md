@@ -39,6 +39,10 @@ npm run prepare-release -- --input /tmp/release-input.json
 
 Dry-run makes no repository mutation: it does not write manifests, `package-lock.json`, fleet markers, or release documents. It does perform the pinned-registry checks described above and may create temporary fallback tarballs outside the repository before cleaning them up. The stable JSON report lists selected packages in internal dependency order (lexical tie-break, umbrella root last), target versions, packed/unpacked bytes, file counts, and document actions. A changed root may be selected alongside a changed workspace because each package's actual artifact is evaluated independently.
 
+## Contributor audit
+
+Generated release-document scaffolds are starting points only and require a manual contributor audit. Before publication, audit merged pull requests and commit/coauthor metadata in the tag range from the previous release to the target release. Credit external human contributors with linked GitHub handles, short descriptions, and pull request or commit links; exclude bots and the repository owner, and omit an empty `## Contributors` section. Confirm the checked-in body contains the audited credits and preserve its managed marker.
+
 ## Write mode
 
 After reviewing the dry-run:
@@ -57,4 +61,4 @@ This lock synchronization step ignores npmrc registry configuration and always t
 
 Existing generated documents are preserved byte-for-byte, so human prose is never overwritten. Each scaffold carries a managed package-evidence marker. Reusing the same document paths with a different ordered package/version set aborts before mutation rather than leaving stale release evidence. Keep that marker when editing prose. The generated GitHub body begins with a short factual summary followed by `Highlights`, `Packages`, and `Install`; it has no internal title. The generated checklist separates agent-safe follow-up actions (commit/tag/push/GitHub release outside this script) from the human-only trusted-publishing actions: dispatching `publish.yml`, inspecting its verified plan, and approving the protected `npm-release` environment deployment. Placeholders and checklist items deliberately do not claim validation or release work was completed.
 
-Rerunning with identical input is idempotent. To undo a successful write mode, restore the affected manifests, `package-lock.json`, optional fleet markers, and newly created `docs/*-v<version>.md` files with your normal version-control workflow.
+Rerunning with identical input is idempotent. To undo a successful write mode, restore the affected manifests, `package-lock.json`, optional fleet markers, and newly created `docs/*-v<version>.md` files with your normal version-control workflow. For a contributor-credit docs-only change, keep a saved public-body backup; to roll it back, restore that backup and reverse this docs-only diff in version control without changing package versions, source, tags, or registry state.
