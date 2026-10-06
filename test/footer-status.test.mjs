@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+
+const require = createRequire(import.meta.url);
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..');
@@ -182,21 +186,35 @@ function createCommandUnavailableError(command) {
   return error;
 }
 
-const gitFooterTesting = (await importTsModule('extensions/git-footer/index.ts')).__testing;
+const gitFooterModule = await importTsModule('extensions/git-footer/index.ts');
+const gitFooterTesting = gitFooterModule.__testing;
 const minimalFooterTesting = (await importTsModule('extensions/minimal-footer/index.ts')).__testing;
+
+const SAFE_GIT_STATUS_ARGS = [
+  '--no-optional-locks',
+  '-c',
+  'core.fsmonitor=false',
+  'status',
+  '--porcelain=v2',
+  '--branch',
+];
 
 const suites = [
   {
     name: 'git-footer',
     testing: gitFooterTesting,
-    supportsCanRun: false,
   },
   {
     name: 'minimal-footer',
     testing: minimalFooterTesting,
-    supportsCanRun: true,
   },
 ];
+
+test('footer git status args disable fsmonitor', () => {
+  for (const { name, testing } of suites) {
+    assert.deepEqual(testing.GIT_STATUS_ARGS, SAFE_GIT_STATUS_ARGS, name);
+  }
+});
 
 test('footer status helpers parse porcelain v2 output for git-footer and minimal-footer', async (t) => {
   for (const { name, testing } of suites) {
@@ -750,65 +768,71 @@ test('footer status caches clear stale snapshots when git becomes unavailable', 
   }
 });
 
-test('minimal-footer cache clears cached status when project git becomes unavailable', async () => {
-  const fakeClock = createFakeClock();
-  let canRun = true;
-  let changes = 0;
-  const { calls, runner } = createScriptedRunner([
-    {
-      command: 'git',
-      result: {
-        stdout: createStatusOutput({ branch: 'feature/minimal-footer', ahead: 2 }),
-        stderr: '',
-        exitCode: 0,
-      },
-    },
-    {
-      command: 'gh',
-      result: {
-        stdout: '{"number":19}',
-        stderr: '',
-        exitCode: 0,
-      },
-    },
-  ]);
+test('footer caches clear cached status and skip timed git and gh when project git cannot run', async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, async () => {
+      const fakeClock = createFakeClock();
+      let canRun = true;
+      let changes = 0;
+      const { calls, runner } = createScriptedRunner([
+        {
+          command: 'git',
+          result: {
+            stdout: createStatusOutput({ branch: 'feature/footer', ahead: 2 }),
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+        {
+          command: 'gh',
+          result: {
+            stdout: '{"number":19}',
+            stderr: '',
+            exitCode: 0,
+          },
+        },
+      ]);
 
-  const cache = new minimalFooterTesting.GitFooterCache({
-    cwd: () => '/tmp/minimal-footer',
-    canRun: () => canRun,
-    runner,
-    clock: fakeClock.clock,
-    onChange: () => {
-      changes += 1;
-    },
-  });
+      const cache = new testing.GitFooterCache({
+        cwd: () => `/tmp/${name}`,
+        canRun: () => canRun,
+        runner,
+        clock: fakeClock.clock,
+        onChange: () => {
+          changes += 1;
+        },
+      });
 
-  await cache.refresh();
-  assert.deepEqual(cache.getStatusSnapshot(), {
-    branch: 'feature/minimal-footer',
-    staged: 0,
-    unstaged: 0,
-    untracked: 0,
-    conflict: 0,
-    ahead: 2,
-    behind: 0,
-  });
-  assert.deepEqual(cache.getPullRequestSnapshot(), { number: 19 });
-  assert.equal(changes, 1);
-  assert.equal(calls.length, 2);
+      await cache.refresh();
+      assert.deepEqual(cache.getStatusSnapshot(), {
+        branch: 'feature/footer',
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+        conflict: 0,
+        ahead: 2,
+        behind: 0,
+      });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 19 });
+      assert.equal(changes, 1);
+      assert.equal(calls.length, 2);
 
-  canRun = false;
-  await cache.refresh();
+      canRun = false;
+      await cache.refresh();
 
-  assert.equal(cache.getStatusSnapshot(), undefined);
-  assert.equal(cache.getPullRequestSnapshot(), undefined);
-  assert.equal(calls.length, 2);
-  assert.equal(changes, 2);
+      assert.equal(cache.getStatusSnapshot(), undefined);
+      assert.equal(cache.getPullRequestSnapshot(), undefined);
+      assert.equal(calls.length, 2);
+      assert.equal(changes, 2);
 
-  await cache.refresh();
-  assert.equal(changes, 2);
+      fakeClock.handles[0].callback();
+      await cache.refresh();
+      assert.equal(calls.length, 2);
+      assert.equal(changes, 2);
 
-  cache.dispose();
+      cache.dispose();
+    });
+  }
 });
 
 
@@ -1046,4 +1070,162 @@ test('minimal-footer cache swallows render callback errors', async () => {
   assert.equal(queue.length, 0);
 
   cache.dispose();
+});
+
+function createExtensionUi() {
+  const statuses = [];
+  return {
+    statuses,
+    ui: {
+      setStatus(key, value) {
+        statuses.push({ key, value });
+      },
+      theme: {
+        fg(_color, text) {
+          return text;
+        },
+      },
+    },
+  };
+}
+
+function installSpawnSpy(t) {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+
+  childProcess.spawn = (command, args = [], options = {}) => {
+    calls.push({ command, args: [...args], cwd: options.cwd });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let settled = false;
+    child.kill = () => {
+      if (settled) return;
+      settled = true;
+      child.emit('close', null);
+    };
+    setImmediate(() => {
+      if (settled) return;
+      settled = true;
+      if (command === 'git') {
+        child.stdout.emit('data', '# branch.head main\n# branch.ab +1 -0\n');
+      } else if (command === 'gh') {
+        child.stdout.emit('data', '{"number":4,"state":"OPEN"}');
+      }
+      child.emit('close', 0);
+    });
+    return child;
+  };
+  syncBuiltinESMExports();
+
+  t.after(() => {
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+  });
+
+  return calls;
+}
+
+function installIntervalSpy(t) {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const timers = [];
+
+  globalThis.setInterval = (callback, ms, ...args) => {
+    const handle = originalSetInterval(callback, ms, ...args);
+    timers.push({ callback, ms, handle, cleared: false });
+    return handle;
+  };
+  globalThis.clearInterval = (handle) => {
+    const timer = timers.find((entry) => entry.handle === handle);
+    if (timer) timer.cleared = true;
+    return originalClearInterval(handle);
+  };
+
+  t.after(() => {
+    for (const timer of timers) {
+      if (!timer.cleared) originalClearInterval(timer.handle);
+    }
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  });
+
+  return timers;
+}
+
+async function settleExtensionWork() {
+  for (let step = 0; step < 6; step += 1) {
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+}
+
+test('git-footer does not poll git or gh until the project is trusted', { concurrency: false }, async (t) => {
+  const handlers = new Map();
+  gitFooterModule.default({
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+    },
+  });
+
+  const calls = installSpawnSpy(t);
+  const timers = installIntervalSpy(t);
+  const { statuses, ui } = createExtensionUi();
+  const ctx = {
+    cwd: '/tmp/git-footer-trust',
+    ui,
+  };
+
+  await handlers.get('session_start')({}, ctx);
+  await handlers.get('turn_end')({}, ctx);
+  await settleExtensionWork();
+  assert.equal(calls.length, 0);
+  assert.equal(timers.length, 0);
+
+  await handlers.get('session_shutdown')({}, ctx);
+
+  ctx.isProjectTrusted = () => false;
+  await handlers.get('session_start')({}, ctx);
+  await handlers.get('turn_end')({}, ctx);
+  await settleExtensionWork();
+  assert.equal(calls.length, 0);
+  assert.equal(timers.length, 0);
+  assert.equal(statuses.at(-1)?.key, 'git-footer');
+  assert.equal(statuses.at(-1)?.value, undefined);
+
+  ctx.isProjectTrusted = () => true;
+  await handlers.get('turn_end')({}, ctx);
+  await settleExtensionWork();
+
+  assert.deepEqual(calls.map(({ command, args, cwd }) => ({ command, args, cwd })), [
+    {
+      command: 'git',
+      args: SAFE_GIT_STATUS_ARGS,
+      cwd: '/tmp/git-footer-trust',
+    },
+    {
+      command: 'gh',
+      args: [...gitFooterTesting.GH_PR_VIEW_ARGS],
+      cwd: '/tmp/git-footer-trust',
+    },
+  ]);
+  assert.equal(statuses.at(-1)?.value, '↑1 • PR #4');
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 8000);
+  assert.equal(timers[0].cleared, false);
+
+  const callsBeforeRevoke = calls.length;
+  ctx.isProjectTrusted = () => false;
+  await handlers.get('turn_end')({}, ctx);
+  await settleExtensionWork();
+  timers[0].callback();
+  await settleExtensionWork();
+
+  assert.equal(calls.length, callsBeforeRevoke);
+  assert.equal(timers[0].cleared, true);
+  assert.equal(statuses.at(-1)?.value, undefined);
+
+  await handlers.get('session_shutdown')({}, ctx);
 });
