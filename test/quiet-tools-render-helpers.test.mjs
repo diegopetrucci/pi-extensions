@@ -145,7 +145,6 @@ test('quiet-tools wrapper preserves Pi 0.99 metadata, execution context, structu
   assert.deepEqual(executeCalls, [{ toolCallId: 'fixture-call', args: { command: 'printf safe' }, signal, onUpdate, ctx }]);
   assert.deepEqual(updates, [{ content: [{ type: 'text', text: 'partial' }], details: { phase: 'partial' } }]);
 
-  const state = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
   const errorResult = {
     content: [{ type: 'text', text: 'line 1\nline 2' }],
     details: { phase: 'streaming' },
@@ -156,41 +155,34 @@ test('quiet-tools wrapper preserves Pi 0.99 metadata, execution context, structu
     { ...errorResult, isError: false },
     { expanded: false, isPartial: true },
     theme,
-    { isError: false, lastComponent: undefined, state },
+    { isError: false, lastComponent: undefined, state: {} },
   );
   assert.deepEqual(partialCollapsed.render(200), []);
-  assert.ok(state.interval, 'partial rendering must keep the timing update alive');
 
   const finalCollapsed = quietTool.renderResult(
     errorResult,
     { expanded: false, isPartial: false },
     theme,
-    { isError: true, lastComponent: partialCollapsed, state },
+    { isError: true, lastComponent: partialCollapsed, state: {} },
   );
   assert.deepEqual(finalCollapsed.render(200), []);
-  assert.equal(state.interval, undefined);
-  assert.ok(state.endedAt);
 
-  const emptyState = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
   const emptyResult = { content: [], details: {}, isError: false };
   const partialEmptyCollapsed = quietTool.renderResult(
     emptyResult,
     { expanded: false, isPartial: true },
     theme,
-    { isError: false, lastComponent: undefined, state: emptyState },
+    { isError: false, lastComponent: undefined, state: {} },
   );
   assert.deepEqual(partialEmptyCollapsed.render(200), []);
-  assert.ok(emptyState.interval, 'partial empty rendering must keep the timing update alive');
 
   const finalEmptyCollapsed = quietTool.renderResult(
     emptyResult,
     { expanded: false, isPartial: false },
     theme,
-    { isError: false, lastComponent: partialEmptyCollapsed, state: emptyState },
+    { isError: false, lastComponent: partialEmptyCollapsed, state: {} },
   );
   assert.deepEqual(finalEmptyCollapsed.render(200), []);
-  assert.equal(emptyState.interval, undefined);
-  assert.ok(emptyState.endedAt);
 
   assert.equal(
     quietTool.renderResult(
@@ -235,7 +227,7 @@ test('quiet-tools collapsed render keeps summaries visible while hiding results 
     { text: 'hidden result' },
     { expanded: false, isPartial: false },
     theme,
-    { isError: false, lastComponent: undefined, state: { startedAt: Date.now() } },
+    { isError: false, lastComponent: undefined, state: {} },
   );
   assert.deepEqual(collapsedResult.render(200), []);
 

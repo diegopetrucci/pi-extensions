@@ -26,12 +26,6 @@ type ToolRenderResultParams = Parameters<ToolRenderResult>;
 type RenderTheme = ToolRenderResultParams[2];
 type ToolRenderContext = ToolRenderResultParams[3];
 
-type TimerRenderState = {
-	startedAt?: number;
-	endedAt?: number;
-	interval?: ReturnType<typeof setInterval>;
-};
-
 class QuietLinesRenderComponent extends Container {
 	private linesRenderer: ((width: number) => string[]) | undefined;
 
@@ -194,26 +188,7 @@ function formatExpandHint(theme: RenderTheme): string {
 	return `${theme.fg("muted", "(")}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
 }
 
-function markToolTiming(options: ToolRenderResultParams[1], context: ToolRenderContext): void {
-	const state = context.state as TimerRenderState;
-
-	if ((!options.isPartial || context.isError) && state.startedAt !== undefined) {
-		state.endedAt ??= Date.now();
-	}
-
-	if ((!options.isPartial || context.isError) && state.interval) {
-		clearInterval(state.interval);
-		state.interval = undefined;
-	}
-}
-
-function renderQuietCollapsedResult(
-	_result: ToolRenderResultParams[0],
-	options: ToolRenderResultParams[1],
-	_theme: RenderTheme,
-	context: ToolRenderContext,
-): QuietResultRenderComponent {
-	markToolTiming(options, context);
+function renderQuietCollapsedResult(context: ToolRenderContext): QuietResultRenderComponent {
 	const component = context.lastComponent instanceof QuietResultRenderComponent
 		? context.lastComponent
 		: new QuietResultRenderComponent();
@@ -228,12 +203,6 @@ function renderQuietCall(
 	theme: ToolRenderCallParams[1],
 	context: ToolRenderCallParams[2],
 ) {
-	const state = context.state as TimerRenderState;
-	if (context.executionStarted && state.startedAt === undefined) {
-		state.startedAt = Date.now();
-		state.endedAt = undefined;
-	}
-
 	if (context.expanded || !QUIET_CALL_TOOL_NAMES.has(toolName)) {
 		const delegateContext = context.lastComponent instanceof QuietCallRenderComponent
 			? { ...context, lastComponent: undefined }
@@ -269,7 +238,7 @@ function createQuietToolDefinition(base: ToolDefinition): ToolDefinition {
 				return baseRenderResult(result, options, theme, delegateContext);
 			}
 
-			return renderQuietCollapsedResult(result, options, theme, context);
+			return renderQuietCollapsedResult(context);
 		},
 	};
 }
