@@ -1,33 +1,46 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import test from "node:test";
 
-import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 
-import { createModelSelectionContext, loadRoleTestUtils } from './support/provider-policy-contract-support.mjs';
+import {
+  createModelSelectionContext,
+  loadRoleTestUtils,
+} from "./support/provider-policy-contract-support.mjs";
 
 async function loadOracleTestUtils() {
-  return loadRoleTestUtils('oracle');
+  return loadRoleTestUtils("oracle");
 }
 
-for (const provider of ['openai', 'openai-codex', 'github-copilot']) {
+for (const provider of ["openai", "openai-codex", "github-copilot"]) {
   test(`Oracle selects Astra on ${provider} and falls back when unavailable`, async () => {
     const { selectOracleModel } = await loadOracleTestUtils();
-    const older = { provider, id: 'gpt-5.6-sol', reasoning: true };
-    const astra = { provider, id: 'gpt-6-astra', reasoning: true, thinkingLevelMap: { xhigh: 'xhigh', max: 'max' } };
+    const older = { provider, id: "gpt-5.6-sol", reasoning: true };
+    const astra = {
+      provider,
+      id: "gpt-6-astra",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+    };
     for (const available of [[older, astra], [older]]) {
-      const result = await selectOracleModel(createModelSelectionContext({ model: older, available }));
+      const result = await selectOracleModel(
+        createModelSelectionContext({ model: older, available }),
+      );
       assert.equal(result.ok, true);
-      assert.equal(result.selection.modelRef, `${provider}/${available.length === 2 ? astra.id : older.id}`);
+      assert.equal(
+        result.selection.modelRef,
+        `${provider}/${available.length === 2 ? astra.id : older.id}`,
+      );
     }
   });
 }
 
-test('Oracle preserves Copilot Claude precedence before Astra and Sol fallbacks', async () => {
+test("Oracle preserves Copilot Claude precedence before Astra and Sol fallbacks", async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
-  const provider = 'github-copilot';
-  const sol = { provider, id: 'gpt-5.6-sol', reasoning: true };
-  const astra = { provider, id: 'gpt-6-astra', reasoning: true };
-  const claude = { provider, id: 'claude-opus-5', reasoning: true };
+  const provider = "github-copilot";
+  const sol = { provider, id: "gpt-5.6-sol", reasoning: true };
+  const astra = { provider, id: "gpt-6-astra", reasoning: true };
+  const claude = { provider, id: "claude-opus-5", reasoning: true };
 
   for (const [available, expected] of [
     [[sol, astra, claude], claude],
@@ -40,15 +53,30 @@ test('Oracle preserves Copilot Claude precedence before Astra and Sol fallbacks'
   }
 });
 
-test('oracle auto-selection keeps the gpt-5.6 sol/terra/luna ordering before older openai-codex fallbacks', async () => {
+test("oracle auto-selection keeps the gpt-5.6 sol/terra/luna ordering before older openai-codex fallbacks", async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
     createModelSelectionContext({
-      model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+      model: { provider: "openai-codex", id: "gpt-5.4", reasoning: true },
       available: [
-        { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
-        { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
-        { provider: 'openai-codex', id: 'gpt-5.6-terra', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+        {
+          provider: "openai-codex",
+          id: "gpt-5.6-luna",
+          reasoning: true,
+          thinkingLevelMap: { high: {}, xhigh: {} },
+        },
+        {
+          provider: "openai-codex",
+          id: "gpt-5.4",
+          reasoning: true,
+          thinkingLevelMap: { high: {}, xhigh: {} },
+        },
+        {
+          provider: "openai-codex",
+          id: "gpt-5.6-terra",
+          reasoning: true,
+          thinkingLevelMap: { high: {}, xhigh: {} },
+        },
       ],
     }),
   );
@@ -56,22 +84,22 @@ test('oracle auto-selection keeps the gpt-5.6 sol/terra/luna ordering before old
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'openai-codex/gpt-5.6-terra');
-  assert.equal(result.selection.thinkingLevel, 'xhigh');
+  assert.equal(result.selection.modelRef, "openai-codex/gpt-5.6-terra");
+  assert.equal(result.selection.thinkingLevel, "xhigh");
   assert.deepEqual(
     result.ordered.map((candidate) => candidate.modelRef),
-    ['openai-codex/gpt-5.6-terra', 'openai-codex/gpt-5.6-luna', 'openai-codex/gpt-5.4'],
+    ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.4"],
   );
 });
 
-test('oracle auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 when Fable and Opus are unavailable', async () => {
+test("oracle auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 when Fable and Opus are unavailable", async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
     createModelSelectionContext({
-      model: { provider: 'anthropic', id: 'claude-3-7-sonnet', reasoning: true },
+      model: { provider: "anthropic", id: "claude-3-7-sonnet", reasoning: true },
       available: [
-        { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
-        { provider: 'anthropic', id: 'claude-sonnet-5.0', reasoning: true },
+        { provider: "anthropic", id: "claude-sonnet-4.6", reasoning: true },
+        { provider: "anthropic", id: "claude-sonnet-5.0", reasoning: true },
       ],
     }),
   );
@@ -79,22 +107,22 @@ test('oracle auto-selection prefers Claude Sonnet 5 over Claude Sonnet 4 when Fa
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'anthropic/claude-sonnet-5.0');
+  assert.equal(result.selection.modelRef, "anthropic/claude-sonnet-5.0");
   assert.deepEqual(
     result.ordered.map((candidate) => candidate.modelRef),
-    ['anthropic/claude-sonnet-5.0', 'anthropic/claude-sonnet-4.6'],
+    ["anthropic/claude-sonnet-5.0", "anthropic/claude-sonnet-4.6"],
   );
   assert.match(result.selection.selectionReason, /hardcoded preference list for anthropic/i);
 });
 
-test('oracle auto-selection stays on the current provider when it has no reasoning models', async () => {
+test("oracle auto-selection stays on the current provider when it has no reasoning models", async () => {
   const { selectOracleModel } = await loadOracleTestUtils();
   const result = await selectOracleModel(
     createModelSelectionContext({
-      model: { provider: 'google', id: 'gemini-2.5-flash-lite', reasoning: false },
+      model: { provider: "google", id: "gemini-2.5-flash-lite", reasoning: false },
       available: [
-        { provider: 'google', id: 'project-random-lite', reasoning: false },
-        { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+        { provider: "google", id: "project-random-lite", reasoning: false },
+        { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
       ],
     }),
   );
@@ -102,56 +130,65 @@ test('oracle auto-selection stays on the current provider when it has no reasoni
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(result.selection.modelRef, 'google/project-random-lite');
+  assert.equal(result.selection.modelRef, "google/project-random-lite");
   assert.match(
     result.selection.selectionReason,
     /current provider has no reasoning models available, so the top-ranked model on that provider was used\./i,
   );
 });
 
-test('Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 remain xhigh', async () => {
+test("Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 remain xhigh", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
-  const sol = getBuiltinModels('openai').find((model) => model.id === 'gpt-6-sol');
-  const astra = getBuiltinModels('openai').find((model) => model.id === 'gpt-6-astra');
-  const opus = getBuiltinModels('anthropic').find((model) => model.id === 'claude-opus-5-5');
-  assert.ok(sol && astra && opus, 'expected Pi 0.87.1 frontier models in the pinned catalog');
+  const sol = getBuiltinModels("openai").find((model) => model.id === "gpt-6-sol");
+  const astra = getBuiltinModels("openai").find((model) => model.id === "gpt-6-astra");
+  const opus = getBuiltinModels("anthropic").find((model) => model.id === "claude-opus-5-5");
+  assert.ok(sol && astra && opus, "expected Pi 0.87.1 frontier models in the pinned catalog");
 
-  assert.equal(resolveThinkingLevel(sol, undefined).effective, 'high');
-  assert.equal(resolveThinkingLevel(astra, undefined).effective, 'xhigh');
-  assert.equal(resolveThinkingLevel(opus, undefined).effective, 'xhigh');
+  assert.equal(resolveThinkingLevel(sol, undefined).effective, "high");
+  assert.equal(resolveThinkingLevel(astra, undefined).effective, "xhigh");
+  assert.equal(resolveThinkingLevel(opus, undefined).effective, "xhigh");
 });
 
-test('Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupported off reasoning', async () => {
+test("Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupported off reasoning", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
-  for (const provider of ['openai', 'azure-openai-responses', 'openai-codex']) {
-    const sol = getBuiltinModels(provider).find((model) => model.id === 'gpt-6.1-sol');
+  for (const provider of ["openai", "azure-openai-responses", "openai-codex"]) {
+    const sol = getBuiltinModels(provider).find((model) => model.id === "gpt-6.1-sol");
     assert.ok(sol, `expected Pi 1.0 GPT-6.1 Sol in the pinned ${provider} catalog`);
     assert.equal(sol.thinkingLevelMap?.off, null);
-    if (provider === 'openai-codex') assert.equal(sol.thinkingLevelMap?.minimal, 'low');
+    if (provider === "openai-codex") assert.equal(sol.thinkingLevelMap?.minimal, "low");
 
     const automatic = resolveThinkingLevel(sol, undefined);
-    assert.deepEqual(automatic, { requested: 'high', effective: 'high', clamped: false });
-    assert.notEqual(automatic.effective, 'off');
-    assert.equal(resolveThinkingLevel(sol, 'high').effective, 'high', 'explicit high must remain authoritative');
-    assert.equal(resolveThinkingLevel(sol, 'off').effective, provider === 'openai-codex' ? 'minimal' : 'low');
+    assert.deepEqual(automatic, { requested: "high", effective: "high", clamped: false });
+    assert.notEqual(automatic.effective, "off");
+    assert.equal(
+      resolveThinkingLevel(sol, "high").effective,
+      "high",
+      "explicit high must remain authoritative",
+    );
+    assert.equal(
+      resolveThinkingLevel(sol, "off").effective,
+      provider === "openai-codex" ? "minimal" : "low",
+    );
   }
 });
 
-test('Oracle does not apply the GPT-6.1 Sol high-thinking exception to Pro/Fast variants', async () => {
+test("Oracle does not apply the GPT-6.1 Sol high-thinking exception to Pro/Fast variants", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
-  const pro = getBuiltinModels('openrouter').find((model) => model.id === 'openai/gpt-6.1-sol-pro');
-  const fast = getBuiltinModels('vercel-ai-gateway').find((model) => model.id === 'openai/gpt-6.1-sol-fast');
-  assert.ok(pro && fast, 'expected Pi 1.0 GPT-6.1 Sol Pro/Fast variants in the pinned catalog');
+  const pro = getBuiltinModels("openrouter").find((model) => model.id === "openai/gpt-6.1-sol-pro");
+  const fast = getBuiltinModels("vercel-ai-gateway").find(
+    (model) => model.id === "openai/gpt-6.1-sol-fast",
+  );
+  assert.ok(pro && fast, "expected Pi 1.0 GPT-6.1 Sol Pro/Fast variants in the pinned catalog");
 
-  assert.equal(resolveThinkingLevel(pro, undefined).requested, 'xhigh');
-  assert.equal(resolveThinkingLevel(fast, undefined).requested, 'xhigh');
+  assert.equal(resolveThinkingLevel(pro, undefined).requested, "xhigh");
+  assert.equal(resolveThinkingLevel(fast, undefined).requested, "xhigh");
 });
 
-test('oracle thinking-level resolution clamps unsupported levels for matched models', async () => {
+test("oracle thinking-level resolution clamps unsupported levels for matched models", async () => {
   const { findAvailableModel, resolveThinkingLevel } = await loadOracleTestUtils();
   const matchedModel = {
-    provider: 'openai',
-    id: 'gpt-5.5-pro',
+    provider: "openai",
+    id: "gpt-5.5-pro",
     reasoning: true,
     thinkingLevelMap: {
       off: {},
@@ -166,11 +203,11 @@ test('oracle thinking-level resolution clamps unsupported levels for matched mod
     available: [matchedModel],
   });
 
-  const matched = await findAvailableModel(ctx, 'openai/gpt-5.5-pro');
+  const matched = await findAvailableModel(ctx, "openai/gpt-5.5-pro");
   assert.equal(matched, matchedModel);
-  assert.deepEqual(resolveThinkingLevel(matched, 'xhigh'), {
-    requested: 'xhigh',
-    effective: 'low',
+  assert.deepEqual(resolveThinkingLevel(matched, "xhigh"), {
+    requested: "xhigh",
+    effective: "low",
     clamped: true,
   });
 
@@ -178,14 +215,20 @@ test('oracle thinking-level resolution clamps unsupported levels for matched mod
     ...matchedModel,
     thinkingLevelMap: { ...matchedModel.thinkingLevelMap, xhigh: {}, max: {} },
   };
-  assert.deepEqual(resolveThinkingLevel(maxModel, 'max'), {
-    requested: 'max',
-    effective: 'max',
+  assert.deepEqual(resolveThinkingLevel(maxModel, "max"), {
+    requested: "max",
+    effective: "max",
     clamped: false,
   });
-  assert.deepEqual(resolveThinkingLevel({ ...maxModel, thinkingLevelMap: { ...maxModel.thinkingLevelMap, max: null } }, 'max'), {
-    requested: 'max',
-    effective: 'xhigh',
-    clamped: true,
-  });
+  assert.deepEqual(
+    resolveThinkingLevel(
+      { ...maxModel, thinkingLevelMap: { ...maxModel.thinkingLevelMap, max: null } },
+      "max",
+    ),
+    {
+      requested: "max",
+      effective: "xhigh",
+      clamped: true,
+    },
+  );
 });

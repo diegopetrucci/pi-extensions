@@ -154,10 +154,7 @@ type ExpandResult = ExpandOk | ExpandFail;
  * declares.  We also require typeof === "string" to reject any non-string
  * own property that somehow ends up in the env record.
  */
-function lookupVar(
-  env: Record<string, string>,
-  name: string
-): string | undefined {
+function lookupVar(env: Record<string, string>, name: string): string | undefined {
   if (Object.hasOwn(env, name) && typeof env[name] === "string") {
     return env[name];
   }
@@ -176,10 +173,7 @@ function lookupVar(
  *   only the variable (never its value).
  * - `env` supplements `process.env`; `env` values take precedence.
  */
-export function expandVars(
-  template: string,
-  env: Record<string, string>
-): ExpandResult {
+export function expandVars(template: string, env: Record<string, string>): ExpandResult {
   let missingVar: string | undefined;
 
   const result = template.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
@@ -224,10 +218,7 @@ function isStringArray(v: unknown): v is string[] {
  * @param env   Optional supplemental environment variables used for
  *              `${VAR}` expansion (merged over `process.env`).
  */
-export function parseMcpJson(
-  text: string,
-  env: Record<string, string> = {}
-): ParseResult {
+export function parseMcpJson(text: string, env: Record<string, string> = {}): ParseResult {
   const warnings: string[] = [];
   const servers: ParsedServer[] = [];
 
@@ -257,8 +248,7 @@ export function parseMcpJson(
 
   for (const [name, rawEntry] of Object.entries(mcpServers)) {
     const safeName = sanitizeStringForWarning(name);
-    const warn = (msg: string) =>
-      warnings.push(`project-mcp-json: server "${safeName}": ${msg}`);
+    const warn = (msg: string) => warnings.push(`project-mcp-json: server "${safeName}": ${msg}`);
 
     if (!SERVER_NAME_RE.test(name)) {
       warn("invalid name (allowed: letters, digits, _ and -); skipping");
@@ -282,12 +272,10 @@ export function parseMcpJson(
       continue;
     }
 
-    const unknownFields = Object.keys(rawEntry).filter(
-      (k) => !ALL_KNOWN_FIELDS.has(k)
-    );
+    const unknownFields = Object.keys(rawEntry).filter((k) => !ALL_KNOWN_FIELDS.has(k));
     if (unknownFields.length > 0) {
       warn(
-        `unknown field(s) "${unknownFields.map(sanitizeStringForWarning).join('", "')}" are not allowed; skipping`
+        `unknown field(s) "${unknownFields.map(sanitizeStringForWarning).join('", "')}" are not allowed; skipping`,
       );
       continue;
     }
@@ -348,7 +336,7 @@ export function parseMcpJson(
 function parseStdioEntry(
   raw: Record<string, unknown>,
   env: Record<string, string>,
-  warn: (msg: string) => void
+  warn: (msg: string) => void,
 ): McpStdioServerConfig | null {
   const rawCommand = raw["command"];
   if (typeof rawCommand !== "string" || rawCommand.length === 0) {
@@ -357,7 +345,9 @@ function parseStdioEntry(
   }
   const commandExpanded = expandVars(rawCommand, env);
   if (!commandExpanded.ok) {
-    warn(`variable "${safeVarName(commandExpanded.missingVar)}" in command is not set and has no default; skipping`);
+    warn(
+      `variable "${safeVarName(commandExpanded.missingVar)}" in command is not set and has no default; skipping`,
+    );
     return null;
   }
 
@@ -370,7 +360,9 @@ function parseStdioEntry(
   for (const arg of rawArgs ?? []) {
     const res = expandVars(arg, env);
     if (!res.ok) {
-      warn(`variable "${safeVarName(res.missingVar)}" in args is not set and has no default; skipping`);
+      warn(
+        `variable "${safeVarName(res.missingVar)}" in args is not set and has no default; skipping`,
+      );
       return null;
     }
     expandedArgs.push(res.value);
@@ -390,7 +382,9 @@ function parseStdioEntry(
       }
       const res = expandVars(v, env);
       if (!res.ok) {
-        warn(`variable "${safeVarName(res.missingVar)}" in env["${sanitizeStringForWarning(k)}"] is not set and has no default; skipping`);
+        warn(
+          `variable "${safeVarName(res.missingVar)}" in env["${sanitizeStringForWarning(k)}"] is not set and has no default; skipping`,
+        );
         return null;
       }
       // Encode so Pi's second pass treats the expanded value as a literal
@@ -407,7 +401,9 @@ function parseStdioEntry(
   if (typeof rawCwd === "string") {
     const res = expandVars(rawCwd, env);
     if (!res.ok) {
-      warn(`variable "${safeVarName(res.missingVar)}" in cwd is not set and has no default; skipping`);
+      warn(
+        `variable "${safeVarName(res.missingVar)}" in cwd is not set and has no default; skipping`,
+      );
       return null;
     }
     expandedCwd = res.value;
@@ -428,7 +424,7 @@ function parseStdioEntry(
 function parseHttpEntry(
   raw: Record<string, unknown>,
   env: Record<string, string>,
-  warn: (msg: string) => void
+  warn: (msg: string) => void,
 ): McpHttpServerConfig | null {
   const rawUrl = raw["url"];
   if (typeof rawUrl !== "string" || rawUrl.length === 0) {
@@ -437,7 +433,9 @@ function parseHttpEntry(
   }
   const urlExpanded = expandVars(rawUrl, env);
   if (!urlExpanded.ok) {
-    warn(`variable "${safeVarName(urlExpanded.missingVar)}" in url is not set and has no default; skipping`);
+    warn(
+      `variable "${safeVarName(urlExpanded.missingVar)}" in url is not set and has no default; skipping`,
+    );
     return null;
   }
 
@@ -455,7 +453,9 @@ function parseHttpEntry(
       }
       const res = expandVars(v, env);
       if (!res.ok) {
-        warn(`variable "${safeVarName(res.missingVar)}" in headers["${sanitizeStringForWarning(k)}"] is not set and has no default; skipping`);
+        warn(
+          `variable "${safeVarName(res.missingVar)}" in headers["${sanitizeStringForWarning(k)}"] is not set and has no default; skipping`,
+        );
         return null;
       }
       encodedHeaders[k] = encodeLiteral(res.value);
@@ -469,12 +469,10 @@ function parseHttpEntry(
       warn("oauth must be an object; skipping");
       return null;
     }
-    const oauthUnknown = Object.keys(rawOauth).filter(
-      (k) => !OAUTH_ALLOWED_FIELDS.has(k)
-    );
+    const oauthUnknown = Object.keys(rawOauth).filter((k) => !OAUTH_ALLOWED_FIELDS.has(k));
     if (oauthUnknown.length > 0) {
       warn(
-        `unknown oauth field(s) "${oauthUnknown.map(sanitizeStringForWarning).join('", "')}" are not allowed; skipping`
+        `unknown oauth field(s) "${oauthUnknown.map(sanitizeStringForWarning).join('", "')}" are not allowed; skipping`,
       );
       return null;
     }
@@ -498,7 +496,9 @@ function parseHttpEntry(
       }
       const res = expandVars(rawClientSecret, env);
       if (!res.ok) {
-        warn(`variable "${safeVarName(res.missingVar)}" in oauth.clientSecret is not set and has no default; skipping`);
+        warn(
+          `variable "${safeVarName(res.missingVar)}" in oauth.clientSecret is not set and has no default; skipping`,
+        );
         return null;
       }
       oauth.clientSecret = encodeLiteral(res.value);

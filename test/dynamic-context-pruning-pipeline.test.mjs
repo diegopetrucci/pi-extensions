@@ -1,10 +1,10 @@
-import assert from 'node:assert/strict';
-import path from 'node:path';
-import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const modulePath = path.join(repoRoot, 'extensions/dynamic-context-pruning/index.ts');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const modulePath = path.join(repoRoot, "extensions/dynamic-context-pruning/index.ts");
 const dcp = await import(pathToFileURL(modulePath).href);
 
 const {
@@ -19,27 +19,32 @@ const {
   classifyAgentStateFromMessages,
 } = dcp;
 
-function toolCallMessages({ toolCallId = 'call_1', toolName = 'bash', isError = false, resultText = 'a'.repeat(500) } = {}) {
+function toolCallMessages({
+  toolCallId = "call_1",
+  toolName = "bash",
+  isError = false,
+  resultText = "a".repeat(500),
+} = {}) {
   return [
-    { role: 'user', content: 'do the thing', timestamp: 1 },
+    { role: "user", content: "do the thing", timestamp: 1 },
     {
-      role: 'assistant',
-      content: [{ type: 'toolCall', id: toolCallId, name: toolName, arguments: { command: 'ls' } }],
+      role: "assistant",
+      content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: { command: "ls" } }],
       timestamp: 2,
     },
     {
-      role: 'toolResult',
+      role: "toolResult",
       toolCallId,
       toolName,
-      content: [{ type: 'text', text: resultText }],
+      content: [{ type: "text", text: resultText }],
       isError,
       timestamp: 3,
     },
-    { role: 'assistant', content: [{ type: 'text', text: 'done' }], timestamp: 4 },
+    { role: "assistant", content: [{ type: "text", text: "done" }], timestamp: 4 },
   ];
 }
 
-test('pipeline is a no-op when disabled', () => {
+test("pipeline is a no-op when disabled", () => {
   const messages = toolCallMessages();
   const config = { ...defaultConfig(), enabled: false };
   const result = runDynamicContextPruningPipeline({
@@ -52,29 +57,35 @@ test('pipeline is a no-op when disabled', () => {
   assert.deepEqual(result.newlyAppliedDecisions, []);
 });
 
-test('bounded nestedCalls remain metadata and do not create child prune targets or token attribution', () => {
-  const messages = toolCallMessages({ resultText: 'parent output' });
+test("bounded nestedCalls remain metadata and do not create child prune targets or token attribution", () => {
+  const messages = toolCallMessages({ resultText: "parent output" });
   messages[2].nestedCalls = {
     complete: false,
-    calls: [{ id: 'call_1/1', name: 'read', arguments: { path: '/not-transcript' }, status: 'ok' }],
+    calls: [{ id: "call_1/1", name: "read", arguments: { path: "/not-transcript" }, status: "ok" }],
   };
 
   const occurrences = collectCompletedToolCallOccurrences(messages);
-  assert.deepEqual(occurrences.map((occurrence) => occurrence.toolCallId), ['call_1']);
+  assert.deepEqual(
+    occurrences.map((occurrence) => occurrence.toolCallId),
+    ["call_1"],
+  );
   const items = buildPrunableItems(messages, new Map(), new Set());
-  assert.deepEqual(items.map((item) => item.toolCallId), ['call_1']);
-  assert.equal(items[0].estimatedTokens, Math.ceil('parent output'.length / 4));
+  assert.deepEqual(
+    items.map((item) => item.toolCallId),
+    ["call_1"],
+  );
+  assert.equal(items[0].estimatedTokens, Math.ceil("parent output".length / 4));
   assert.equal(messages.length, 4);
-  assert.equal(messages.filter((message) => message.toolCallId === 'call_1/1').length, 0);
+  assert.equal(messages.filter((message) => message.toolCallId === "call_1/1").length, 0);
 });
 
-test('applyPruneDecision replaces tool result content in place, preserving ids/order (pairing invariant)', () => {
+test("applyPruneDecision replaces tool result content in place, preserving ids/order (pairing invariant)", () => {
   const messages = toolCallMessages();
   const decision = proposalToDecisionRecord({
-    strategyId: 'test-strategy',
-    toolCallId: 'call_1',
-    kind: 'tool_result_content',
-    reason: 'stale output',
+    strategyId: "test-strategy",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "stale output",
   });
 
   const before = JSON.parse(JSON.stringify(messages));
@@ -88,15 +99,15 @@ test('applyPruneDecision replaces tool result content in place, preserving ids/o
   messages.forEach((message, index) => assert.equal(message.role, before[index].role));
 
   // toolCall / toolResult ids are unchanged -> no orphan pairs possible.
-  assert.equal(messages[1].content[0].id, 'call_1');
-  assert.equal(messages[2].toolCallId, 'call_1');
+  assert.equal(messages[1].content[0].id, "call_1");
+  assert.equal(messages[2].toolCallId, "call_1");
   assert.equal(messages[2].toolName, before[2].toolName);
   assert.equal(messages[2].isError, before[2].isError);
 
   // Content was replaced with a placeholder, not left untouched or removed.
   assert.equal(messages[2].content.length, 1);
-  assert.equal(messages[2].content[0].type, 'text');
-  assert.ok(messages[2].content[0].text.includes('pruned by dynamic-context-pruning'));
+  assert.equal(messages[2].content[0].type, "text");
+  assert.ok(messages[2].content[0].text.includes("pruned by dynamic-context-pruning"));
   assert.notEqual(messages[2].content[0].text, before[2].content[0].text);
 
   // Assistant/user text blocks are never touched.
@@ -104,42 +115,45 @@ test('applyPruneDecision replaces tool result content in place, preserving ids/o
   assert.deepEqual(messages[3], before[3]);
 });
 
-test('applyPruneDecision only redacts tool_call_input for errored calls', () => {
+test("applyPruneDecision only redacts tool_call_input for errored calls", () => {
   const successMessages = toolCallMessages({ isError: false });
-  const errorMessages = toolCallMessages({ toolCallId: 'call_2', isError: true });
+  const errorMessages = toolCallMessages({ toolCallId: "call_2", isError: true });
 
   const successDecision = proposalToDecisionRecord({
-    strategyId: 'test-strategy',
-    toolCallId: 'call_1',
-    kind: 'tool_call_input',
-    reason: 'redundant input',
+    strategyId: "test-strategy",
+    toolCallId: "call_1",
+    kind: "tool_call_input",
+    reason: "redundant input",
   });
   const errorDecision = proposalToDecisionRecord({
-    strategyId: 'test-strategy',
-    toolCallId: 'call_2',
-    kind: 'tool_call_input',
-    reason: 'redundant input',
+    strategyId: "test-strategy",
+    toolCallId: "call_2",
+    kind: "tool_call_input",
+    reason: "redundant input",
   });
 
   const successResult = applyPruneDecision(successMessages, successDecision);
-  assert.equal(successResult.applied, false, 'must never redact input for a successful tool call');
-  assert.deepEqual(successMessages[1].content[0].arguments, { command: 'ls' });
+  assert.equal(successResult.applied, false, "must never redact input for a successful tool call");
+  assert.deepEqual(successMessages[1].content[0].arguments, { command: "ls" });
 
   const errorResult = applyPruneDecision(errorMessages, errorDecision);
   assert.equal(errorResult.applied, true);
-  assert.deepEqual(errorMessages[1].content[0].arguments, { pruned: true, reason: 'redundant input' });
+  assert.deepEqual(errorMessages[1].content[0].arguments, {
+    pruned: true,
+    reason: "redundant input",
+  });
   // The tool call id/name/type are preserved; only arguments changed.
-  assert.equal(errorMessages[1].content[0].id, 'call_2');
-  assert.equal(errorMessages[1].content[0].name, 'bash');
+  assert.equal(errorMessages[1].content[0].id, "call_2");
+  assert.equal(errorMessages[1].content[0].name, "bash");
 });
 
-test('applyPruneDecision gracefully no-ops when the target toolCallId is absent (e.g. after compaction)', () => {
+test("applyPruneDecision gracefully no-ops when the target toolCallId is absent (e.g. after compaction)", () => {
   const messages = toolCallMessages();
   const decision = proposalToDecisionRecord({
-    strategyId: 'test-strategy',
-    toolCallId: 'does-not-exist',
-    kind: 'tool_result_content',
-    reason: 'stale output',
+    strategyId: "test-strategy",
+    toolCallId: "does-not-exist",
+    kind: "tool_result_content",
+    reason: "stale output",
   });
   const before = JSON.parse(JSON.stringify(messages));
   const result = applyPruneDecision(messages, decision);
@@ -148,13 +162,13 @@ test('applyPruneDecision gracefully no-ops when the target toolCallId is absent 
   assert.deepEqual(messages, before);
 });
 
-test('pipeline degrades gracefully when a persisted decision references an absent message', () => {
+test("pipeline degrades gracefully when a persisted decision references an absent message", () => {
   const messages = toolCallMessages();
   const staleDecision = proposalToDecisionRecord({
-    strategyId: 'old-strategy',
-    toolCallId: 'gone-call-id',
-    kind: 'tool_result_content',
-    reason: 'no longer present',
+    strategyId: "old-strategy",
+    toolCallId: "gone-call-id",
+    kind: "tool_result_content",
+    reason: "no longer present",
   });
 
   const result = runDynamicContextPruningPipeline({
@@ -169,11 +183,16 @@ test('pipeline degrades gracefully when a persisted decision references an absen
   assert.deepEqual(result.newlyAppliedDecisions, []);
 });
 
-test('propose/apply split: a strategy proposes, the pipeline applies and reports it for appendEntry exactly once', (t) => {
+test("propose/apply split: a strategy proposes, the pipeline applies and reports it for appendEntry exactly once", (t) => {
   const fakeStrategy = {
-    id: 'test-strategy',
+    id: "test-strategy",
     propose: () => [
-      { strategyId: 'test-strategy', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'stale output' },
+      {
+        strategyId: "test-strategy",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "stale output",
+      },
     ],
   };
   dcp.STRATEGIES.push(fakeStrategy);
@@ -188,9 +207,14 @@ test('propose/apply split: a strategy proposes, the pipeline applies and reports
   const config = {
     ...defaultConfig(),
     protections: { ...defaultConfig().protections, recentTurns: 0 },
-    gate: { ...defaultConfig().gate, mode: 'off' },
+    gate: { ...defaultConfig().gate, mode: "off" },
   };
-  const idempotencyKey = buildIdempotencyKey({ strategyId: 'test-strategy', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'x' });
+  const idempotencyKey = buildIdempotencyKey({
+    strategyId: "test-strategy",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "x",
+  });
 
   // First call: nothing persisted yet -> the proposal must be applied and reported once.
   const firstCall = runDynamicContextPruningPipeline({
@@ -201,7 +225,7 @@ test('propose/apply split: a strategy proposes, the pipeline applies and reports
   });
   assert.equal(firstCall.newlyAppliedDecisions.length, 1);
   assert.equal(firstCall.newlyAppliedDecisions[0].idempotencyKey, idempotencyKey);
-  assert.ok(firstCall.messages[2].content[0].text.includes('pruned by'));
+  assert.ok(firstCall.messages[2].content[0].text.includes("pruned by"));
 
   // Second call: the same decision is now persisted/known -> it must still be
   // applied (pruning is recomputed every call) but never re-reported.
@@ -212,8 +236,12 @@ test('propose/apply split: a strategy proposes, the pipeline applies and reports
     persistedDecisions: [persistedDecision],
     knownIdempotencyKeys: new Set([persistedDecision.idempotencyKey]),
   });
-  assert.equal(secondCall.newlyAppliedDecisions.length, 0, 'must not re-report an already-known decision');
-  assert.ok(secondCall.messages[2].content[0].text.includes('pruned by'));
+  assert.equal(
+    secondCall.newlyAppliedDecisions.length,
+    0,
+    "must not re-report an already-known decision",
+  );
+  assert.ok(secondCall.messages[2].content[0].text.includes("pruned by"));
 });
 
 // ---------------------------------------------------------------------------
@@ -227,21 +255,33 @@ function offGateNoRecencyConfig() {
   return {
     ...defaultConfig(),
     protections: { ...defaultConfig().protections, recentTurns: 0 },
-    gate: { ...defaultConfig().gate, mode: 'off' },
+    gate: { ...defaultConfig().gate, mode: "off" },
   };
 }
 
-test('two fresh strategies proposing the same toolCallId collapse to one gate candidate / one applied decision, winner by STRATEGIES order', (t) => {
+test("two fresh strategies proposing the same toolCallId collapse to one gate candidate / one applied decision, winner by STRATEGIES order", (t) => {
   const stratA = {
-    id: 'fake-overlap-a',
+    id: "fake-overlap-a",
     propose: () => [
-      { strategyId: 'fake-overlap-a', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-a', placeholder: 'PLACEHOLDER_A' },
+      {
+        strategyId: "fake-overlap-a",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "reason-a",
+        placeholder: "PLACEHOLDER_A",
+      },
     ],
   };
   const stratB = {
-    id: 'fake-overlap-b',
+    id: "fake-overlap-b",
     propose: () => [
-      { strategyId: 'fake-overlap-b', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-b', placeholder: 'PLACEHOLDER_B' },
+      {
+        strategyId: "fake-overlap-b",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "reason-b",
+        placeholder: "PLACEHOLDER_B",
+      },
     ],
   };
   // Pushed in this order -> stratA is earlier in STRATEGIES and must win.
@@ -261,29 +301,49 @@ test('two fresh strategies proposing the same toolCallId collapse to one gate ca
     knownIdempotencyKeys: new Set(),
   });
 
-  assert.equal(result.gate.accepted.length, 1, 'exactly one gate candidate should survive the collapse');
+  assert.equal(
+    result.gate.accepted.length,
+    1,
+    "exactly one gate candidate should survive the collapse",
+  );
   assert.equal(result.gate.rejected.length, 0);
-  assert.equal(result.newlyAppliedDecisions.length, 1, 'exactly one decision should be applied/persisted');
-  assert.equal(result.newlyAppliedStats.length, 1, 'savings must be counted exactly once');
+  assert.equal(
+    result.newlyAppliedDecisions.length,
+    1,
+    "exactly one decision should be applied/persisted",
+  );
+  assert.equal(result.newlyAppliedStats.length, 1, "savings must be counted exactly once");
 
   // Deterministic winner: earlier STRATEGIES entry (stratA) wins.
-  assert.equal(result.newlyAppliedDecisions[0].strategyId, 'fake-overlap-a');
-  assert.equal(result.gate.accepted[0].strategyId, 'fake-overlap-a');
-  assert.ok(result.messages[2].content[0].text.includes('PLACEHOLDER_A'));
-  assert.ok(!result.messages[2].content[0].text.includes('PLACEHOLDER_B'));
+  assert.equal(result.newlyAppliedDecisions[0].strategyId, "fake-overlap-a");
+  assert.equal(result.gate.accepted[0].strategyId, "fake-overlap-a");
+  assert.ok(result.messages[2].content[0].text.includes("PLACEHOLDER_A"));
+  assert.ok(!result.messages[2].content[0].text.includes("PLACEHOLDER_B"));
 });
 
-test('overlap collapse does not affect non-overlapping targets (regression)', (t) => {
+test("overlap collapse does not affect non-overlapping targets (regression)", (t) => {
   const stratA = {
-    id: 'fake-nonoverlap-a',
+    id: "fake-nonoverlap-a",
     propose: () => [
-      { strategyId: 'fake-nonoverlap-a', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'reason-a', placeholder: 'PLACEHOLDER_A' },
+      {
+        strategyId: "fake-nonoverlap-a",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "reason-a",
+        placeholder: "PLACEHOLDER_A",
+      },
     ],
   };
   const stratB = {
-    id: 'fake-nonoverlap-b',
+    id: "fake-nonoverlap-b",
     propose: () => [
-      { strategyId: 'fake-nonoverlap-b', toolCallId: 'call_2', kind: 'tool_result_content', reason: 'reason-b', placeholder: 'PLACEHOLDER_B' },
+      {
+        strategyId: "fake-nonoverlap-b",
+        toolCallId: "call_2",
+        kind: "tool_result_content",
+        reason: "reason-b",
+        placeholder: "PLACEHOLDER_B",
+      },
     ],
   };
   dcp.STRATEGIES.push(stratA, stratB);
@@ -298,8 +358,12 @@ test('overlap collapse does not affect non-overlapping targets (regression)', (t
   // here — this test is isolated to the two fake strategies' non-overlapping
   // targets.
   const messages = [
-    ...toolCallMessages({ toolCallId: 'call_1', toolName: 'bash', resultText: 'a'.repeat(500) }).slice(0, 3),
-    ...toolCallMessages({ toolCallId: 'call_2', toolName: 'read', resultText: 'b'.repeat(500) }),
+    ...toolCallMessages({
+      toolCallId: "call_1",
+      toolName: "bash",
+      resultText: "a".repeat(500),
+    }).slice(0, 3),
+    ...toolCallMessages({ toolCallId: "call_2", toolName: "read", resultText: "b".repeat(500) }),
   ];
 
   const result = runDynamicContextPruningPipeline({
@@ -309,30 +373,38 @@ test('overlap collapse does not affect non-overlapping targets (regression)', (t
     knownIdempotencyKeys: new Set(),
   });
 
-  assert.equal(result.gate.accepted.length, 2, 'both non-overlapping targets should still be gate candidates');
-  assert.equal(result.newlyAppliedDecisions.length, 2, 'both non-overlapping targets should still be applied');
+  assert.equal(
+    result.gate.accepted.length,
+    2,
+    "both non-overlapping targets should still be gate candidates",
+  );
+  assert.equal(
+    result.newlyAppliedDecisions.length,
+    2,
+    "both non-overlapping targets should still be applied",
+  );
   const strategyIds = result.newlyAppliedDecisions.map((d) => d.strategyId).sort();
-  assert.deepEqual(strategyIds, ['fake-nonoverlap-a', 'fake-nonoverlap-b']);
+  assert.deepEqual(strategyIds, ["fake-nonoverlap-a", "fake-nonoverlap-b"]);
 });
 
-test('a persisted decision and a fresh decision targeting the same toolCallId do not double-count stats (pe-j7sb)', (t) => {
+test("a persisted decision and a fresh decision targeting the same toolCallId do not double-count stats (pe-j7sb)", (t) => {
   const persistedDecision = proposalToDecisionRecord({
-    strategyId: 'old-strategy',
-    toolCallId: 'call_1',
-    kind: 'tool_result_content',
-    reason: 'persisted reason',
-    placeholder: 'PERSISTED_PLACEHOLDER',
+    strategyId: "old-strategy",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "persisted reason",
+    placeholder: "PERSISTED_PLACEHOLDER",
   });
 
   const freshOverlap = {
-    id: 'fake-fresh-overlap',
+    id: "fake-fresh-overlap",
     propose: () => [
       {
-        strategyId: 'fake-fresh-overlap',
-        toolCallId: 'call_1',
-        kind: 'tool_result_content',
-        reason: 'fresh reason',
-        placeholder: 'FRESH_PLACEHOLDER',
+        strategyId: "fake-fresh-overlap",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "fresh reason",
+        placeholder: "FRESH_PLACEHOLDER",
       },
     ],
   };
@@ -353,14 +425,22 @@ test('a persisted decision and a fresh decision targeting the same toolCallId do
   // The persisted decision is not newly-reported (already known), and the
   // overlapping fresh decision must be skipped entirely (already-pruned
   // guard) rather than silently re-applied and credited stats.
-  assert.equal(result.newlyAppliedDecisions.length, 0, 'no new decision should be reported for this call');
-  assert.equal(result.newlyAppliedStats.length, 0, 'no stats should be double-counted for the same target');
+  assert.equal(
+    result.newlyAppliedDecisions.length,
+    0,
+    "no new decision should be reported for this call",
+  );
+  assert.equal(
+    result.newlyAppliedStats.length,
+    0,
+    "no stats should be double-counted for the same target",
+  );
   // The persisted decision's placeholder wins (applied first in allCandidates order).
-  assert.ok(result.messages[2].content[0].text.includes('PERSISTED_PLACEHOLDER'));
-  assert.ok(!result.messages[2].content[0].text.includes('FRESH_PLACEHOLDER'));
+  assert.ok(result.messages[2].content[0].text.includes("PERSISTED_PLACEHOLDER"));
+  assert.ok(!result.messages[2].content[0].text.includes("FRESH_PLACEHOLDER"));
 });
 
-test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s totalTokensRemoved (pe-j7sb follow-up)', (t) => {
+test("a persisted-vs-fresh overlap must not inflate the net-benefit gate's totalTokensRemoved (pe-j7sb follow-up)", (t) => {
   // call_2 is a genuinely NEW fresh candidate: its savings alone are small
   // enough that the gate (threshold 20) rejects it. call_1 is already
   // claimed by a persisted decision from a different strategy; a fresh
@@ -377,23 +457,33 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
   // `gateCandidates` before the gate ever runs, so only call_2's genuine
   // savings are counted and the batch stays rejected.
   const persistedDecision = proposalToDecisionRecord({
-    strategyId: 'old-strategy',
-    toolCallId: 'call_1',
-    kind: 'tool_result_content',
-    reason: 'persisted reason',
-    placeholder: 'PERSISTED_PLACEHOLDER',
+    strategyId: "old-strategy",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "persisted reason",
+    placeholder: "PERSISTED_PLACEHOLDER",
   });
 
   const freshReal = {
-    id: 'fake-real',
+    id: "fake-real",
     propose: () => [
-      { strategyId: 'fake-real', toolCallId: 'call_2', kind: 'tool_result_content', reason: 'real reason' },
+      {
+        strategyId: "fake-real",
+        toolCallId: "call_2",
+        kind: "tool_result_content",
+        reason: "real reason",
+      },
     ],
   };
   const freshOverlap = {
-    id: 'fake-overlap',
+    id: "fake-overlap",
     propose: () => [
-      { strategyId: 'fake-overlap', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'overlap reason' },
+      {
+        strategyId: "fake-overlap",
+        toolCallId: "call_1",
+        kind: "tool_result_content",
+        reason: "overlap reason",
+      },
     ],
   };
   dcp.STRATEGIES.push(freshReal, freshOverlap);
@@ -411,8 +501,8 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
   // differs between the buggy and fixed behavior, isolating exactly the gap
   // this fix closes.
   const messages = [
-    ...toolCallMessages({ toolCallId: 'call_2', toolName: 'read', resultText: 'b'.repeat(200) }),
-    ...toolCallMessages({ toolCallId: 'call_1', toolName: 'bash', resultText: 'a'.repeat(500) }),
+    ...toolCallMessages({ toolCallId: "call_2", toolName: "read", resultText: "b".repeat(200) }),
+    ...toolCallMessages({ toolCallId: "call_1", toolName: "bash", resultText: "a".repeat(500) }),
   ];
 
   const config = {
@@ -424,7 +514,7 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
     thresholds: { ...defaultConfig().thresholds, minCharsSaved: 0 },
     gate: {
       ...defaultConfig().gate,
-      mode: 'on',
+      mode: "on",
       cachedPriceRatio: 0.1,
       breakEvenThreshold: 20,
       breakEvenThresholdByState: { idle: 20, mid_loop: 20 },
@@ -443,34 +533,56 @@ test('a persisted-vs-fresh overlap must not inflate the net-benefit gate\'s tota
   // ACCEPTED. With the fix: only call_2's 33 tokens are ever gate
   // candidates, so the batch stays REJECTED (33 tokens removed isn't
   // enough to amortize the cache-bust penalty at threshold 20).
-  assert.equal(result.gate.totalTokensRemoved, 33, 'gate must only ever see call_2\'s genuine savings, never call_1\'s claimed-target overlap');
-  assert.equal(result.gate.accepted.length, 0, 'the batch must be rejected once the double-count is removed');
-  assert.equal(result.gate.rejected.length, 1, 'only the genuinely-new call_2 candidate should reach the gate at all');
-  assert.equal(result.gate.rejected[0].strategyId, 'fake-real');
+  assert.equal(
+    result.gate.totalTokensRemoved,
+    33,
+    "gate must only ever see call_2's genuine savings, never call_1's claimed-target overlap",
+  );
+  assert.equal(
+    result.gate.accepted.length,
+    0,
+    "the batch must be rejected once the double-count is removed",
+  );
+  assert.equal(
+    result.gate.rejected.length,
+    1,
+    "only the genuinely-new call_2 candidate should reach the gate at all",
+  );
+  assert.equal(result.gate.rejected[0].strategyId, "fake-real");
 
   // Nothing new applied this call: call_2 was rejected by the gate, and
   // call_1's fresh proposal was excluded before gating (its target is
   // already claimed by the persisted decision).
   assert.equal(result.newlyAppliedDecisions.length, 0);
   assert.equal(result.newlyAppliedStats.length, 0);
-  assert.ok(result.messages[6].content[0].text.includes('PERSISTED_PLACEHOLDER'));
+  assert.ok(result.messages[6].content[0].text.includes("PERSISTED_PLACEHOLDER"));
 });
 
-test('buildIdempotencyKey is stable for the same strategy/kind/toolCallId', () => {
-  const pair = findToolCallPairIndices(toolCallMessages(), 'call_1');
+test("buildIdempotencyKey is stable for the same strategy/kind/toolCallId", () => {
+  const pair = findToolCallPairIndices(toolCallMessages(), "call_1");
   assert.equal(pair.assistantIndex, 1);
   assert.equal(pair.resultIndex, 2);
 
-  const keyA = buildIdempotencyKey({ strategyId: 's', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'x' });
-  const keyB = buildIdempotencyKey({ strategyId: 's', toolCallId: 'call_1', kind: 'tool_result_content', reason: 'y' });
-  assert.equal(keyA, keyB, 'idempotency key must not depend on the (possibly varying) reason text');
+  const keyA = buildIdempotencyKey({
+    strategyId: "s",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "x",
+  });
+  const keyB = buildIdempotencyKey({
+    strategyId: "s",
+    toolCallId: "call_1",
+    kind: "tool_result_content",
+    reason: "y",
+  });
+  assert.equal(keyA, keyB, "idempotency key must not depend on the (possibly varying) reason text");
 });
 
 // ---------------------------------------------------------------------------
 // pe-zy4s: agent-state detection actually reaches the gate
 // ---------------------------------------------------------------------------
 
-test('runDynamicContextPruningPipeline: agentState classified from the message payload reaches the net-benefit gate threshold', () => {
+test("runDynamicContextPruningPipeline: agentState classified from the message payload reaches the net-benefit gate threshold", () => {
   // This mirrors exactly what the `context` event handler does: classify the
   // agent state from the message payload, then pass it through to the
   // pipeline. Using a distinct per-state threshold config makes it directly
@@ -481,10 +593,8 @@ test('runDynamicContextPruningPipeline: agentState classified from the message p
     gate: { ...defaultConfig().gate, breakEvenThresholdByState: { idle: 5, mid_loop: 40 } },
   };
 
-  const idleMessages = [
-    { role: 'user', content: 'do the thing', timestamp: 1 },
-  ];
-  assert.equal(classifyAgentStateFromMessages(idleMessages), 'idle');
+  const idleMessages = [{ role: "user", content: "do the thing", timestamp: 1 }];
+  assert.equal(classifyAgentStateFromMessages(idleMessages), "idle");
   const idleResult = runDynamicContextPruningPipeline({
     messages: idleMessages,
     config,
@@ -495,11 +605,22 @@ test('runDynamicContextPruningPipeline: agentState classified from the message p
   assert.equal(idleResult.gate.threshold, 5);
 
   const midLoopMessages = [
-    { role: 'user', content: 'do the thing', timestamp: 1 },
-    { role: 'assistant', content: [{ type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'ls' } }], timestamp: 2 },
-    { role: 'toolResult', toolCallId: 'call_1', toolName: 'bash', content: [{ type: 'text', text: 'ok' }], isError: false, timestamp: 3 },
+    { role: "user", content: "do the thing", timestamp: 1 },
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } }],
+      timestamp: 2,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call_1",
+      toolName: "bash",
+      content: [{ type: "text", text: "ok" }],
+      isError: false,
+      timestamp: 3,
+    },
   ];
-  assert.equal(classifyAgentStateFromMessages(midLoopMessages), 'mid_loop');
+  assert.equal(classifyAgentStateFromMessages(midLoopMessages), "mid_loop");
   const midLoopResult = runDynamicContextPruningPipeline({
     messages: midLoopMessages,
     config,

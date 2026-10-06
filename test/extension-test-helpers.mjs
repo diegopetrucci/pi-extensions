@@ -1,8 +1,8 @@
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, '..');
+const repoRoot = path.resolve(testDir, "..");
 
 export async function loadExtension(relativePath) {
   const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath)).href;
@@ -32,7 +32,7 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
     async exec(...args) {
       execCalls.push(args);
       if (!execImpl) {
-        throw new Error('pi.exec should not have been called');
+        throw new Error("pi.exec should not have been called");
       }
       return execImpl(...args);
     },

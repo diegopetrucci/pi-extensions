@@ -1,26 +1,26 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createExtensionHarness, loadExtension } from './extension-test-helpers.mjs';
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createExtensionHarness, loadExtension } from "./extension-test-helpers.mjs";
 
 function getHandler(handlers, eventName) {
   const handler = handlers.get(eventName);
-  assert.equal(typeof handler, 'function');
+  assert.equal(typeof handler, "function");
   return handler;
 }
 
 function createMessageEntry(role) {
   return {
-    type: 'message',
+    type: "message",
     message: { role },
   };
 }
 
-test('confirm-destructive confirms before clearing a session and can cancel the action', async () => {
-  const confirmDestructive = await loadExtension('extensions/confirm-destructive/index.ts');
+test("confirm-destructive confirms before clearing a session and can cancel the action", async () => {
+  const confirmDestructive = await loadExtension("extensions/confirm-destructive/index.ts");
   const { pi, handlers } = createExtensionHarness();
   confirmDestructive(pi);
 
-  const beforeSwitch = getHandler(handlers, 'session_before_switch');
+  const beforeSwitch = getHandler(handlers, "session_before_switch");
   const notifications = [];
   const confirmations = [];
   const answers = [false, true];
@@ -43,32 +43,32 @@ test('confirm-destructive confirms before clearing a session and can cancel the 
     },
   };
 
-  assert.deepEqual(await beforeSwitch({ reason: 'new' }, ctx), { cancel: true });
-  assert.equal(await beforeSwitch({ reason: 'new' }, ctx), undefined);
+  assert.deepEqual(await beforeSwitch({ reason: "new" }, ctx), { cancel: true });
+  assert.equal(await beforeSwitch({ reason: "new" }, ctx), undefined);
   assert.deepEqual(confirmations, [
     {
-      title: 'Clear session?',
-      message: 'This will delete all messages in the current session.',
+      title: "Clear session?",
+      message: "This will delete all messages in the current session.",
     },
     {
-      title: 'Clear session?',
-      message: 'This will delete all messages in the current session.',
+      title: "Clear session?",
+      message: "This will delete all messages in the current session.",
     },
   ]);
-  assert.deepEqual(notifications, [{ message: 'Clear cancelled', level: 'info' }]);
+  assert.deepEqual(notifications, [{ message: "Clear cancelled", level: "info" }]);
 });
 
-test('confirm-destructive only prompts before switching when there is unsaved user work', async () => {
-  const confirmDestructive = await loadExtension('extensions/confirm-destructive/index.ts');
+test("confirm-destructive only prompts before switching when there is unsaved user work", async () => {
+  const confirmDestructive = await loadExtension("extensions/confirm-destructive/index.ts");
   const { pi, handlers } = createExtensionHarness();
   confirmDestructive(pi);
 
-  const beforeSwitch = getHandler(handlers, 'session_before_switch');
+  const beforeSwitch = getHandler(handlers, "session_before_switch");
   const confirmations = [];
   const notifications = [];
 
   const blocked = await beforeSwitch(
-    { reason: 'resume' },
+    { reason: "resume" },
     {
       hasUI: true,
       ui: {
@@ -82,7 +82,7 @@ test('confirm-destructive only prompts before switching when there is unsaved us
       },
       sessionManager: {
         getEntries() {
-          return [createMessageEntry('assistant'), createMessageEntry('user')];
+          return [createMessageEntry("assistant"), createMessageEntry("user")];
         },
       },
     },
@@ -91,15 +91,15 @@ test('confirm-destructive only prompts before switching when there is unsaved us
   assert.deepEqual(blocked, { cancel: true });
   assert.deepEqual(confirmations, [
     {
-      title: 'Switch session?',
-      message: 'You have messages in the current session. Switch anyway?',
+      title: "Switch session?",
+      message: "You have messages in the current session. Switch anyway?",
     },
   ]);
-  assert.deepEqual(notifications, [{ message: 'Switch cancelled', level: 'info' }]);
+  assert.deepEqual(notifications, [{ message: "Switch cancelled", level: "info" }]);
 
   let promptCount = 0;
   const allowedWithoutPrompt = await beforeSwitch(
-    { reason: 'resume' },
+    { reason: "resume" },
     {
       hasUI: true,
       ui: {
@@ -111,14 +111,14 @@ test('confirm-destructive only prompts before switching when there is unsaved us
       },
       sessionManager: {
         getEntries() {
-          return [createMessageEntry('user'), createMessageEntry('assistant')];
+          return [createMessageEntry("user"), createMessageEntry("assistant")];
         },
       },
     },
   );
 
   const assistantFreePrompt = await beforeSwitch(
-    { reason: 'resume' },
+    { reason: "resume" },
     {
       hasUI: true,
       ui: {
@@ -131,14 +131,14 @@ test('confirm-destructive only prompts before switching when there is unsaved us
       },
       sessionManager: {
         getEntries() {
-          return [createMessageEntry('user')];
+          return [createMessageEntry("user")];
         },
       },
     },
   );
 
   const emptyHistory = await beforeSwitch(
-    { reason: 'resume' },
+    { reason: "resume" },
     {
       hasUI: true,
       ui: {
@@ -162,25 +162,25 @@ test('confirm-destructive only prompts before switching when there is unsaved us
   assert.equal(promptCount, 1);
   assert.deepEqual(confirmations, [
     {
-      title: 'Switch session?',
-      message: 'You have messages in the current session. Switch anyway?',
+      title: "Switch session?",
+      message: "You have messages in the current session. Switch anyway?",
     },
     {
-      title: 'Switch session?',
-      message: 'You have messages in the current session. Switch anyway?',
+      title: "Switch session?",
+      message: "You have messages in the current session. Switch anyway?",
     },
   ]);
 });
 
-test('confirm-destructive confirms before forking and respects the selected choice', async () => {
-  const confirmDestructive = await loadExtension('extensions/confirm-destructive/index.ts');
+test("confirm-destructive confirms before forking and respects the selected choice", async () => {
+  const confirmDestructive = await loadExtension("extensions/confirm-destructive/index.ts");
   const { pi, handlers } = createExtensionHarness();
   confirmDestructive(pi);
 
-  const beforeFork = getHandler(handlers, 'session_before_fork');
+  const beforeFork = getHandler(handlers, "session_before_fork");
   const prompts = [];
   const notifications = [];
-  const answers = ['No, stay in current session', 'Yes, create fork'];
+  const answers = ["No, stay in current session", "Yes, create fork"];
 
   const ctx = {
     hasUI: true,
@@ -195,36 +195,36 @@ test('confirm-destructive confirms before forking and respects the selected choi
     },
   };
 
-  assert.deepEqual(await beforeFork({ entryId: 'abcdef1234567890' }, ctx), { cancel: true });
-  assert.equal(await beforeFork({ entryId: 'abcdef1234567890' }, ctx), undefined);
+  assert.deepEqual(await beforeFork({ entryId: "abcdef1234567890" }, ctx), { cancel: true });
+  assert.equal(await beforeFork({ entryId: "abcdef1234567890" }, ctx), undefined);
   assert.deepEqual(prompts, [
     {
-      prompt: 'Fork from entry abcdef12?',
-      options: ['Yes, create fork', 'No, stay in current session'],
+      prompt: "Fork from entry abcdef12?",
+      options: ["Yes, create fork", "No, stay in current session"],
     },
     {
-      prompt: 'Fork from entry abcdef12?',
-      options: ['Yes, create fork', 'No, stay in current session'],
+      prompt: "Fork from entry abcdef12?",
+      options: ["Yes, create fork", "No, stay in current session"],
     },
   ]);
-  assert.deepEqual(notifications, [{ message: 'Fork cancelled', level: 'info' }]);
+  assert.deepEqual(notifications, [{ message: "Fork cancelled", level: "info" }]);
 });
 
-test('confirm-destructive skips prompts without UI and cancels on unexpected fork selections', async () => {
-  const confirmDestructive = await loadExtension('extensions/confirm-destructive/index.ts');
+test("confirm-destructive skips prompts without UI and cancels on unexpected fork selections", async () => {
+  const confirmDestructive = await loadExtension("extensions/confirm-destructive/index.ts");
   const { pi, handlers } = createExtensionHarness();
   confirmDestructive(pi);
 
-  const beforeSwitch = getHandler(handlers, 'session_before_switch');
-  const beforeFork = getHandler(handlers, 'session_before_fork');
+  const beforeSwitch = getHandler(handlers, "session_before_switch");
+  const beforeFork = getHandler(handlers, "session_before_fork");
 
-  assert.equal(await beforeSwitch({ reason: 'new' }, { hasUI: false }), undefined);
-  assert.equal(await beforeFork({ entryId: 'abc' }, { hasUI: false }), undefined);
+  assert.equal(await beforeSwitch({ reason: "new" }, { hasUI: false }), undefined);
+  assert.equal(await beforeFork({ entryId: "abc" }, { hasUI: false }), undefined);
 
   const prompts = [];
   const notifications = [];
   const cancelled = await beforeFork(
-    { entryId: 'abc' },
+    { entryId: "abc" },
     {
       hasUI: true,
       ui: {
@@ -242,9 +242,9 @@ test('confirm-destructive skips prompts without UI and cancels on unexpected for
   assert.deepEqual(cancelled, { cancel: true });
   assert.deepEqual(prompts, [
     {
-      prompt: 'Fork from entry abc?',
-      options: ['Yes, create fork', 'No, stay in current session'],
+      prompt: "Fork from entry abc?",
+      options: ["Yes, create fork", "No, stay in current session"],
     },
   ]);
-  assert.deepEqual(notifications, [{ message: 'Fork cancelled', level: 'info' }]);
+  assert.deepEqual(notifications, [{ message: "Fork cancelled", level: "info" }]);
 });

@@ -1,27 +1,31 @@
-import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import test from 'node:test';
-import { pathToFileURL } from 'node:url';
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { pathToFileURL } from "node:url";
 
-import ts from 'typescript';
+import ts from "typescript";
 
-import { createExtensionHarness } from './extension-test-helpers.mjs';
-import { createModelSelectionContext, loadRoleTestUtils, repoRoot } from './support/provider-policy-contract-support.mjs';
+import { createExtensionHarness } from "./extension-test-helpers.mjs";
+import {
+  createModelSelectionContext,
+  loadRoleTestUtils,
+  repoRoot,
+} from "./support/provider-policy-contract-support.mjs";
 
 async function loadCodeReviewerTestUtils() {
-  return loadRoleTestUtils('code-reviewer');
+  return loadRoleTestUtils("code-reviewer");
 }
 
 async function loadCodeReviewerExtensionWithMockPi(t) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'code-reviewer-selection-'));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "code-reviewer-selection-"));
   t.after(async () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  const sourcePath = path.join(repoRoot, 'extensions/code-reviewer/index.ts');
-  const source = await readFile(sourcePath, 'utf8');
+  const sourcePath = path.join(repoRoot, "extensions/code-reviewer/index.ts");
+  const source = await readFile(sourcePath, "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
@@ -29,22 +33,26 @@ async function loadCodeReviewerExtensionWithMockPi(t) {
     },
   }).outputText;
 
-  const packageDir = path.join(tempDir, 'node_modules', '@earendil-works', 'pi-coding-agent');
+  const packageDir = path.join(tempDir, "node_modules", "@earendil-works", "pi-coding-agent");
   await mkdir(packageDir, { recursive: true });
-  const typeboxDir = path.join(tempDir, 'node_modules', 'typebox');
+  const typeboxDir = path.join(tempDir, "node_modules", "typebox");
   await mkdir(typeboxDir, { recursive: true });
   await writeFile(
-    path.join(packageDir, 'package.json'),
-    JSON.stringify({ name: '@earendil-works/pi-coding-agent', type: 'module', exports: './index.js' }),
-    'utf8',
+    path.join(packageDir, "package.json"),
+    JSON.stringify({
+      name: "@earendil-works/pi-coding-agent",
+      type: "module",
+      exports: "./index.js",
+    }),
+    "utf8",
   );
   await writeFile(
-    path.join(typeboxDir, 'package.json'),
-    JSON.stringify({ name: 'typebox', type: 'module', exports: './index.js' }),
-    'utf8',
+    path.join(typeboxDir, "package.json"),
+    JSON.stringify({ name: "typebox", type: "module", exports: "./index.js" }),
+    "utf8",
   );
   await writeFile(
-    path.join(typeboxDir, 'index.js'),
+    path.join(typeboxDir, "index.js"),
     `
 export const Type = {
   Object(value) {
@@ -58,10 +66,10 @@ export const Type = {
   },
 };
 `,
-    'utf8',
+    "utf8",
   );
   await writeFile(
-    path.join(packageDir, 'index.js'),
+    path.join(packageDir, "index.js"),
     `
 export class DefaultResourceLoader {
   constructor(options) {
@@ -125,13 +133,15 @@ export function __setCreateAgentSessionBehaviors(nextBehaviors) {
   behaviors.push(...nextBehaviors);
 }
 `,
-    'utf8',
+    "utf8",
   );
 
-  const compiledPath = path.join(tempDir, 'code-reviewer.mjs');
-  await writeFile(compiledPath, compiled, 'utf8');
+  const compiledPath = path.join(tempDir, "code-reviewer.mjs");
+  await writeFile(compiledPath, compiled, "utf8");
   const extensionModule = await import(`${pathToFileURL(compiledPath).href}?t=${Date.now()}`);
-  const piModule = await import(`${pathToFileURL(path.join(packageDir, 'index.js')).href}?t=${Date.now()}`);
+  const piModule = await import(
+    `${pathToFileURL(path.join(packageDir, "index.js")).href}?t=${Date.now()}`
+  );
   return {
     extension: extensionModule.default,
     getCreateAgentSessionCalls: piModule.__getCreateAgentSessionCalls,
@@ -139,15 +149,15 @@ export function __setCreateAgentSessionBehaviors(nextBehaviors) {
   };
 }
 
-test('code_reviewer auto-selection prefers an opposite provider and model family when available', async () => {
+test("code_reviewer auto-selection prefers an opposite provider and model family when available", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createModelSelectionContext({
-      model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+      model: { provider: "openai", id: "gpt-5.5", reasoning: true },
       available: [
-        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-        { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
-        { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+        { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
+        { provider: "anthropic", id: "claude-sonnet-4.6", reasoning: true },
+        { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
       ],
     }),
   );
@@ -155,21 +165,21 @@ test('code_reviewer auto-selection prefers an opposite provider and model family
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'anthropic/claude-opus-4.8');
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, "anthropic/claude-opus-4.8");
   assert.deepEqual(
     result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-4.6', 'openai/gpt-5.5-pro'],
+    ["anthropic/claude-opus-4.8", "anthropic/claude-sonnet-4.6", "openai/gpt-5.5-pro"],
   );
 });
 
-test('code_reviewer Bedrock selection keeps Sonnet 5 ahead of GPT-6.1 Sol', async () => {
+test("code_reviewer Bedrock selection keeps Sonnet 5 ahead of GPT-6.1 Sol", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createModelSelectionContext({
-      model: { provider: 'amazon-bedrock', id: 'bedrock-current', reasoning: true },
+      model: { provider: "amazon-bedrock", id: "bedrock-current", reasoning: true },
       available: [
-        { provider: 'amazon-bedrock', id: 'global.openai.gpt-6.1-sol', reasoning: true },
-        { provider: 'amazon-bedrock', id: 'claude-sonnet-5', reasoning: true },
+        { provider: "amazon-bedrock", id: "global.openai.gpt-6.1-sol", reasoning: true },
+        { provider: "amazon-bedrock", id: "claude-sonnet-5", reasoning: true },
       ],
     }),
   );
@@ -177,21 +187,24 @@ test('code_reviewer Bedrock selection keeps Sonnet 5 ahead of GPT-6.1 Sol', asyn
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'amazon-bedrock/claude-sonnet-5');
+  assert.equal(
+    `${result.selection.provider}/${result.selection.id}`,
+    "amazon-bedrock/claude-sonnet-5",
+  );
   assert.deepEqual(
     result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['amazon-bedrock/claude-sonnet-5', 'amazon-bedrock/global.openai.gpt-6.1-sol'],
+    ["amazon-bedrock/claude-sonnet-5", "amazon-bedrock/global.openai.gpt-6.1-sol"],
   );
 });
 
-test('code_reviewer auto-selection falls back to the current provider when no opposite provider or family exists', async () => {
+test("code_reviewer auto-selection falls back to the current provider when no opposite provider or family exists", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createModelSelectionContext({
-      model: { provider: 'custom', id: 'solver-1', reasoning: true },
+      model: { provider: "custom", id: "solver-1", reasoning: true },
       available: [
-        { provider: 'custom', id: 'solver-1', reasoning: true },
-        { provider: 'custom', id: 'solver-2', reasoning: true },
+        { provider: "custom", id: "solver-1", reasoning: true },
+        { provider: "custom", id: "solver-2", reasoning: true },
       ],
     }),
   );
@@ -199,19 +212,18 @@ test('code_reviewer auto-selection falls back to the current provider when no op
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'custom/solver-2');
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, "custom/solver-2");
 });
 
-
-test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallback paths', async () => {
+test("code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallback paths", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createModelSelectionContext({
-      model: { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+      model: { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
       available: [
-        { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-        { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true },
-        { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
+        { provider: "openai", id: "gpt-5.6-sol", reasoning: true },
+        { provider: "openai", id: "gpt-5.5", reasoning: true },
       ],
     }),
   );
@@ -219,22 +231,22 @@ test('code_reviewer auto-selection prefers gpt-5.6-sol first within openai fallb
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai/gpt-5.6-sol');
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, "openai/gpt-5.6-sol");
   assert.deepEqual(
     result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
+    ["openai/gpt-5.6-sol", "openai/gpt-5.5-pro", "openai/gpt-5.5"],
   );
 });
 
-test('code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/terra/luna ordering with high thinking', async () => {
+test("code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/terra/luna ordering with high thinking", async () => {
   const { resolveThinkingLevel, selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
     createModelSelectionContext({
-      model: { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+      model: { provider: "openai-codex", id: "gpt-5.4", reasoning: true },
       available: [
-        { provider: 'openai-codex', id: 'gpt-5.6-luna', reasoning: true },
-        { provider: 'openai-codex', id: 'gpt-5.6-terra', reasoning: true },
-        { provider: 'openai-codex', id: 'gpt-5.4', reasoning: true },
+        { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true },
+        { provider: "openai-codex", id: "gpt-5.6-terra", reasoning: true },
+        { provider: "openai-codex", id: "gpt-5.4", reasoning: true },
       ],
     }),
   );
@@ -242,27 +254,28 @@ test('code_reviewer same-provider openai-codex fallback keeps the gpt-5.6 sol/te
   assert.equal(result.ok, true);
   if (!result.ok) return;
 
-  assert.equal(`${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-5.6-terra');
+  assert.equal(`${result.selection.provider}/${result.selection.id}`, "openai-codex/gpt-5.6-terra");
   assert.deepEqual(
     result.ordered.map((model) => `${model.provider}/${model.id}`),
-    ['openai-codex/gpt-5.6-terra', 'openai-codex/gpt-5.6-luna', 'openai-codex/gpt-5.4'],
+    ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.4"],
   );
   assert.deepEqual(resolveThinkingLevel(result.selection, undefined), {
-    requested: 'high',
-    effective: 'high',
+    requested: "high",
+    effective: "high",
     clamped: false,
-    note: 'defaulted to high',
+    note: "defaulted to high",
   });
 });
 
-test('code_reviewer auto-selection works without ctx.model, clamps active thinking, and reports the final model details', async (t) => {
-  const { extension, getCreateAgentSessionCalls, setCreateAgentSessionBehaviors } = await loadCodeReviewerExtensionWithMockPi(t);
+test("code_reviewer auto-selection works without ctx.model, clamps active thinking, and reports the final model details", async (t) => {
+  const { extension, getCreateAgentSessionCalls, setCreateAgentSessionBehaviors } =
+    await loadCodeReviewerExtensionWithMockPi(t);
   setCreateAgentSessionBehaviors([]);
   const harness = createExtensionHarness();
-  harness.pi.getThinkingLevel = () => 'xhigh';
+  harness.pi.getThinkingLevel = () => "xhigh";
   extension(harness.pi);
-  const tool = harness.tools.get('code_reviewer');
-  assert.ok(tool, 'expected code_reviewer tool to be registered');
+  const tool = harness.tools.get("code_reviewer");
+  assert.ok(tool, "expected code_reviewer tool to be registered");
 
   const ctx = {
     cwd: repoRoot,
@@ -270,74 +283,101 @@ test('code_reviewer auto-selection works without ctx.model, clamps active thinki
     modelRegistry: {
       async getAvailable() {
         return [
-          { provider: 'custom', id: 'solver-1', reasoning: false },
-          { provider: 'custom', id: 'solver-2', reasoning: true, thinkingLevelMap: { high: true, xhigh: null } },
+          { provider: "custom", id: "solver-1", reasoning: false },
+          {
+            provider: "custom",
+            id: "solver-2",
+            reasoning: true,
+            thinkingLevelMap: { high: true, xhigh: null },
+          },
         ];
       },
     },
   };
 
-  const result = await tool.execute('call-1', { task: 'Review this change for correctness.' }, undefined, undefined, ctx);
+  const result = await tool.execute(
+    "call-1",
+    { task: "Review this change for correctness." },
+    undefined,
+    undefined,
+    ctx,
+  );
   assert.match(result.content[0].text, /review ok/);
-  assert.match(result.content[0].text, /Run details: model custom\/solver-2; thinking high \(requested xhigh; clamped to high\)/);
-  assert.equal(result.details.modelRef, 'custom/solver-2');
-  assert.equal(result.details.requestedThinkingLevel, 'xhigh');
-  assert.equal(result.details.effectiveThinkingLevel, 'high');
+  assert.match(
+    result.content[0].text,
+    /Run details: model custom\/solver-2; thinking high \(requested xhigh; clamped to high\)/,
+  );
+  assert.equal(result.details.modelRef, "custom/solver-2");
+  assert.equal(result.details.requestedThinkingLevel, "xhigh");
+  assert.equal(result.details.effectiveThinkingLevel, "high");
   assert.equal(result.details.thinkingLevelClamped, true);
-  assert.equal(result.details.thinkingLevelNote, 'requested xhigh; clamped to high');
+  assert.equal(result.details.thinkingLevelNote, "requested xhigh; clamped to high");
 
   const createCalls = getCreateAgentSessionCalls();
   assert.equal(createCalls.length, 1);
-  assert.equal(`${createCalls[0].model.provider}/${createCalls[0].model.id}`, 'custom/solver-2');
-  assert.equal(createCalls[0].thinkingLevel, 'high');
+  assert.equal(`${createCalls[0].model.provider}/${createCalls[0].model.id}`, "custom/solver-2");
+  assert.equal(createCalls[0].thinkingLevel, "high");
 });
 
-test('code_reviewer falls back to lower-priority selected models when preferred contrarian candidates are unavailable and reports the successful fallback model', async (t) => {
-  const { extension, getCreateAgentSessionCalls, setCreateAgentSessionBehaviors } = await loadCodeReviewerExtensionWithMockPi(t);
+test("code_reviewer falls back to lower-priority selected models when preferred contrarian candidates are unavailable and reports the successful fallback model", async (t) => {
+  const { extension, getCreateAgentSessionCalls, setCreateAgentSessionBehaviors } =
+    await loadCodeReviewerExtensionWithMockPi(t);
   setCreateAgentSessionBehaviors([
-    { type: 'throw', message: '404 model_not_found_error: model does not exist' },
-    { type: 'return', text: 'review ok after fallback' },
+    { type: "throw", message: "404 model_not_found_error: model does not exist" },
+    { type: "return", text: "review ok after fallback" },
   ]);
   const harness = createExtensionHarness();
-  harness.pi.getThinkingLevel = () => 'high';
+  harness.pi.getThinkingLevel = () => "high";
   extension(harness.pi);
-  const tool = harness.tools.get('code_reviewer');
-  assert.ok(tool, 'expected code_reviewer tool to be registered');
+  const tool = harness.tools.get("code_reviewer");
+  assert.ok(tool, "expected code_reviewer tool to be registered");
 
   const ctx = {
     cwd: repoRoot,
-    model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+    model: { provider: "openai", id: "gpt-5.5", reasoning: true },
     modelRegistry: {
       async getAvailable() {
         return [
-          { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-          { provider: 'openai', id: 'gpt-5.5-mini', reasoning: false },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+          { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
+          { provider: "openai", id: "gpt-5.5-mini", reasoning: false },
+          { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
         ];
       },
     },
   };
 
-  const result = await tool.execute('call-2', { task: 'Review this change for correctness.' }, undefined, undefined, ctx);
+  const result = await tool.execute(
+    "call-2",
+    { task: "Review this change for correctness." },
+    undefined,
+    undefined,
+    ctx,
+  );
   assert.match(result.content[0].text, /review ok after fallback/);
-  assert.match(result.content[0].text, /Run details: model openai\/gpt-5\.5-pro; thinking high \(requested high\)/);
+  assert.match(
+    result.content[0].text,
+    /Run details: model openai\/gpt-5\.5-pro; thinking high \(requested high\)/,
+  );
   assert.doesNotMatch(result.content[0].text, /Run details: model anthropic\/claude-opus-4\.8/);
-  assert.equal(result.details.modelRef, 'openai/gpt-5.5-pro');
-  assert.equal(result.details.effectiveThinkingLevel, 'high');
-  assert.equal(result.details.thinkingLevelNote, 'requested high');
+  assert.equal(result.details.modelRef, "openai/gpt-5.5-pro");
+  assert.equal(result.details.effectiveThinkingLevel, "high");
+  assert.equal(result.details.thinkingLevelNote, "requested high");
 
   const createCalls = getCreateAgentSessionCalls();
   assert.equal(createCalls.length, 2);
   assert.deepEqual(
     createCalls.map((call) => `${call.model.provider}/${call.model.id}`),
-    ['anthropic/claude-opus-4.8', 'openai/gpt-5.5-pro'],
+    ["anthropic/claude-opus-4.8", "openai/gpt-5.5-pro"],
   );
   assert.deepEqual(
     createCalls.map((call) => call.tools),
     [
-      ['read', 'grep', 'find', 'ls', 'bash'],
-      ['read', 'grep', 'find', 'ls', 'bash'],
+      ["read", "grep", "find", "ls", "bash"],
+      ["read", "grep", "find", "ls", "bash"],
     ],
   );
-  assert.deepEqual(createCalls.map((call) => call.thinkingLevel), ['high', 'high']);
+  assert.deepEqual(
+    createCalls.map((call) => call.thinkingLevel),
+    ["high", "high"],
+  );
 });

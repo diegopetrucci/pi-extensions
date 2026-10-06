@@ -7,41 +7,41 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = join(__dirname, "web");
 
 function escapeForInlineScript(value: string): string {
-	return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+  return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
 function escapeInlineScriptSource(value: string): string {
-	return value.replace(/<\/(script)/gi, "<\\/$1");
+  return value.replace(/<\/(script)/gi, "<\\/$1");
 }
 
 export interface ReviewUiAssets {
-	tailwindBrowserJs: string;
-	monacoLoaderJs: string;
-	monacoVsBaseUrl: string;
+  tailwindBrowserJs: string;
+  monacoLoaderJs: string;
+  monacoVsBaseUrl: string;
 }
 
 export function buildReviewHtml(data: ReviewWindowData, assets: ReviewUiAssets): string {
-	const templateHtml = readFileSync(join(webDir, "index.html"), "utf8");
-	const appJs = escapeInlineScriptSource(readFileSync(join(webDir, "app.js"), "utf8"));
-	const payload = escapeForInlineScript(JSON.stringify(data));
-	const assetConfig = escapeForInlineScript(
-		JSON.stringify({
-			monacoVsBaseUrl: assets.monacoVsBaseUrl,
-			bootstrapError: null,
-		}),
-	);
-	const replacements = new Map([
-		['"__INLINE_DATA__"', payload],
-		["__INLINE_ASSET_CONFIG__", assetConfig],
-		["__INLINE_TAILWIND_JS__", escapeInlineScriptSource(assets.tailwindBrowserJs)],
-		["__INLINE_MONACO_LOADER_JS__", escapeInlineScriptSource(assets.monacoLoaderJs)],
-		["__INLINE_JS__", appJs],
-	]);
+  const templateHtml = readFileSync(join(webDir, "index.html"), "utf8");
+  const appJs = escapeInlineScriptSource(readFileSync(join(webDir, "app.js"), "utf8"));
+  const payload = escapeForInlineScript(JSON.stringify(data));
+  const assetConfig = escapeForInlineScript(
+    JSON.stringify({
+      monacoVsBaseUrl: assets.monacoVsBaseUrl,
+      bootstrapError: null,
+    }),
+  );
+  const replacements = new Map([
+    ['"__INLINE_DATA__"', payload],
+    ["__INLINE_ASSET_CONFIG__", assetConfig],
+    ["__INLINE_TAILWIND_JS__", escapeInlineScriptSource(assets.tailwindBrowserJs)],
+    ["__INLINE_MONACO_LOADER_JS__", escapeInlineScriptSource(assets.monacoLoaderJs)],
+    ["__INLINE_JS__", appJs],
+  ]);
 
-	// Replace the original template in one pass so marker-like repository data
-	// or runtime source is never scanned as another template placeholder.
-	return templateHtml.replace(
-		/"__INLINE_DATA__"|__INLINE_ASSET_CONFIG__|__INLINE_TAILWIND_JS__|__INLINE_MONACO_LOADER_JS__|__INLINE_JS__/g,
-		(marker) => replacements.get(marker) ?? marker,
-	);
+  // Replace the original template in one pass so marker-like repository data
+  // or runtime source is never scanned as another template placeholder.
+  return templateHtml.replace(
+    /"__INLINE_DATA__"|__INLINE_ASSET_CONFIG__|__INLINE_TAILWIND_JS__|__INLINE_MONACO_LOADER_JS__|__INLINE_JS__/g,
+    (marker) => replacements.get(marker) ?? marker,
+  );
 }

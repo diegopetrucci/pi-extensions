@@ -75,3 +75,7 @@ Then reload pi:
 ```text
 /reload
 ```
+
+## Development
+
+Run `npm run format` for the supported source and test files; CI runs `npm run format:check`.

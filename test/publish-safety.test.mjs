@@ -1,35 +1,45 @@
-import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import path from 'node:path';
-import test from 'node:test';
-import ts from 'typescript';
-import { getWorkspacePackageDefs, repoRoot } from './workspace-package-helpers.mjs';
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import ts from "typescript";
+import { getWorkspacePackageDefs, repoRoot } from "./workspace-package-helpers.mjs";
 
 const packagePackCache = new Map();
-const localModuleExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json'];
+const localModuleExtensions = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+];
 const packageLikeJavaScriptExtensions = new Map([
-  ['.js', ['.ts', '.tsx']],
-  ['.jsx', ['.tsx', '.ts']],
-  ['.mjs', ['.mts', '.ts']],
-  ['.cjs', ['.cts', '.ts']],
+  [".js", [".ts", ".tsx"]],
+  [".jsx", [".tsx", ".ts"]],
+  [".mjs", [".mts", ".ts"]],
+  [".cjs", [".cts", ".ts"]],
 ]);
 
 const publishablePackages = [
   {
-    label: 'root',
+    label: "root",
     packageRoot: repoRoot,
-    manifestPath: 'package.json',
+    manifestPath: "package.json",
   },
   ...getWorkspacePackageDefs(),
 ];
 
 function toPosix(filePath) {
-  return filePath.split(path.sep).join('/');
+  return filePath.split(path.sep).join("/");
 }
 
 function readManifest(packageDef) {
-  return JSON.parse(readFileSync(path.join(repoRoot, packageDef.manifestPath), 'utf8'));
+  return JSON.parse(readFileSync(path.join(repoRoot, packageDef.manifestPath), "utf8"));
 }
 
 function collectDirectoryFiles(rootPath) {
@@ -54,17 +64,18 @@ function collectDirectoryFiles(rootPath) {
 }
 
 function getDependencySections(manifest) {
-  return ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies']
-    .map((section) => [section, manifest[section] ?? {}]);
+  return ["dependencies", "peerDependencies", "optionalDependencies", "devDependencies"].map(
+    (section) => [section, manifest[section] ?? {}],
+  );
 }
 
 function getPublishedFiles(packageDef) {
   const cacheKey = packageDef.workspace ?? packageDef.label;
   if (packagePackCache.has(cacheKey)) return packagePackCache.get(cacheKey);
 
-  const args = ['pack', '--dry-run', '--json'];
-  if (packageDef.workspace) args.push('--workspace', packageDef.workspace);
-  const stdout = execFileSync('npm', args, { cwd: repoRoot, encoding: 'utf8' });
+  const args = ["pack", "--dry-run", "--json"];
+  if (packageDef.workspace) args.push("--workspace", packageDef.workspace);
+  const stdout = execFileSync("npm", args, { cwd: repoRoot, encoding: "utf8" });
   const parsed = JSON.parse(stdout);
   assert.equal(parsed.length, 1, `expected one npm pack result for ${packageDef.label}`);
   const files = new Set(parsed[0].files.map((file) => toPosix(file.path)));
@@ -84,18 +95,30 @@ function isTypeOnlyImportClause(importClause) {
   if (importClause.name) return false;
   if (!importClause.namedBindings) return false;
   if (ts.isNamespaceImport(importClause.namedBindings)) return false;
-  return importClause.namedBindings.elements.length > 0 &&
-    importClause.namedBindings.elements.every((element) => element.isTypeOnly);
+  return (
+    importClause.namedBindings.elements.length > 0 &&
+    importClause.namedBindings.elements.every((element) => element.isTypeOnly)
+  );
 }
 
 function collectStaticModuleSpecifiers(sourceText, filePath) {
-  const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const specifiers = [];
 
   function visit(node) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
       specifiers.push(node.moduleSpecifier.text);
-    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
       specifiers.push(node.moduleSpecifier.text);
     }
 
@@ -107,13 +130,23 @@ function collectStaticModuleSpecifiers(sourceText, filePath) {
 }
 
 function collectRuntimeModuleSpecifiers(sourceText, filePath) {
-  const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const specifiers = [];
 
   function visit(node) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
       if (!isTypeOnlyImportClause(node.importClause)) specifiers.push(node.moduleSpecifier.text);
-    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
       if (!node.isTypeOnly) specifiers.push(node.moduleSpecifier.text);
     } else if (
       ts.isCallExpression(node) &&
@@ -137,8 +170,8 @@ function resolveLocalModule(importerPath, specifier) {
   const candidates = ext
     ? [
         basePath,
-        ...(packageLikeJavaScriptExtensions.get(ext) ?? []).map((sourceExtension) =>
-          `${basePath.slice(0, -ext.length)}${sourceExtension}`,
+        ...(packageLikeJavaScriptExtensions.get(ext) ?? []).map(
+          (sourceExtension) => `${basePath.slice(0, -ext.length)}${sourceExtension}`,
         ),
       ]
     : [
@@ -161,11 +194,11 @@ function getRuntimeDeclarations(manifest) {
   const pi = manifest.pi ?? {};
 
   if (Array.isArray(pi.extensions)) {
-    declarations.push(...pi.extensions.map((entry) => ({ kind: 'extension', entry })));
+    declarations.push(...pi.extensions.map((entry) => ({ kind: "extension", entry })));
   }
 
   if (Array.isArray(pi.skills)) {
-    declarations.push(...pi.skills.map((entry) => ({ kind: 'skill', entry })));
+    declarations.push(...pi.skills.map((entry) => ({ kind: "skill", entry })));
   }
 
   return declarations;
@@ -173,11 +206,17 @@ function getRuntimeDeclarations(manifest) {
 
 function getStandaloneExtensionEntries(manifest) {
   return getRuntimeDeclarations(manifest)
-    .filter(({ kind }) => kind === 'extension')
+    .filter(({ kind }) => kind === "extension")
     .map(({ entry }) => entry);
 }
 
-function resolveStandaloneLocalModule(packageDef, importerPath, importerLabel, specifier, resolutionLabel) {
+function resolveStandaloneLocalModule(
+  packageDef,
+  importerPath,
+  importerLabel,
+  specifier,
+  resolutionLabel,
+) {
   const targetBase = path.resolve(path.dirname(importerPath), specifier);
   assert.ok(
     isInside(packageDef.packageRoot, targetBase),
@@ -185,7 +224,10 @@ function resolveStandaloneLocalModule(packageDef, importerPath, importerLabel, s
   );
 
   const resolvedFile = resolveLocalModule(importerPath, specifier);
-  assert.ok(resolvedFile, `${packageDef.label} could not resolve ${resolutionLabel} ${specifier} from ${importerLabel}`);
+  assert.ok(
+    resolvedFile,
+    `${packageDef.label} could not resolve ${resolutionLabel} ${specifier} from ${importerLabel}`,
+  );
   return resolvedFile;
 }
 
@@ -195,23 +237,26 @@ function assertStandaloneStaticImportsStayWithinPackageRoot(packageDef, manifest
 
   while (toVisit.length > 0) {
     const declaredEntry = toVisit.pop();
-    const normalizedEntry = toPosix(declaredEntry.replace(/^\.\//, ''));
+    const normalizedEntry = toPosix(declaredEntry.replace(/^\.\//, ""));
     if (visitedFiles.has(normalizedEntry)) continue;
 
     const absoluteEntry = path.join(packageDef.packageRoot, normalizedEntry);
-    assert.ok(existsSync(absoluteEntry), `${packageDef.label} runtime file is missing: ${normalizedEntry}`);
+    assert.ok(
+      existsSync(absoluteEntry),
+      `${packageDef.label} runtime file is missing: ${normalizedEntry}`,
+    );
     visitedFiles.add(normalizedEntry);
 
-    const sourceText = readFileSync(absoluteEntry, 'utf8');
+    const sourceText = readFileSync(absoluteEntry, "utf8");
     for (const specifier of collectStaticModuleSpecifiers(sourceText, absoluteEntry)) {
-      if (!specifier.startsWith('.')) continue;
+      if (!specifier.startsWith(".")) continue;
 
       const resolvedFile = resolveStandaloneLocalModule(
         packageDef,
         absoluteEntry,
         normalizedEntry,
         specifier,
-        'local static import/export',
+        "local static import/export",
       );
 
       toVisit.push(toPosix(path.relative(packageDef.packageRoot, resolvedFile)));
@@ -226,24 +271,27 @@ function collectStandaloneRuntimeFiles(packageDef, manifest) {
 
   while (toVisit.length > 0) {
     const declaredEntry = toVisit.pop();
-    const normalizedEntry = toPosix(declaredEntry.replace(/^\.\//, ''));
+    const normalizedEntry = toPosix(declaredEntry.replace(/^\.\//, ""));
     if (visitedFiles.has(normalizedEntry)) continue;
 
     const absoluteEntry = path.join(packageDef.packageRoot, normalizedEntry);
-    assert.ok(existsSync(absoluteEntry), `${packageDef.label} runtime file is missing: ${normalizedEntry}`);
+    assert.ok(
+      existsSync(absoluteEntry),
+      `${packageDef.label} runtime file is missing: ${normalizedEntry}`,
+    );
     visitedFiles.add(normalizedEntry);
     runtimeFiles.add(normalizedEntry);
 
-    const sourceText = readFileSync(absoluteEntry, 'utf8');
+    const sourceText = readFileSync(absoluteEntry, "utf8");
     for (const specifier of collectRuntimeModuleSpecifiers(sourceText, absoluteEntry)) {
-      if (!specifier.startsWith('.')) continue;
+      if (!specifier.startsWith(".")) continue;
 
       const resolvedFile = resolveStandaloneLocalModule(
         packageDef,
         absoluteEntry,
         normalizedEntry,
         specifier,
-        'local runtime import',
+        "local runtime import",
       );
 
       const normalizedResolved = toPosix(path.relative(packageDef.packageRoot, resolvedFile));
@@ -255,13 +303,13 @@ function collectStandaloneRuntimeFiles(packageDef, manifest) {
   return runtimeFiles;
 }
 
-test('publishable manifests do not use workspace protocol dependencies', () => {
+test("publishable manifests do not use workspace protocol dependencies", () => {
   for (const packageDef of publishablePackages) {
     const manifest = readManifest(packageDef);
     for (const [sectionName, dependencies] of getDependencySections(manifest)) {
       for (const [dependencyName, version] of Object.entries(dependencies)) {
         assert.notEqual(
-          typeof version === 'string' ? version.trim().startsWith('workspace:') : false,
+          typeof version === "string" ? version.trim().startsWith("workspace:") : false,
           true,
           `${packageDef.label} manifest must not publish workspace: dependency ${dependencyName} in ${sectionName}`,
         );
@@ -270,14 +318,14 @@ test('publishable manifests do not use workspace protocol dependencies', () => {
   }
 });
 
-test('standalone publishable extensions do not import files outside their package roots', () => {
+test("standalone publishable extensions do not import files outside their package roots", () => {
   for (const packageDef of publishablePackages.filter((candidate) => candidate.workspace)) {
     assertStandaloneStaticImportsStayWithinPackageRoot(packageDef, readManifest(packageDef));
   }
 });
 
-test('root package pack output excludes repo-only extension scripts and docs directories', () => {
-  const rootPackageDef = publishablePackages.find((candidate) => candidate.label === 'root');
+test("root package pack output excludes repo-only extension scripts and docs directories", () => {
+  const rootPackageDef = publishablePackages.find((candidate) => candidate.label === "root");
   const packedFiles = getPublishedFiles(rootPackageDef);
 
   const repoOnlyPathPattern = /^extensions\/[^/]+\/(scripts|docs)\//;
@@ -286,19 +334,22 @@ test('root package pack output excludes repo-only extension scripts and docs dir
   assert.deepEqual(
     offendingFiles,
     [],
-    `root package must not publish repo-only extension scripts/ or docs/ files: ${offendingFiles.join(', ')}`,
+    `root package must not publish repo-only extension scripts/ or docs/ files: ${offendingFiles.join(", ")}`,
   );
 });
 
-test('publishable package files allowlists include declared runtime files', () => {
+test("publishable package files allowlists include declared runtime files", () => {
   for (const packageDef of publishablePackages) {
     const manifest = readManifest(packageDef);
     const packedFiles = getPublishedFiles(packageDef);
 
     for (const { entry } of getRuntimeDeclarations(manifest)) {
-      const normalizedEntry = toPosix(entry.replace(/^\.\//, ''));
+      const normalizedEntry = toPosix(entry.replace(/^\.\//, ""));
       const absoluteEntry = path.join(packageDef.packageRoot, normalizedEntry);
-      assert.ok(existsSync(absoluteEntry), `${packageDef.label} runtime declaration is missing on disk: ${normalizedEntry}`);
+      assert.ok(
+        existsSync(absoluteEntry),
+        `${packageDef.label} runtime declaration is missing on disk: ${normalizedEntry}`,
+      );
 
       const stats = statSync(absoluteEntry);
       if (stats.isDirectory()) {
