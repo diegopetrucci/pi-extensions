@@ -34,7 +34,7 @@ There is no runtime setting or toggle for submit behavior. To roll back the rend
 
 ## Requirements
 
-- Interactive pi session with editor access.
+- Interactive pi TUI session.
 - A completed assistant message with text on the active branch.
 - Local desktop support for opening a native [Glimpse](https://github.com/mariozechner/glimpse) window.
 

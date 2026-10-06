@@ -1,7 +1,7 @@
 /* global globalThis */
 
 /**
- * TLH annotate-last-message: pure markdown line parser.
+ * annotate-last-message: pure markdown line parser.
  *
  * Single source of truth for the parsing logic.  ui.ts reads this file and
  * inlines it as a dedicated script before app.js, so globalThis.__tlhMdRenderer

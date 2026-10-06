@@ -2,7 +2,7 @@
 
 Adds `/triage-comments` plus a read-only `triage_comments` subagent tool for evidence-based review-comment triage.
 
-Use it when you want The Last Harness to inspect selected PR feedback, classify whether each comment is valid, cite local evidence, draft review-thread responses, and propose handling options. It does **not** implement changes; after triage, the main agent should ask which handling option to take before editing anything.
+Use it when you want `/triage-comments` to inspect selected PR feedback, classify whether each comment is valid, cite local evidence, draft review-thread responses, and propose handling options. It does **not** implement changes; after triage, the main agent should ask which handling option to take before editing anything.
 
 ## Install
 
@@ -43,7 +43,7 @@ The extension registers `/triage-comments` as an interactive intake flow.
 /triage-comments 123
 ```
 
-- With no arguments, The Last Harness asks whether to paste feedback or fetch PR comments.
+- With no arguments, `/triage-comments` asks whether to paste feedback or fetch PR comments.
 - `paste` opens an editor for multiline reviewer feedback, then sends one selected feedback item to the main agent.
 - `pr` with no explicit target first tries to detect an existing PR for the current named non-`main` git branch using read-only `git` and `gh pr view` calls. If the branch is `main`, detached, outside a git repository, `gh` is unavailable or unauthenticated, or no PR is found, it falls back to the PR URL/number prompt.
 - `pr <PR URL or number>` and a bare PR URL/number fetch that explicit PR directly, display PR review comments, PR issue comments, and review bodies with `gh` as numbered items with stable IDs, and ask whether to investigate all displayed comments or an explicit subset such as `1,3-5`.
