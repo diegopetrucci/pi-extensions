@@ -94,7 +94,7 @@ test('selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
   const preferences = extractConst('extensions/oracle/index.ts', 'PROVIDER_MODEL_PREFERENCES');
   const expectedPatterns = {
     'amazon-bedrock': ['openai.gpt-5.6-sol', 'xai.grok-4.6'],
-    baseten: ['zai-org/GLM-5.3'],
+    baseten: ['zai-org/GLM-5.3 '],
     'cloudflare-ai-gateway': [
       'workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813',
       'workers-ai/@cf/zai-org/glm-5.3',
@@ -166,7 +166,7 @@ test('Pi 0.99 dead-entry cleanup preserves the approved survivor order', () => {
     ],
     'opencode-go': [
       'deepseek-v4-pro',
-      'glm-5.3',
+      'glm-5.3 ',
       'glm-5.2',
       'qwen3.7-plus',
       'mimo-v2.5-pro',
@@ -174,7 +174,7 @@ test('Pi 0.99 dead-entry cleanup preserves the approved survivor order', () => {
       'minimax-m3',
       'minimax-m2.7',
       'kimi-k3',
-      'kimi-k2.7-code',
+      'kimi-k2.7-code ',
       'grok-4.7 ',
       'grok-4.7',
       'grok-4.6',
@@ -197,10 +197,10 @@ test('Pi 0.99 dead-entry cleanup preserves the approved survivor order', () => {
       'claude-opus-4-8',
       'claude-sonnet-5',
       'gpt-5.5',
-      'gpt-5.4',
+      'gpt-5.4 ',
       'gpt-5.3-codex',
       'kimi-k3',
-      'glm-5.3',
+      'glm-5.3 ',
       'deepseek-v4.1-flash',
       'gpt-5.4-mini',
       'glm-5.3-flash',
