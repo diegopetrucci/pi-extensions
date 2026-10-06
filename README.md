@@ -48,6 +48,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 - [`illustrations-to-explain-things`](./extensions/illustrations-to-explain-things): Adds a skill for generating clean, absurd Xiaohei-style article illustrations, shot lists, image edits, and visual metaphors.
 - [`inline-bash`](./extensions/inline-bash): Expands `!{command}` snippets in user prompts by running them through bash before the prompt reaches the agent.
 - [`notify`](./extensions/notify): Sends configurable terminal, desktop, bell, and sound notifications when pi finishes and is ready for input, including tmux-aware terminal notifications.
+- [`project-mcp-json`](./extensions/project-mcp-json): Reads a Claude Code-style `.mcp.json` from the project working directory and registers the configured MCP servers with pi via `pi.registerMcpServer`. Requires a trusted project and follows Pi's project trust semantics — run `/trust` in the project to enable loading.
 - [`todo`](./extensions/todo): Adds a branch-aware `todo` tool for the agent and a `/todos` viewer for users..
 
 ### Deprecated
