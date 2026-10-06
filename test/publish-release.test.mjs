@@ -93,7 +93,14 @@ function githubEnv(overrides = {}) {
   };
 }
 
-function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), postPublishVisibilityMisses = {}, registryError, registryDistOverrides = {}, registryPackPayloadOverrides = {}, registryPackDirectories = [], packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
+function exactNotFoundResult(notFoundOnStdout) {
+  const message = 'npm error code E404\nnpm error 404 Not Found';
+  return notFoundOnStdout
+    ? { code: 1, stdout: message, stderr: '' }
+    : { code: 1, stdout: '', stderr: message };
+}
+
+function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new Set(), postPublishVisibilityMisses = {}, postPublishViewErrors = {}, notFoundOnStdout = false, registryError, registryDistOverrides = {}, registryPackPayloadOverrides = {}, registryPackDirectories = [], packOverrides = {}, releaseOverrides = {}, remoteTag = 'deadbeef', calls = [] }) {
   const artifacts = new Map();
   const remainingPostPublishMisses = new Map();
   return async (file, args, options = {}) => {
@@ -128,15 +135,16 @@ function mockRunner({ root, snapshot, dirtyByPackage = {}, publishedSpecs = new 
         const remainingMisses = remainingPostPublishMisses.get(spec) ?? 0;
         if (remainingMisses > 0) {
           remainingPostPublishMisses.set(spec, remainingMisses - 1);
-          return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
+          return exactNotFoundResult(notFoundOnStdout);
         }
+        if (postPublishViewErrors[spec]) return { code: 1, stdout: '', stderr: postPublishViewErrors[spec] };
         const dist = registryDistOverrides[spec] ?? (() => {
           const version = spec.slice(spec.lastIndexOf('@') + 1);
           return { shasum: `${spec.replace(`@${version}`, '')}:same`, integrity: `sha512-${spec.replace(`@${version}`, '')}:same` };
         })();
         return { code: 0, stdout: JSON.stringify(dist), stderr: '' };
       }
-      return { code: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 Not Found' };
+      return exactNotFoundResult(notFoundOnStdout);
     }
     if (args[0] === 'publish') {
       const spec = artifacts.get(args[1]);
@@ -349,6 +357,64 @@ test('GitHub OIDC live mode gives post-publish propagation a bounded ten-minute 
   );
   assert.equal(timeoutSleeps.length, 120);
   assert.ok(timeoutSleeps.every((milliseconds) => milliseconds === 5_000));
+});
+
+test('stdout-only exact not-found still plans a publish', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const result = await publishRelease({
+    cwd: root,
+    version: 'v1.2.3',
+    dryRun: true,
+    run: mockRunner({ root, snapshot, notFoundOnStdout: true }),
+    createTagSnapshot: async () => cloneSnapshot(snapshot),
+  });
+
+  assert.deepEqual(result.planned.map(({ action }) => action), ['publish', 'publish', 'publish']);
+});
+
+test('post-publish verification retries only exact not-found and fails immediately on integrity or registry errors', async (t) => {
+  const { root, snapshot } = await fixture(t);
+  const mismatchSleeps = [];
+  await assert.rejects(
+    publishRelease({
+      cwd: root,
+      version: 'v1.2.3',
+      githubActions: true,
+      env: githubEnv(),
+      run: mockRunner({
+        root,
+        snapshot,
+        publishedSpecs: new Set(['plain-addon@1.2.3']),
+        registryDistOverrides: { '@example/feature@1.2.3': { shasum: 'feature:other', integrity: 'sha512-feature:other' } },
+        registryPackPayloadOverrides: { '@example/feature@1.2.3': 'tampered\n' },
+      }),
+      sleep: async (milliseconds) => mismatchSleeps.push(milliseconds),
+      createTagSnapshot: async () => cloneSnapshot(snapshot),
+    }),
+    /registry dist metadata mismatch for @example\/feature@1\.2\.3/,
+  );
+  assert.equal(mismatchSleeps.length, 0);
+
+  const { root: errorRoot, snapshot: errorSnapshot } = await fixture(t);
+  const errorSleeps = [];
+  await assert.rejects(
+    publishRelease({
+      cwd: errorRoot,
+      version: 'v1.2.3',
+      githubActions: true,
+      env: githubEnv(),
+      run: mockRunner({
+        root: errorRoot,
+        snapshot: errorSnapshot,
+        publishedSpecs: new Set(['plain-addon@1.2.3']),
+        postPublishViewErrors: { '@example/feature@1.2.3': 'npm error code E500\n500 Internal Server Error' },
+      }),
+      sleep: async (milliseconds) => errorSleeps.push(milliseconds),
+      createTagSnapshot: async () => cloneSnapshot(errorSnapshot),
+    }),
+    /registry dist check for @example\/feature@1\.2\.3 failed \(1\): npm error code E500/,
+  );
+  assert.equal(errorSleeps.length, 0);
 });
 
 test('unsafe evidence order and dirty publishable paths hard-fail before publish', async (t) => {

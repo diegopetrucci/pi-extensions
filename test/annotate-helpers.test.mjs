@@ -164,14 +164,12 @@ test('annotate-git-diff git helpers parse change outputs and decide when branch 
     ]);
   });
 
-  await t.test('parseStatusPorcelainZ tracks reviewable untracked files, deletions, and renames', () => {
+  await t.test('parseStatusPorcelainZ tracks reviewable untracked files and renames', () => {
     const status = parseStatusPorcelainZ('?? src/new.ts\0R  src/old.ts\0src/renamed.ts\0 D src/removed.ts\0!! .gitignore\0');
 
     assert.deepEqual(status, {
-      hasChanges: true,
       hasReviewableChanges: true,
       hasUntracked: true,
-      hasTrackedDeletions: true,
       hasRenames: true,
       untrackedPaths: ['src/new.ts'],
     });
@@ -180,10 +178,8 @@ test('annotate-git-diff git helpers parse change outputs and decide when branch 
   await t.test('shouldNormalizeBranchChanges only switches to snapshot normalization when needed', () => {
     const trackedChanges = [{ status: 'deleted', oldPath: 'src/old.ts', newPath: null }];
     const baseStatus = {
-      hasChanges: true,
       hasReviewableChanges: true,
       hasUntracked: false,
-      hasTrackedDeletions: false,
       hasRenames: false,
       untrackedPaths: [],
     };
@@ -480,7 +476,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
     assert.deepEqual(result, {
       ok: true,
       data: {
-        text: 'First line\n\nSecond line',
         lines: [
           { number: 1, text: 'First line' },
           { number: 2, text: '' },
@@ -493,7 +488,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
             startLine: 1,
             endLine: 1,
             preview: 'First line',
-            text: 'First line',
           },
           {
             id: 'section-2',
@@ -501,7 +495,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
             startLine: 3,
             endLine: 3,
             preview: 'Second line',
-            text: 'Second line',
           },
         ],
       },
@@ -522,7 +515,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
     assert.deepEqual(result, {
       ok: true,
       data: {
-        text: `${longFirstLine}\nContinuation\nTrailing part`,
         lines: [
           { number: 1, text: longFirstLine },
           { number: 2, text: 'Continuation' },
@@ -535,7 +527,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
             startLine: 1,
             endLine: 3,
             preview: `${'A'.repeat(95)}…`,
-            text: `${longFirstLine}\nContinuation\nTrailing part`,
           },
         ],
       },
@@ -545,7 +536,6 @@ test('annotate-last-message session helper reports missing, incomplete, empty, a
 
 test('annotate-last-message prompt helper filters blank feedback and composes sorted section and inline notes', () => {
   const message = {
-    text: 'Intro paragraph\n\nImplementation details go here',
     lines: [
       { number: 1, text: 'Intro paragraph' },
       { number: 2, text: '' },
@@ -558,7 +548,6 @@ test('annotate-last-message prompt helper filters blank feedback and composes so
         startLine: 1,
         endLine: 1,
         preview: 'Intro paragraph',
-        text: 'Intro paragraph',
       },
       {
         id: 'section-2',
@@ -566,7 +555,6 @@ test('annotate-last-message prompt helper filters blank feedback and composes so
         startLine: 3,
         endLine: 3,
         preview: 'Implementation details go here',
-        text: 'Implementation details go here',
       },
     ],
   };

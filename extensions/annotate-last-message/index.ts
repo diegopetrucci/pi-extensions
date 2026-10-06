@@ -58,7 +58,7 @@ function isCancelPayload(value: unknown): value is AnnotateLastMessageCancelPayl
 	return typeof value === "object" && value != null && "type" in value && value.type === "cancel";
 }
 
-export function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
+function registerAnnotateLastMessageCommand(pi: ExtensionAPI): void {
 	let activeWindow: QuietGlimpseWindow | null = null;
 	let annotationOpening = false;
 	let annotationAttempt = 0;

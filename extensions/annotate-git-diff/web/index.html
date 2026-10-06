@@ -784,14 +784,13 @@ window.__reviewAssetConfig = __INLINE_ASSET_CONFIG__;
     if (active?.isContentEditable) {
       return document.execCommand("delete");
     }
-    return window.__reviewClipboard?.deleteSelection?.() === true;
+    return false;
   }
 
   function canReceivePaste() {
     const active = document.activeElement;
-    if (!active) return false;
-    if (isMonacoInput(active)) return window.__reviewClipboard?.canPaste?.() === true;
-    return isEditableTextControl(active) || active.isContentEditable || window.__reviewClipboard?.canPaste?.() === true;
+    if (!active || isMonacoInput(active)) return false;
+    return isEditableTextControl(active) || active.isContentEditable;
   }
 
   function insertAtActiveTarget(text) {
@@ -802,7 +801,7 @@ window.__reviewAssetConfig = __INLINE_ASSET_CONFIG__;
     if (active?.isContentEditable) {
       return document.execCommand("insertText", false, text);
     }
-    return window.__reviewClipboard?.insertText?.(text) === true;
+    return false;
   }
 
   function writeClipboardText(text) {

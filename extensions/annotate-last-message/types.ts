@@ -9,11 +9,9 @@ export interface LastAssistantMessageSection {
 	startLine: number;
 	endLine: number;
 	preview: string;
-	text: string;
 }
 
 export interface LastAssistantMessageData {
-	text: string;
 	lines: LastAssistantMessageLine[];
 	sections: LastAssistantMessageSection[];
 }
