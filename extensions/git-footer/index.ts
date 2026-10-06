@@ -43,8 +43,14 @@ type Clock = {
 	clearInterval(handle: TimerHandle): void;
 };
 
+type ProjectGitContext = {
+	cwd: string;
+	isProjectTrusted?: () => boolean;
+};
+
 type GitFooterCacheOptions = {
 	cwd: () => string;
+	canRun?: () => boolean;
 	runner?: CommandRunner;
 	clock?: Clock;
 	refreshIntervalMs?: number;
@@ -60,7 +66,14 @@ const STATUS_SEPARATOR = " • ";
 const DEFAULT_REFRESH_INTERVAL_MS = 8_000;
 const DEFAULT_GIT_TIMEOUT_MS = 1_500;
 const DEFAULT_GH_TIMEOUT_MS = 3_000;
-const GIT_STATUS_ARGS = ["--no-optional-locks", "status", "--porcelain=v2", "--branch"] as const;
+const GIT_STATUS_ARGS = [
+	"--no-optional-locks",
+	"-c",
+	"core.fsmonitor=false",
+	"status",
+	"--porcelain=v2",
+	"--branch",
+] as const;
 const GH_PR_VIEW_ARGS = ["pr", "view", "--json", "number,state,isDraft,url,title"] as const;
 
 function createEmptyGitStatus(): GitStatusSnapshot {
@@ -295,8 +308,13 @@ function isCommandUnavailableError(error: unknown): boolean {
 	return !!error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT";
 }
 
+function canRunProjectGit(ctx: ProjectGitContext): boolean {
+	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+}
+
 class GitFooterCache {
 	private readonly cwd: () => string;
+	private readonly canRun: () => boolean;
 	private readonly runner: CommandRunner;
 	private readonly clock: Clock;
 	private readonly refreshIntervalMs: number;
@@ -314,6 +332,7 @@ class GitFooterCache {
 
 	constructor(options: GitFooterCacheOptions) {
 		this.cwd = options.cwd;
+		this.canRun = options.canRun ?? (() => true);
 		this.runner = options.runner ?? defaultRunner;
 		this.clock = options.clock ?? defaultClock();
 		this.refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
@@ -337,6 +356,15 @@ class GitFooterCache {
 
 	refresh(): Promise<void> {
 		if (this.disposed) return Promise.resolve();
+		if (!this.canRun()) {
+			const previousStatusSnapshot = this.statusSnapshot;
+			const previousPullRequestSnapshot = this.pullRequestSnapshot;
+			this.statusSnapshot = undefined;
+			this.pullRequestSnapshot = undefined;
+			this.lastSeenBranch = undefined;
+			this.emitChangeIfSnapshotsChanged(previousStatusSnapshot, previousPullRequestSnapshot);
+			return Promise.resolve();
+		}
 		if (this.refreshInFlight) return this.refreshInFlight;
 		const run = this.runRefresh()
 			.finally(() => {
@@ -462,36 +490,49 @@ class GitFooterCache {
 
 export default function (pi: ExtensionAPI) {
 	let cache: GitFooterCache | undefined;
+	let updateStatus: (() => void) | undefined;
 
 	function disposeCache(): void {
 		cache?.dispose();
 		cache = undefined;
 	}
 
+	function ensureCache(ctx: ProjectGitContext): void {
+		if (!canRunProjectGit(ctx)) {
+			disposeCache();
+			updateStatus?.();
+			return;
+		}
+
+		if (cache) return;
+		cache = new GitFooterCache({
+			cwd: () => ctx.cwd,
+			canRun: () => canRunProjectGit(ctx),
+			onChange: () => updateStatus?.(),
+		});
+	}
+
 	pi.on("session_start", (_event, ctx) => {
 		disposeCache();
-
-		const updateStatus = () => {
+		updateStatus = () => {
 			const text = formatGitFooterStatus(
 				cache?.getStatusSnapshot(),
 				cache?.getPullRequestSnapshot(),
 			);
 			ctx.ui.setStatus(STATUS_KEY, text ? ctx.ui.theme.fg("dim", text) : undefined);
 		};
-
-		cache = new GitFooterCache({
-			cwd: () => ctx.cwd,
-			onChange: updateStatus,
-		});
+		ensureCache(ctx);
 		updateStatus();
 	});
 
-	pi.on("turn_end", () => {
+	pi.on("turn_end", (_event, ctx) => {
+		ensureCache(ctx);
 		void cache?.refresh();
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		disposeCache();
+		updateStatus = undefined;
 		ctx.ui.setStatus(STATUS_KEY, undefined);
 	});
 }
