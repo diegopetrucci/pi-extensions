@@ -178,11 +178,6 @@ function inspectFinalAssistant(messages: unknown[]): AuditAssistantOutcome {
 	return { ok: false, reason: "Agent Workflow Audit subagent produced no assistant message" };
 }
 
-function extractLastAssistantText(messages: unknown[]): string {
-	const outcome = inspectFinalAssistant(messages);
-	return outcome.ok ? outcome.answer : "";
-}
-
 function isAbortLikeError(error: unknown): boolean {
 	if (error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError") return true;
 	const message = error instanceof Error ? error.message : String(error);
@@ -741,7 +736,6 @@ function getBlockedExecutableReason(tokens: string[]): string | undefined {
 
 	const commandName = getCommandName(executable);
 	if (commandName === "cd") return getBlockedCdReason(tokens);
-	if (executable.startsWith("./")) return "Agent Workflow Audit blocks relative executables to avoid symlink/path escapes; use package-manager scripts or report the documented command as manual.";
 	if (!SAFE_DIRECT_COMMANDS.has(commandName)) {
 		return `Agent Workflow Audit bash blocks direct ${commandName || "shell"} commands; use read/grep/find/ls for inspection or documented project commands.`;
 	}
