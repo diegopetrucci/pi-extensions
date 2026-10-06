@@ -130,7 +130,7 @@ test('triage-comments command completes arguments and handles help, no-UI, and c
   });
 
   await command.handler('', { cwd: repoRoot, hasUI: false });
-  assert.match(noUiMessages.at(-1), /This intake flow requires The Last Harness interactive UI/);
+  assert.match(noUiMessages.at(-1), /This intake flow requires the \/triage-comments interactive UI/);
 
   const cancelSelectionContext = createCommandContext({ selectResult: 'Cancel' });
   await command.handler('', cancelSelectionContext.ctx);
