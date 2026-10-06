@@ -565,11 +565,9 @@ aligned to that same runtime-observable definition and re-derived on the
 current representative corpus (460 gate-eligible candidates). The split
 **reverses**: at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now
 carries essentially all the value and `mid_loop` (T=1, ~0) carries
-essentially none. Per the extension's state-conditioned-defaults decision
-rule, this does not support a stricter idle default; the runtime keeps
-parity (`22`/`22`). The table above is retained as the historical
-turn-END-definition record; the extension README's Roadmap section carries
-the up-to-date note.
+essentially none. Parity (`22`/`22`) was kept only for that update.
+Shipped defaults are idle `22` / mid_loop `1`. The table above is the
+historical turn-END-definition record.
 
 **Reframed go/no-go implication**: this is evidence *for*, not against,
 prototyping v2 — but for a specific reason. Condition (1) above ("a

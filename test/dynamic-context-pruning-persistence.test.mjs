@@ -10,7 +10,7 @@ const dcp = await import(pathToFileURL(modulePath).href);
 const {
   proposalToDecisionRecord,
   parseDecisionRecord,
-  rebuildDecisionStateFromEntries,
+  resolvePruneTombstoneState,
   runDynamicContextPruningPipeline,
   defaultConfig,
 } = dcp;
@@ -38,7 +38,7 @@ test('parseDecisionRecord round-trips a valid record and rejects malformed paylo
   assert.equal(parseDecisionRecord({ ...decision, correlation: { type: 'bogus' } }), undefined);
 });
 
-test('rebuildDecisionStateFromEntries reconstructs decisions from custom entries on a branch', () => {
+test('resolvePruneTombstoneState reconstructs active decisions from custom entries on a branch', () => {
   const decisionA = proposalToDecisionRecord({ strategyId: 's', toolCallId: 'c1', kind: 'tool_result_content', reason: 'r1' });
   const decisionB = proposalToDecisionRecord({ strategyId: 's', toolCallId: 'c2', kind: 'tool_result_content', reason: 'r2' });
 
@@ -48,37 +48,37 @@ test('rebuildDecisionStateFromEntries reconstructs decisions from custom entries
     customEntry(decisionB, { id: 'e2', parentId: 'e1' }),
   ];
 
-  const state = rebuildDecisionStateFromEntries(entries);
-  assert.equal(state.decisions.length, 2);
-  assert.deepEqual(new Set(state.decisions.map((d) => d.idempotencyKey)), new Set([decisionA.idempotencyKey, decisionB.idempotencyKey]));
-  assert.ok(state.idempotencyKeys.has(decisionA.idempotencyKey));
-  assert.ok(state.idempotencyKeys.has(decisionB.idempotencyKey));
+  const state = resolvePruneTombstoneState(entries);
+  assert.equal(state.activeDecisions.length, 2);
+  assert.deepEqual(new Set(state.activeDecisions.map((d) => d.idempotencyKey)), new Set([decisionA.idempotencyKey, decisionB.idempotencyKey]));
+  assert.ok(state.activeIdempotencyKeys.has(decisionA.idempotencyKey));
+  assert.ok(state.activeIdempotencyKeys.has(decisionB.idempotencyKey));
 });
 
-test('rebuildDecisionStateFromEntries tolerates duplicate/replayed entries (idempotent rebuild)', () => {
+test('resolvePruneTombstoneState tolerates duplicate/replayed entries (idempotent rebuild)', () => {
   const decision = proposalToDecisionRecord({ strategyId: 's', toolCallId: 'c1', kind: 'tool_result_content', reason: 'r1' });
   const entries = [
     customEntry(decision, { id: 'e1' }),
     customEntry(decision, { id: 'e2' }), // replayed/duplicated append
     customEntry(decision, { id: 'e3' }),
   ];
-  const state = rebuildDecisionStateFromEntries(entries);
-  assert.equal(state.decisions.length, 1, 'duplicate idempotency keys must collapse to a single decision');
+  const state = resolvePruneTombstoneState(entries);
+  assert.equal(state.activeDecisions.length, 1, 'duplicate idempotency keys must collapse to a single decision');
 });
 
-test('rebuildDecisionStateFromEntries ignores unrelated custom entries and malformed data', () => {
+test('resolvePruneTombstoneState ignores unrelated custom entries and malformed data', () => {
   const entries = [
     { type: 'custom', id: 'e1', parentId: null, timestamp: 't', customType: 'some-other-extension:thing', data: { x: 1 } },
     { type: 'custom', id: 'e2', parentId: 'e1', timestamp: 't', customType: 'dynamic-context-pruning:decision', data: { garbage: true } },
   ];
-  const state = rebuildDecisionStateFromEntries(entries);
-  assert.equal(state.decisions.length, 0);
+  const state = resolvePruneTombstoneState(entries);
+  assert.equal(state.activeDecisions.length, 0);
 });
 
-test('rebuilt state feeds back into the pipeline and is not re-reported for appendEntry', () => {
+test('rebuilt tombstone state feeds back into the pipeline and is not re-reported for appendEntry', () => {
   const decision = proposalToDecisionRecord({ strategyId: 's', toolCallId: 'c1', kind: 'tool_result_content', reason: 'r1' });
   const entries = [customEntry(decision)];
-  const state = rebuildDecisionStateFromEntries(entries);
+  const state = resolvePruneTombstoneState(entries);
 
   const messages = [
     { role: 'user', content: 'hi', timestamp: 1 },
@@ -92,8 +92,8 @@ test('rebuilt state feeds back into the pipeline and is not re-reported for appe
   const result = runDynamicContextPruningPipeline({
     messages,
     config,
-    persistedDecisions: state.decisions,
-    knownIdempotencyKeys: state.idempotencyKeys,
+    persistedDecisions: state.activeDecisions,
+    knownIdempotencyKeys: state.activeIdempotencyKeys,
   });
 
   assert.equal(result.newlyAppliedDecisions.length, 0, 'a decision rebuilt from persisted entries is already known');
