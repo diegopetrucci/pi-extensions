@@ -60,6 +60,7 @@
       "./extensions/notify/index.ts",
       "./extensions/oracle/index.ts",
       "./extensions/permission-gate/index.ts",
+      "./extensions/project-mcp-json/index.ts",
       "./extensions/quiet-tools/index.ts",
       "./extensions/review/index.ts",
       "./extensions/todo/index.ts",
