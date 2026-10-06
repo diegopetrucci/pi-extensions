@@ -145,7 +145,7 @@ recoup the one-time cache-bust cost via the recurring saving. The gate accepts
 a batch of candidates only if `breakEvenCalls` is at most the effective
 threshold for the current state (`idle=22`, `mid_loop=1` by default,
 calibrated from the representative-corpus benchmark — see the calibration
-note under [Configuration](#configuration) and the [Roadmap](#roadmap) evidence).
+note under [Configuration](#configuration)).
 
 All candidates proposed in the same `context` call share one cache bust (since
 a prompt cache is a single linear prefix), so they're evaluated and
@@ -262,7 +262,7 @@ Notes:
   `idle` if the most recent relevant message is a user message (this is the
   first LLM call of the turn), `mid_loop` if it's an assistant message or a
   tool result (the agent is iterating mid-turn). The representative-corpus
-  benchmark (see [Roadmap](#roadmap)) was re-derived against this same
+  benchmark was re-derived against this same
   runtime-observable definition and found the state-split REVERSED from an
   earlier turn-end-based analysis: at r=0.1, `idle` candidates now carry
   essentially all the realized net benefit and `mid_loop` candidates carry
@@ -277,8 +277,7 @@ Notes:
   impossible. Set `mid_loop` back to `22` to restore the old parity behavior.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
-  prompt caching, the common case) — see [Roadmap](#roadmap) for the full
-  evidence and its ratio-sensitivity caveats. It is **provider/ratio-
+  prompt caching, the common case). It is **provider/ratio-
   dependent**: the optimal threshold rises as caching gets weaker (T=29 at
   r=0.25, T=54 at r=0.5, T=58 at r=0.9 on the same corpus).
 
@@ -440,40 +439,9 @@ candidates — see the corpus-choice note above) produced:
   more amortization runway than the earlier small-corpus run showed, because
   this corpus is dominated by long, tool-heavy agent sessions rather than
   short orchestrator sessions.
-- **Hindsight-optimal break-even threshold `T`** (maximizes total *realized*
-  net benefit), by cached-price ratio `r`, split overall / mid_loop / idle:
 
-  | ratio `r` | overall `T` (benefit) | mid_loop `T` (benefit) | idle `T` (benefit) |
-  | --- | --- | --- | --- |
-  | 0.1  | T=22 (~20.6k)  | T=22 (~20.6k)  | T=1 (0 — zero benefit) |
-  | 0.25 | T=29 (~1.54M)  | T=29 (~1.54M)  | T=12 (~4.0k) |
-  | 0.5  | T=54 (~8.06M)  | T=54 (~8.06M)  | T=27 (~37.2k) |
-  | 0.9  | T=58 (~24.7M)  | T=58 (~24.2M)  | T=21 (~459k) |
-
-**Reading**: `mid_loop` candidates carry essentially all of the realized
-benefit; `idle` candidates carry essentially none (literally zero at r=0.1).
-At r=0.1 (aggressive prompt caching, the common Anthropic case) the total
-realized benefit across the whole 1,390-session corpus is only ~20.6k
-token-units — economically marginal, on the order of pennies. Savings only
-become material at weaker caching, r>=0.25.
-
-**pe-zy4s update (2026-07-08): this idle/mid_loop split used a turn-END
-definition** ("idle" = this call IS the turn's final assistant message, only
-knowable in hindsight via replay) **that was never runtime-observable.** Once
-real runtime agent-state detection landed (turn-START definition: "idle" =
-this is the FIRST LLM call of a turn; see the config-notes bullet above), the
-benchmark's candidate labeling was aligned to that same definition and
-re-derived on the representative corpus (460 gate-eligible candidates on the
-current `~/.the-last-harness/agent/sessions` corpus). The split **reverses**:
-at r=0.1, `idle` (T=22, ~20.6k realized net benefit) now carries essentially
-all the value, and `mid_loop` (T=1, ~0 realized net benefit) carries
-essentially none. Under that ticket's decision rule (stricter idle default
-only if idle is shown ~worthless), parity (`22`/`22`) was retained at the time.
-The 2026-09-08 follow-up supersedes that default with `idle=22` / `mid_loop=1`,
-using the measured mid-loop result to choose a conservative threshold (see
-[Configuration](#configuration) for the evidence and limitations). The table
-above is retained as the historical turn-END-definition record; it no longer
-reflects how the runtime classifies agent state.
+Shipped gate defaults remain `idle=22` / `mid_loop=1` (see
+[Configuration](#configuration)).
 
 **This reframes, rather than weakens, the case for v2.** Small deterministic
 removals (dedupe/error-purge/superseded-file-ops) structurally cannot beat
