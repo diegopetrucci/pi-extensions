@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initTheme } from '@earendil-works/pi-coding-agent';
+import { createBashToolDefinition, initTheme } from '@earendil-works/pi-coding-agent';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '..');
@@ -145,6 +145,7 @@ test('quiet-tools wrapper preserves Pi 0.99 metadata, execution context, structu
   assert.deepEqual(executeCalls, [{ toolCallId: 'fixture-call', args: { command: 'printf safe' }, signal, onUpdate, ctx }]);
   assert.deepEqual(updates, [{ content: [{ type: 'text', text: 'partial' }], details: { phase: 'partial' } }]);
 
+  const state = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
   const errorResult = {
     content: [{ type: 'text', text: 'line 1\nline 2' }],
     details: { phase: 'streaming' },
@@ -155,34 +156,41 @@ test('quiet-tools wrapper preserves Pi 0.99 metadata, execution context, structu
     { ...errorResult, isError: false },
     { expanded: false, isPartial: true },
     theme,
-    { isError: false, lastComponent: undefined, state: {} },
+    { isError: false, lastComponent: undefined, state },
   );
   assert.deepEqual(partialCollapsed.render(200), []);
+  assert.ok(state.interval, 'partial rendering must keep the timing update alive');
 
   const finalCollapsed = quietTool.renderResult(
     errorResult,
     { expanded: false, isPartial: false },
     theme,
-    { isError: true, lastComponent: partialCollapsed, state: {} },
+    { isError: true, lastComponent: partialCollapsed, state },
   );
   assert.deepEqual(finalCollapsed.render(200), []);
+  assert.equal(state.interval, undefined);
+  assert.ok(state.endedAt);
 
+  const emptyState = { startedAt: Date.now(), interval: setInterval(() => {}, 100000) };
   const emptyResult = { content: [], details: {}, isError: false };
   const partialEmptyCollapsed = quietTool.renderResult(
     emptyResult,
     { expanded: false, isPartial: true },
     theme,
-    { isError: false, lastComponent: undefined, state: {} },
+    { isError: false, lastComponent: undefined, state: emptyState },
   );
   assert.deepEqual(partialEmptyCollapsed.render(200), []);
+  assert.ok(emptyState.interval, 'partial empty rendering must keep the timing update alive');
 
   const finalEmptyCollapsed = quietTool.renderResult(
     emptyResult,
     { expanded: false, isPartial: false },
     theme,
-    { isError: false, lastComponent: partialEmptyCollapsed, state: {} },
+    { isError: false, lastComponent: partialEmptyCollapsed, state: emptyState },
   );
   assert.deepEqual(finalEmptyCollapsed.render(200), []);
+  assert.equal(emptyState.interval, undefined);
+  assert.ok(emptyState.endedAt);
 
   assert.equal(
     quietTool.renderResult(
@@ -227,7 +235,7 @@ test('quiet-tools collapsed render keeps summaries visible while hiding results 
     { text: 'hidden result' },
     { expanded: false, isPartial: false },
     theme,
-    { isError: false, lastComponent: undefined, state: {} },
+    { isError: false, lastComponent: undefined, state: { startedAt: Date.now() } },
   );
   assert.deepEqual(collapsedResult.render(200), []);
 
@@ -239,4 +247,86 @@ test('quiet-tools collapsed render keeps summaries visible while hiding results 
     quietTool.renderResult({}, { expanded: true, isPartial: false }, theme, { isError: false, lastComponent: undefined, state: {} }),
     baseResult,
   );
+});
+
+const bashResult = { content: [{ type: 'text', text: 'ok' }] };
+
+function quietBashTool() {
+  return createQuietToolDefinition(createBashToolDefinition(repoRoot));
+}
+
+test('quiet-tools clears the delegated bash timer when a running row finishes collapsed', (t) => {
+  const quietTool = quietBashTool();
+  const state = {};
+  t.after(() => {
+    if (state.interval) clearInterval(state.interval);
+  });
+
+  quietTool.renderCall(
+    { command: 'echo hello' },
+    theme,
+    { expanded: true, executionStarted: true, lastComponent: undefined, state },
+  );
+  quietTool.renderResult(
+    bashResult,
+    { expanded: true, isPartial: true },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.equal(typeof state.interval, 'object');
+
+  const collapsedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.deepEqual(collapsedFinal.render(200), []);
+  assert.equal(state.interval, undefined);
+  assert.equal(typeof state.endedAt, 'number');
+});
+
+test('quiet-tools keeps collapsed bash timing so a later expand is not Took 0.0s', (t) => {
+  const quietTool = quietBashTool();
+  const state = {};
+  t.after(() => {
+    if (state.interval) clearInterval(state.interval);
+  });
+
+  quietTool.renderCall(
+    { command: 'echo hello' },
+    theme,
+    { expanded: false, executionStarted: true, lastComponent: undefined, state },
+  );
+  assert.equal(typeof state.startedAt, 'number');
+  state.startedAt = Date.now() - 10_000;
+
+  const collapsedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.deepEqual(collapsedFinal.render(200), []);
+  const startedAt = state.startedAt;
+  const endedAt = state.endedAt;
+  assert.equal(typeof endedAt, 'number');
+  assert.ok(endedAt - startedAt >= 9_000);
+
+  quietTool.renderCall(
+    { command: 'echo hello' },
+    theme,
+    { expanded: true, executionStarted: true, lastComponent: undefined, state },
+  );
+  const expandedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: true, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.equal(state.startedAt, startedAt);
+  assert.equal(state.endedAt, endedAt);
+  const durationSeconds = ((endedAt - startedAt) / 1000).toFixed(1);
+  assert.notEqual(durationSeconds, '0.0');
+  assert.match(expandedFinal.render(80).join('\n'), new RegExp(`Took ${durationSeconds.replace('.', '\\.')}s`));
 });
