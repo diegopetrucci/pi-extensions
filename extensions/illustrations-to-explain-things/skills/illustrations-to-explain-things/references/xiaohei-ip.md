@@ -25,19 +25,12 @@ Xiaohei should appear in most images by default. Xiaohei is not a mascot, sticke
 
 ## Typical jobs
 
-Make Xiaohei carry the core action:
+Make Xiaohei carry the core action. Choose from the action pool:
 
-- moving source material
-- pulling lines to gather information sources
-- getting stuck inside a breakpoint
-- operating a judgment lever inside a machine
-- becoming a sorting funnel
-- cutting up a source-material fish
-- stamping a handoff message
-- pulling a handoff path
-- holding a warning sign over a trap
-- reaching out from a hole but failing to catch the content
-- building, bridging, opening, sorting, logging, or carrying beside the main structure
+- pull, carry, stuff, scoop, press, weigh, stitch, cut, twist, guard, push, catch, unpack, mark, recycle
+- the action should serve the core idea instead of being strange for its own sake
+
+Invent the scene for the current article. Do not replay a composition from `assets/examples/`.
 
 ## Do not
 

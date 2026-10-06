@@ -6,7 +6,7 @@
 - The background is clean white.
 - Xiaohei is present.
 - Xiaohei performs the core action instead of acting as decoration.
-- The composition is not a copy of an old example; it uses a new metaphor for the current article.
+- The composition is not a copy of `assets/examples/`; it uses a new metaphor for the current article.
 - The image feels strange, inventive, and interesting.
 - The canvas stays clean and sparse, with the subject using no more than about 60% of the space.
 - One image explains only one core structure.
@@ -37,7 +37,7 @@ If any of these appear, regenerate or make a focused edit:
 - Too complex: remove nodes and keep one action plus 3-5 short labels.
 - Too cute: emphasize deadpan, blank serious expression, not cute, not mascot.
 - Too PPT: remove titles, frames, tidy grids, and extra arrows; turn it back into a hand-drawn scene.
-- Too similar to an old case: keep the core idea and replace the main object plus Xiaohei's action.
+- Too similar to `assets/examples/`: keep the core idea and replace the main object plus Xiaohei's action.
 - Text errors: prefer a local edit first; if there are many errors, regenerate with fewer labels.
 - Wrong language: regenerate or edit so the default output is English unless the user asked for another language.
 
