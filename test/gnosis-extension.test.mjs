@@ -238,25 +238,37 @@ test('gnosis omits install guidance when execution throws for a reason other tha
   );
 });
 
+test('gnosis omits install guidance for an empty non-zero exit', async () => {
+  const gnosisExtension = await loadExtension('extensions/gnosis/index.ts');
+  const { pi, tools } = createExtensionHarness({
+    async execImpl() {
+      return {
+        stdout: '',
+        stderr: '',
+        code: 1,
+      };
+    },
+  });
+
+  gnosisExtension(pi);
+  const tool = tools.get('gnosis');
+  assert.ok(tool);
+
+  await assert.rejects(
+    () => tool.execute('call-empty-failure', { action: 'topics' }, undefined, undefined, { cwd: '/repo' }),
+    (error) => {
+      assert.equal(error.message, 'gnosis topics failed with exit code 1.\n\n(no output)');
+      assert.doesNotMatch(error.message, /The `gn` CLI is required/);
+      assert.doesNotMatch(error.message, /brew install/);
+      return true;
+    },
+  );
+});
+
 test('gnosis includes install guidance when the CLI reports the binary is missing', async () => {
   const gnosisExtension = await loadExtension('extensions/gnosis/index.ts');
   const installHintPattern = new RegExp(INSTALL_HINT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const cases = [
-    {
-      name: 'swallowed spawn ENOENT',
-      execImpl() {
-        return {
-          stdout: '',
-          stderr: '',
-          code: 1,
-        };
-      },
-      assertError(error) {
-        assert.match(error.message, /gnosis topics failed with exit code 1\./);
-        assert.match(error.message, /\(no output\)/);
-        assert.match(error.message, installHintPattern);
-      },
-    },
     {
       name: 'command not found',
       execImpl() {

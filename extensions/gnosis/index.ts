@@ -96,16 +96,8 @@ function isEnoent(error: unknown): boolean {
 	return !!error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT";
 }
 
-function isMissingBinaryFailure(
-	error: unknown,
-	outputText = "",
-	exitCode?: number | null,
-	rawStdout = "",
-	rawStderr = "",
-): boolean {
+function isMissingBinaryFailure(error: unknown, outputText = "", exitCode?: number | null): boolean {
 	if (exitCode === 127 || isEnoent(error)) return true;
-	// pi.exec swallows spawn ENOENT and resolves { code: 1, stdout: "", stderr: "" }.
-	if (exitCode === 1 && rawStdout.trim() === "" && rawStderr.trim() === "") return true;
 	const message = error instanceof Error ? error.message : error == null ? "" : String(error);
 	const text = `${message}\n${outputText}`;
 	return /\bENOENT\b/.test(text)
@@ -163,14 +155,10 @@ export default function gnosisExtension(pi: ExtensionAPI) {
 				throw new Error(`${hint}Execution error: ${message}`);
 			}
 
-			const stdout = result.stdout ?? "";
-			const stderr = result.stderr ?? "";
-			const output = formatOutput(stdout, stderr);
+			const output = formatOutput(result.stdout ?? "", result.stderr ?? "");
 			if (result.killed) throw new Error(`gnosis ${params.action} timed out or was cancelled.\n\n${output.text}`);
 			if (result.code !== 0) {
-				const hint = isMissingBinaryFailure(undefined, output.text, result.code, stdout, stderr)
-					? `\n\n${installHint()}`
-					: "";
+				const hint = isMissingBinaryFailure(undefined, output.text, result.code) ? `\n\n${installHint()}` : "";
 				throw new Error(`gnosis ${params.action} failed with exit code ${result.code}.\n\n${output.text}${hint}`);
 			}
 
