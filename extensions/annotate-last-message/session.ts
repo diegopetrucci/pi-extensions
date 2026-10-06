@@ -47,7 +47,6 @@ function buildSections(lines: string[]): LastAssistantMessageSection[] {
 			startLine: startIndex + 1,
 			endLine: endIndex + 1,
 			preview: truncatePreview(previewSource),
-			text: sectionLines.join("\n"),
 		});
 		startIndex = null;
 	};
@@ -97,7 +96,6 @@ export function findLastAssistantMessage(branch: SessionEntry[]): LastAssistantM
 
 		const lines = text.split("\n");
 		const data: LastAssistantMessageData = {
-			text,
 			lines: lines.map((line, lineIndex) => ({ number: lineIndex + 1, text: line })),
 			sections: buildSections(lines),
 		};

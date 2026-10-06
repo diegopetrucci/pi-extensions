@@ -158,9 +158,8 @@ function createAnnotateLastMessageState(overrides = {}) {
     findResult: {
       ok: true,
       data: {
-        text: 'Latest assistant message',
         lines: [{ number: 1, text: 'Latest assistant message' }],
-        sections: [{ id: 'section-1', index: 1, startLine: 1, endLine: 1, preview: 'Latest assistant message', text: 'Latest assistant message' }],
+        sections: [{ id: 'section-1', index: 1, startLine: 1, endLine: 1, preview: 'Latest assistant message' }],
       },
     },
     ...overrides,
