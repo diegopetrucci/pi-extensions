@@ -168,13 +168,12 @@ test('full-message fence metadata preserves rows, coordinates, and section conte
     '<img src=x onerror=alert(1)>',
   ];
   const data = {
-    text: lines.join('\n'),
     lines: lines.map((text, index) => ({ number: index + 1, text })),
     sections: [
-      { id: 'section-1', index: 1, startLine: 1, endLine: 1, preview: '# Heading', text: '# Heading **bold**' },
-      { id: 'section-2', index: 2, startLine: 2, endLine: 3, preview: '```ts', text: '```ts\nconst value = \'<script>\';' },
-      { id: 'section-3', index: 3, startLine: 5, endLine: 6, preview: 'const other = 1;', text: 'const other = 1;\n```' },
-      { id: 'section-4', index: 4, startLine: 8, endLine: 9, preview: '- unsafe', text: '- [unsafe](javascript:alert)\n<img src=x onerror=alert(1)>' },
+      { id: 'section-1', index: 1, startLine: 1, endLine: 1, preview: '# Heading' },
+      { id: 'section-2', index: 2, startLine: 2, endLine: 3, preview: '```ts' },
+      { id: 'section-3', index: 3, startLine: 5, endLine: 6, preview: 'const other = 1;' },
+      { id: 'section-4', index: 4, startLine: 8, endLine: 9, preview: '- unsafe' },
     ],
   };
 
@@ -224,7 +223,6 @@ test('blank and whitespace-only rows retain inline controls, editors, and line c
     'after',
   ];
   const { elements, sentPayloads } = runApp({
-    text: lines.join('\n'),
     lines: lines.map((text, index) => ({ number: index + 1, text })),
     sections: [],
   });
