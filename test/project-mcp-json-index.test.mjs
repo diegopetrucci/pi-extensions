@@ -14,7 +14,6 @@
  *  - no .mcp.json => no-op
  *  - name collision: registerMcpServer throws => caught and warned
  *  - registerMcpServer error is not forwarded verbatim
- *  - session generation counter: shutdown / new session_start abort stale work
  */
 
 import assert from 'node:assert/strict';
@@ -28,18 +27,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let importCounter = 0;
-
-/** Load a fresh module instance so module-level state is reset per test. */
-async function loadFreshExtension(relativePath) {
-  const url = pathToFileURL(path.join(repoRoot, relativePath));
-  url.searchParams.set('v', `${Date.now()}-${importCounter++}`);
-  const mod = await import(url.href);
-  return mod.default;
-}
+import extension from '../extensions/project-mcp-json/index.ts';
 
 // ---------------------------------------------------------------------------
 // Temp directory + environment helpers
@@ -180,9 +168,8 @@ test('untrusted project: does not read or register any server', async (t) => {
 
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir, isProjectTrusted: () => false });
   await fireSessionStart(handlers, ctx);
@@ -196,9 +183,8 @@ test('trusted project + no .mcp.json: does nothing', async (t) => {
   // Trust resources present so extension proceeds past trust check
   createPiResources(projectDir);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -220,9 +206,8 @@ test('hasTrustRequiringProjectResources=true: loads .mcp.json without checking t
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   // No trust.json, no settings.json — should still load
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -243,9 +228,8 @@ test('savedTrust=true (exact path): loads .mcp.json', async (t) => {
   // Write trust.json with exact projectDir → true
   writeTrustStore(agentDir, { [projectDir]: true });
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -265,9 +249,8 @@ test('savedTrust=true (ancestor path): loads .mcp.json', async (t) => {
   // Trust the parent directory, not the exact subdir
   writeTrustStore(agentDir, { [projectDir]: true });
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: subDir });
   await fireSessionStart(handlers, ctx);
@@ -284,9 +267,8 @@ test('savedTrust=false: skips .mcp.json without notification', async (t) => {
   // Explicitly saved as untrusted
   writeTrustStore(agentDir, { [projectDir]: false });
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -307,9 +289,8 @@ test('defaultProjectTrust=always: loads .mcp.json when no resources, no saved tr
   writeGlobalSettings(agentDir, 'always');
   // No .pi resources, no trust.json
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -325,9 +306,8 @@ test('defaultProjectTrust=never: skips .mcp.json without notification', async (t
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   writeGlobalSettings(agentDir, 'never');
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -343,9 +323,8 @@ test('defaultProjectTrust=ask + UI: skips and emits /trust hint notification', a
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   writeGlobalSettings(agentDir, 'ask');
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   await fireSessionStart(handlers, ctx);
@@ -369,9 +348,8 @@ test('defaultProjectTrust=ask + no UI: skips silently (no notification)', async 
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   writeGlobalSettings(agentDir, 'ask');
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
   await fireSessionStart(handlers, ctx);
@@ -387,9 +365,8 @@ test('no settings.json: defaults to ask behaviour (skips with UI notify)', async
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   // No settings.json written — should default to "ask"
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   await fireSessionStart(handlers, ctx);
@@ -412,9 +389,8 @@ test('savedTrust=false: does not attempt to read .mcp.json (no error on absent f
   // No .mcp.json file — if we tried to read it and it were absent, no error should occur
   writeTrustStore(agentDir, { [projectDir]: false });
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   // Should not throw even without .mcp.json, since we skip before reading
@@ -430,9 +406,8 @@ test('defaultProjectTrust=never: does not attempt to read .mcp.json', async (t) 
   // No .mcp.json — if we tried to read it, it would throw; no error expected
   writeGlobalSettings(agentDir, 'never');
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir });
   await assert.doesNotReject(() => fireSessionStart(handlers, ctx));
@@ -458,7 +433,6 @@ test('name collision: registerMcpServer throws => caught and warned, other serve
   );
   createPiResources(projectDir);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const registered = [];
   const { pi, handlers } = makePi();
   // Override to throw on 'colliding'
@@ -466,7 +440,7 @@ test('name collision: registerMcpServer throws => caught and warned, other serve
     if (name === 'colliding') throw new Error('name already taken by another extension');
     registered.push({ name, config });
   };
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -493,12 +467,11 @@ test('registerMcpServer error is not forwarded verbatim in warning', async (t) =
 
   const INTERNAL_ERROR_DETAIL = 'internal-pi-error-detail-xyz';
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers } = makePi();
   pi.registerMcpServer = (_name, _config) => {
     throw new Error(INTERNAL_ERROR_DETAIL);
   };
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -517,6 +490,43 @@ test('registerMcpServer error is not forwarded verbatim in warning', async (t) =
   }
 });
 
+test('parse warning + no UI: does not notify', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeFileSync(path.join(projectDir, '.mcp.json'), '{');
+  createPiResources(projectDir);
+
+  const { pi, handlers, registered } = makePi();
+  extension(pi);
+
+  const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
+  await fireSessionStart(handlers, ctx);
+
+  assert.equal(registered.length, 0);
+  assert.equal(notifications.length, 0, 'parse warnings must not notify without UI');
+});
+
+test('registration failure + no UI: does not notify', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  createPiResources(projectDir);
+
+  const { pi, handlers, registered } = makePi();
+  pi.registerMcpServer = () => {
+    throw new Error('internal-pi-error-detail-xyz');
+  };
+  extension(pi);
+
+  const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
+  await fireSessionStart(handlers, ctx);
+
+  assert.equal(registered.length, 0);
+  assert.equal(notifications.length, 0, 'registration failures must not notify without UI');
+});
+
 test('registration-failure warning: very long server name is truncated, not emitted verbatim', async (t) => {
   // Server names are validated by SERVER_NAME_RE (alphanumeric/_/-) but there
   // is no length limit in the schema.  A >80-char name must be truncated in
@@ -531,12 +541,11 @@ test('registration-failure warning: very long server name is truncated, not emit
   );
   createPiResources(projectDir);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers } = makePi();
   pi.registerMcpServer = (_name, _config) => {
     throw new Error('collision');
   };
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -578,9 +587,8 @@ test('absent .mcp.json with defaultProjectTrust=ask + UI: no notice emitted (no-
   writeGlobalSettings(agentDir, 'ask');
   // Do NOT create .mcp.json
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   await fireSessionStart(handlers, ctx);
@@ -597,9 +605,8 @@ test('absent .mcp.json with hasTrustRequiringProjectResources: complete no-op, n
   createPiResources(projectDir);
   // But no .mcp.json
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -628,9 +635,8 @@ test('settings.json with BOM prefix: defaultProjectTrust=always still loads serv
     'utf-8'
   );
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
   const { pi, handlers, registered } = makePi();
-  ext(pi);
+  extension(pi);
 
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
@@ -650,8 +656,6 @@ test('pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, regi
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
-
   // Build a pi object without registerMcpServer (simulates Pi < 1.0)
   const handlers = new Map();
   const pi = {
@@ -661,7 +665,7 @@ test('pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, regi
     },
     // registerMcpServer intentionally omitted
   };
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   const handler = handlers.get('session_start');
@@ -685,8 +689,6 @@ test('pi.registerMcpServer absent + no UI: registers nothing, no notice emitted'
   writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
-  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
-
   const handlers = new Map();
   const pi = {
     on(eventName, handler) {
@@ -695,7 +697,7 @@ test('pi.registerMcpServer absent + no UI: registers nothing, no notice emitted'
     },
     // registerMcpServer intentionally omitted
   };
-  ext(pi);
+  extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
   const handler = handlers.get('session_start');
