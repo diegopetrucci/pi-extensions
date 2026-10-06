@@ -223,14 +223,14 @@ test("gnosis prepends install guidance when execution throws before a process st
   );
 });
 
-test("gnosis includes output and install guidance when the CLI exits non-zero", async () => {
+test("gnosis includes output without install guidance when the CLI fails after starting", async () => {
   const gnosisExtension = await loadExtension("extensions/gnosis/index.ts");
   const { pi, tools } = createExtensionHarness({
     async execImpl() {
       return {
         stdout: "partial result\n",
         stderr: "database is locked\n",
-        code: 2,
+        code: 1,
       };
     },
   });
@@ -245,12 +245,161 @@ test("gnosis includes output and install guidance when the CLI exits non-zero", 
         cwd: "/repo",
       }),
     (error) => {
-      assert.match(error.message, /gnosis search failed with exit code 2\./);
+      assert.match(error.message, /gnosis search failed with exit code 1\./);
       assert.match(error.message, /partial result\n\ndatabase is locked/);
-      assert.match(error.message, new RegExp(INSTALL_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.doesNotMatch(error.message, /The `gn` CLI is required/);
+      assert.doesNotMatch(error.message, /brew install/);
       return true;
     },
   );
+});
+
+test("gnosis omits install guidance when execution throws for a reason other than a missing binary", async () => {
+  const gnosisExtension = await loadExtension("extensions/gnosis/index.ts");
+  const { pi, tools } = createExtensionHarness({
+    async execImpl() {
+      throw new Error("database is locked");
+    },
+  });
+
+  gnosisExtension(pi);
+  const tool = tools.get("gnosis");
+  assert.ok(tool);
+
+  await assert.rejects(
+    () =>
+      tool.execute("call-exec-error", { action: "topics" }, undefined, undefined, { cwd: "/repo" }),
+    (error) => {
+      assert.equal(error.message, "Execution error: database is locked");
+      assert.doesNotMatch(error.message, /The `gn` CLI is required/);
+      return true;
+    },
+  );
+});
+
+test("gnosis omits install guidance for an empty non-zero exit", async () => {
+  const gnosisExtension = await loadExtension("extensions/gnosis/index.ts");
+  const { pi, tools } = createExtensionHarness({
+    async execImpl() {
+      return {
+        stdout: "",
+        stderr: "",
+        code: 1,
+      };
+    },
+  });
+
+  gnosisExtension(pi);
+  const tool = tools.get("gnosis");
+  assert.ok(tool);
+
+  await assert.rejects(
+    () =>
+      tool.execute("call-empty-failure", { action: "topics" }, undefined, undefined, {
+        cwd: "/repo",
+      }),
+    (error) => {
+      assert.equal(error.message, "gnosis topics failed with exit code 1.\n\n(no output)");
+      assert.doesNotMatch(error.message, /The `gn` CLI is required/);
+      assert.doesNotMatch(error.message, /brew install/);
+      return true;
+    },
+  );
+});
+
+test("gnosis includes install guidance when the CLI reports the binary is missing", async () => {
+  const gnosisExtension = await loadExtension("extensions/gnosis/index.ts");
+  const installHintPattern = new RegExp(INSTALL_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const cases = [
+    {
+      name: "command not found",
+      execImpl() {
+        return {
+          stdout: "",
+          stderr: "sh: gn: command not found\n",
+          code: 1,
+        };
+      },
+      assertError(error) {
+        assert.match(error.message, /gnosis topics failed with exit code 1\./);
+        assert.match(error.message, /sh: gn: command not found/);
+        assert.match(error.message, installHintPattern);
+      },
+    },
+    {
+      name: "shell not found",
+      execImpl() {
+        return {
+          stdout: "",
+          stderr: "sh: 1: gn: not found\n",
+          code: 1,
+        };
+      },
+      assertError(error) {
+        assert.match(error.message, /gnosis topics failed with exit code 1\./);
+        assert.match(error.message, /sh: 1: gn: not found/);
+        assert.match(error.message, installHintPattern);
+      },
+    },
+    {
+      name: "windows command not recognized",
+      execImpl() {
+        return {
+          stdout: "",
+          stderr:
+            "'gn' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n",
+          code: 1,
+        };
+      },
+      assertError(error) {
+        assert.match(error.message, /gnosis topics failed with exit code 1\./);
+        assert.match(error.message, /not recognized as an internal or external command/);
+        assert.match(error.message, installHintPattern);
+      },
+    },
+    {
+      name: "exit 127",
+      execImpl() {
+        return {
+          stdout: "",
+          stderr: "",
+          code: 127,
+        };
+      },
+      assertError(error) {
+        assert.match(error.message, /gnosis topics failed with exit code 127\./);
+        assert.match(error.message, installHintPattern);
+      },
+    },
+    {
+      name: "ENOENT code",
+      execImpl() {
+        const error = new Error("spawn gn failed");
+        error.code = "ENOENT";
+        throw error;
+      },
+      assertError(error) {
+        assert.match(error.message, /Execution error: spawn gn failed/);
+        assert.match(error.message, installHintPattern);
+      },
+    },
+  ];
+
+  for (const { name, execImpl, assertError } of cases) {
+    const { pi, tools } = createExtensionHarness({ execImpl });
+    gnosisExtension(pi);
+    const tool = tools.get("gnosis");
+    assert.ok(tool, name);
+
+    await assert.rejects(
+      () =>
+        tool.execute("call-missing", { action: "topics" }, undefined, undefined, { cwd: "/repo" }),
+      (error) => {
+        assertError(error);
+        return true;
+      },
+    );
+  }
 });
 
 test("gnosis reports truncation metadata for long output", async () => {

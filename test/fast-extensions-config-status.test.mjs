@@ -1,629 +1,113 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import { createExtensionHarness } from "./extension-test-helpers.mjs";
+import { createExtensionHarness, loadExtension } from "./extension-test-helpers.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const CLAUDE_FAST_BETA = "fast-mode-2026-02-01";
-const SUPPORTED_OPENAI_FAST_MODELS = ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
-let importCounter = 0;
+const FAST_BETA = "fast-mode-2026-02-01";
+const leftovers = [
+  {
+    path: "extensions/claude-fast/index.ts",
+    statusKey: "claude-fast",
+    notice: /claude-fast is deprecated and no longer changes provider requests/,
+  },
+  {
+    path: "extensions/openai-fast/index.ts",
+    statusKey: "openai-fast",
+    notice: /openai-fast is deprecated and no longer changes provider requests/,
+  },
+];
 
-async function loadFreshExtension(relativePath) {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath));
-  moduleUrl.searchParams.set("test", `${Date.now()}-${importCounter++}`);
-  const extensionModule = await import(moduleUrl.href);
-  return extensionModule.default;
-}
+for (const leftover of leftovers) {
+  test(`${leftover.path} warns, clears its leftover status, and strips the Fast beta header`, async () => {
+    const extension = await loadExtension(leftover.path);
+    const harness = createExtensionHarness();
+    extension(harness.pi);
 
-function setupTempDirs(t) {
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), "fast-extensions-test-"));
-  const agentDir = path.join(rootDir, "agent");
-  const projectDir = path.join(rootDir, "workspace", "sample-project");
-  const nestedDir = path.join(projectDir, "packages", "app", "src");
+    assert.equal(harness.commands.size, 0);
+    assert.equal(harness.handlers.has("before_provider_request"), false);
+    assert.equal(harness.handlers.has("model_select"), false);
+    assert.deepEqual([...harness.handlers.keys()], ["session_start"]);
 
-  mkdirSync(path.join(agentDir, "extensions"), { recursive: true });
-  mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
-  mkdirSync(nestedDir, { recursive: true });
-  t.after(() => rmSync(rootDir, { recursive: true, force: true }));
-
-  return { agentDir, projectDir, nestedDir };
-}
-
-function setAgentDirEnv(t, agentDir) {
-  const original = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  t.after(() => {
-    if (original === undefined) {
-      delete process.env.PI_CODING_AGENT_DIR;
-      return;
-    }
-    process.env.PI_CODING_AGENT_DIR = original;
-  });
-}
-
-function writeConfig(filePath, config) {
-  writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`);
-}
-
-function createUI() {
-  const statuses = [];
-  const notifications = [];
-  return {
-    statuses,
-    notifications,
-    ui: {
-      setStatus(key, value) {
-        statuses.push({ key, value });
+    const sessionStart = harness.handlers.get("session_start");
+    const notifications = [];
+    const statuses = [];
+    const payload = {
+      model: "gpt-5.5",
+      input: "hello",
+      service_tier: "default",
+      speed: "standard",
+    };
+    const model = {
+      provider: "anthropic",
+      api: "anthropic-messages",
+      id: "claude-opus-4-8",
+      headers: {
+        "Anthropic-Beta": `existing-beta, ${FAST_BETA}, oauth-2025-04-20`,
+        "anthropic-beta": FAST_BETA,
       },
-      notify(message, level) {
-        notifications.push({ message, level });
-      },
-    },
-  };
-}
+    };
 
-function createFastContext({ cwd, model, trusted = true, hasUI = true, isUsingOAuth = false }) {
-  const uiState = createUI();
-  const oauthCalls = [];
-
-  return {
-    ...uiState,
-    oauthCalls,
-    ctx: {
-      cwd,
-      hasUI,
-      isProjectTrusted() {
-        return trusted;
-      },
-      model,
-      sessionManager: {},
-      ui: uiState.ui,
-      modelRegistry: {
-        isUsingOAuth(currentModel) {
-          oauthCalls.push(currentModel);
-          return isUsingOAuth;
+    await sessionStart(
+      {},
+      {
+        hasUI: true,
+        model,
+        ui: {
+          notify(message, level) {
+            notifications.push({ message, level });
+          },
+          setStatus(key, value) {
+            statuses.push({ key, value });
+          },
         },
       },
-    },
-  };
-}
-
-function getCommand(harness, name) {
-  const command = harness.commands.get(name);
-  assert.ok(command, `expected ${name} command to be registered`);
-  return command;
-}
-
-function getHandler(harness, name) {
-  const handler = harness.handlers.get(name);
-  assert.equal(typeof handler, "function", `expected ${name} handler to be registered`);
-  return handler;
-}
-
-function readBetaHeader(model) {
-  return (model.headers?.["anthropic-beta"] ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-}
-
-test("openai-fast honors trusted nested project config over global config and ignores untrusted project config", async (t) => {
-  const { agentDir, projectDir, nestedDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-    enabled: false,
-    showStatus: true,
-  });
-  writeConfig(path.join(projectDir, CONFIG_DIR_NAME, "openai-fast.json"), {
-    enabled: true,
-    showStatus: false,
-  });
-
-  const openAIFastExtension = await loadFreshExtension("extensions/openai-fast/index.ts");
-  const harness = createExtensionHarness();
-  openAIFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-  const trustedModel = { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" };
-  const trusted = createFastContext({
-    cwd: nestedDir,
-    model: trustedModel,
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, trusted.ctx);
-  assert.deepEqual(trusted.statuses, [{ key: "openai-fast", value: undefined }]);
-
-  const trustedPayload = await beforeProviderRequest(
-    { payload: { model: "gpt-5.5", input: "hello" } },
-    trusted.ctx,
-  );
-  assert.deepEqual(trustedPayload, {
-    model: "gpt-5.5",
-    input: "hello",
-    service_tier: "priority",
-  });
-  assert.deepEqual(trusted.statuses.at(-1), { key: "openai-fast", value: undefined });
-
-  const untrustedModel = { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" };
-  const untrusted = createFastContext({
-    cwd: nestedDir,
-    model: untrustedModel,
-    trusted: false,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, untrusted.ctx);
-  assert.deepEqual(untrusted.statuses, [{ key: "openai-fast", value: undefined }]);
-
-  const untrustedPayload = await beforeProviderRequest(
-    { payload: { model: "gpt-5.5", input: "hello" } },
-    untrusted.ctx,
-  );
-  assert.equal(untrustedPayload, undefined);
-  assert.deepEqual(untrusted.statuses.at(-1), { key: "openai-fast", value: undefined });
-});
-
-test("openai-fast reports no-model status, hides disabled status indicators, and warns on invalid command usage", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-    enabled: false,
-    showStatus: false,
-  });
-
-  const openAIFastExtension = await loadFreshExtension("extensions/openai-fast/index.ts");
-  const harness = createExtensionHarness();
-  openAIFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const command = getCommand(harness, "fast");
-  const fastContext = createFastContext({
-    cwd: projectDir,
-    model: undefined,
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, fastContext.ctx);
-  await command.handler("", fastContext.ctx);
-
-  assert.match(
-    fastContext.notifications[0].message,
-    /^OpenAI Fast mode is on \(session override\), but inactive for no-model: no model is selected\.$/,
-  );
-  assert.equal(fastContext.notifications[0].level, "info");
-  assert.deepEqual(fastContext.statuses, [
-    { key: "openai-fast", value: undefined },
-    { key: "openai-fast", value: undefined },
-  ]);
-  assert.deepEqual(fastContext.oauthCalls, []);
-
-  await command.handler("status", fastContext.ctx);
-  assert.deepEqual(fastContext.notifications.at(-1), {
-    message: "Usage: /fast",
-    level: "warning",
-  });
-});
-
-test("openai-fast supports GPT-5.6 Codex variants through config defaults and session toggles", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-    enabled: true,
-    showStatus: true,
-  });
-
-  const openAIFastExtension = await loadFreshExtension("extensions/openai-fast/index.ts");
-  const harness = createExtensionHarness();
-  openAIFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-  const command = getCommand(harness, "fast");
-
-  for (const modelId of SUPPORTED_OPENAI_FAST_MODELS) {
-    writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-      enabled: true,
-      showStatus: true,
-    });
-
-    const configEnabledContext = createFastContext({
-      cwd: projectDir,
-      model: { provider: "openai-codex", api: "openai-codex-responses", id: modelId },
-      trusted: true,
-      isUsingOAuth: true,
-    });
-
-    await sessionStart({}, configEnabledContext.ctx);
-    assert.deepEqual(configEnabledContext.statuses.at(-1), { key: "openai-fast", value: "fast" });
-    assert.deepEqual(
-      await beforeProviderRequest(
-        { payload: { model: modelId, input: "hello" } },
-        configEnabledContext.ctx,
-      ),
-      { model: modelId, input: "hello", service_tier: "priority" },
     );
 
-    writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-      enabled: false,
-      showStatus: true,
+    assert.deepEqual(statuses, [{ key: leftover.statusKey, value: undefined }]);
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0].message, leftover.notice);
+    assert.match(notifications[0].message, /unified fast extension \(\/fast\)/);
+    assert.equal(notifications[0].level, "warning");
+    assert.deepEqual(payload, {
+      model: "gpt-5.5",
+      input: "hello",
+      service_tier: "default",
+      speed: "standard",
     });
+    assert.deepEqual(model.headers, { "Anthropic-Beta": "existing-beta,oauth-2025-04-20" });
 
-    const commandEnabledContext = createFastContext({
-      cwd: projectDir,
-      model: { provider: "openai-codex", api: "openai-codex-responses", id: modelId },
-      trusted: true,
-      isUsingOAuth: true,
-    });
-
-    await sessionStart({}, commandEnabledContext.ctx);
-    await command.handler("", commandEnabledContext.ctx);
-    assert.equal(
-      commandEnabledContext.notifications
-        .at(-1)
-        .message.includes(`active for openai-codex/${modelId}`),
-      true,
+    const quiet = [];
+    const quietStatuses = [];
+    const headlessModel = {
+      headers: { "anthropic-beta": `claude-code-20250219,${FAST_BETA}` },
+    };
+    await sessionStart(
+      {},
+      {
+        hasUI: false,
+        model: headlessModel,
+        ui: {
+          notify(message) {
+            quiet.push(message);
+          },
+          setStatus(key, value) {
+            quietStatuses.push({ key, value });
+          },
+        },
+      },
     );
-    assert.deepEqual(
-      await beforeProviderRequest(
-        { payload: { model: modelId, input: "hello" } },
-        commandEnabledContext.ctx,
-      ),
-      { model: modelId, input: "hello", service_tier: "priority" },
+    assert.deepEqual(quiet, []);
+    assert.deepEqual(quietStatuses, []);
+    assert.deepEqual(headlessModel.headers, { "anthropic-beta": "claude-code-20250219" });
+
+    const onlyFast = { headers: { "anthropic-beta": FAST_BETA } };
+    await sessionStart(
+      {},
+      {
+        hasUI: false,
+        model: onlyFast,
+        ui: { notify() {}, setStatus() {} },
+      },
     );
-  }
-});
-
-test("openai-fast keeps rejecting unsupported providers, APIs, models, and pre-shaped payloads", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-    enabled: true,
-    showStatus: true,
+    assert.deepEqual(onlyFast.headers, {});
   });
-
-  const openAIFastExtension = await loadFreshExtension("extensions/openai-fast/index.ts");
-  const harness = createExtensionHarness();
-  openAIFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-  const unsupportedProviderContext = createFastContext({
-    cwd: projectDir,
-    model: { provider: "openai", api: "openai-codex-responses", id: "gpt-5.6-sol" },
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, unsupportedProviderContext.ctx);
-  assert.deepEqual(unsupportedProviderContext.statuses.at(-1), {
-    key: "openai-fast",
-    value: undefined,
-  });
-  assert.equal(
-    await beforeProviderRequest(
-      { payload: { model: "gpt-5.6-sol", input: "hello" } },
-      unsupportedProviderContext.ctx,
-    ),
-    undefined,
-  );
-
-  const unsupportedApiContext = createFastContext({
-    cwd: projectDir,
-    model: { provider: "openai-codex", api: "chat-completions", id: "gpt-5.6-terra" },
-    trusted: true,
-    isUsingOAuth: true,
-  });
-  await sessionStart({}, unsupportedApiContext.ctx);
-  assert.equal(
-    await beforeProviderRequest(
-      { payload: { model: "gpt-5.6-terra", input: "hello" } },
-      unsupportedApiContext.ctx,
-    ),
-    undefined,
-  );
-
-  const unsupportedModelContext = createFastContext({
-    cwd: projectDir,
-    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-orbit" },
-    trusted: true,
-    isUsingOAuth: true,
-  });
-  await sessionStart({}, unsupportedModelContext.ctx);
-  assert.equal(
-    await beforeProviderRequest(
-      { payload: { model: "gpt-5.6-orbit", input: "hello" } },
-      unsupportedModelContext.ctx,
-    ),
-    undefined,
-  );
-
-  const fastContext = createFastContext({
-    cwd: projectDir,
-    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.6-luna" },
-    trusted: true,
-    isUsingOAuth: true,
-  });
-  await sessionStart({}, fastContext.ctx);
-  assert.equal(
-    await beforeProviderRequest({ payload: ["not-an-object"] }, fastContext.ctx),
-    undefined,
-  );
-  assert.equal(
-    await beforeProviderRequest({ payload: { model: "gpt-5.5", input: "hello" } }, fastContext.ctx),
-    undefined,
-  );
-
-  const existingTierPayload = { model: "gpt-5.6-luna", input: "hello", service_tier: "default" };
-  assert.equal(
-    await beforeProviderRequest({ payload: existingTierPayload }, fastContext.ctx),
-    undefined,
-  );
-  assert.deepEqual(existingTierPayload, {
-    model: "gpt-5.6-luna",
-    input: "hello",
-    service_tier: "default",
-  });
-  assert.deepEqual(fastContext.statuses.at(-1), { key: "openai-fast", value: "fast" });
-});
-
-test("claude-fast honors trusted nested project config over global config and ignores untrusted project config", async (t) => {
-  const { agentDir, projectDir, nestedDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "claude-fast.json"), {
-    enabled: false,
-    showStatus: true,
-  });
-  writeConfig(path.join(projectDir, CONFIG_DIR_NAME, "claude-fast.json"), {
-    enabled: true,
-    showStatus: false,
-  });
-
-  const claudeFastExtension = await loadFreshExtension("extensions/claude-fast/index.ts");
-  const harness = createExtensionHarness();
-  claudeFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-  const trustedModel = {
-    provider: "anthropic",
-    api: "anthropic-messages",
-    id: "claude-opus-4-8",
-    headers: { "Anthropic-Beta": "existing-beta" },
-  };
-  const trusted = createFastContext({
-    cwd: nestedDir,
-    model: trustedModel,
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, trusted.ctx);
-  assert.deepEqual(trusted.statuses, [{ key: "claude-fast", value: undefined }]);
-  assert.deepEqual(readBetaHeader(trustedModel), [
-    "existing-beta",
-    "claude-code-20250219",
-    "oauth-2025-04-20",
-    CLAUDE_FAST_BETA,
-  ]);
-
-  const trustedPayload = await beforeProviderRequest(
-    { payload: { model: "claude-opus-4-8", input: "hello" } },
-    trusted.ctx,
-  );
-  assert.deepEqual(trustedPayload, {
-    model: "claude-opus-4-8",
-    input: "hello",
-    speed: "fast",
-  });
-  assert.deepEqual(trusted.statuses.at(-1), { key: "claude-fast", value: undefined });
-
-  const untrustedModel = {
-    provider: "anthropic",
-    api: "anthropic-messages",
-    id: "claude-opus-4-8",
-    headers: { "Anthropic-Beta": "existing-beta" },
-  };
-  const untrusted = createFastContext({
-    cwd: nestedDir,
-    model: untrustedModel,
-    trusted: false,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, untrusted.ctx);
-  assert.deepEqual(untrusted.statuses, [{ key: "claude-fast", value: undefined }]);
-  assert.deepEqual(readBetaHeader(untrustedModel), ["existing-beta"]);
-
-  const untrustedPayload = await beforeProviderRequest(
-    { payload: { model: "claude-opus-4-8", input: "hello" } },
-    untrusted.ctx,
-  );
-  assert.equal(untrustedPayload, undefined);
-  assert.deepEqual(untrusted.statuses.at(-1), { key: "claude-fast", value: undefined });
-});
-
-test("claude-fast reports no-model status, hides disabled status indicators, and warns on invalid command usage", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "claude-fast.json"), {
-    enabled: false,
-    showStatus: false,
-  });
-
-  const claudeFastExtension = await loadFreshExtension("extensions/claude-fast/index.ts");
-  const harness = createExtensionHarness();
-  claudeFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const command = getCommand(harness, "claude-fast");
-  const fastContext = createFastContext({
-    cwd: projectDir,
-    model: undefined,
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, fastContext.ctx);
-  await command.handler("", fastContext.ctx);
-
-  assert.match(
-    fastContext.notifications[0].message,
-    /^Claude Fast mode is on \(session override\), but inactive for no-model: no model is selected\.$/,
-  );
-  assert.equal(fastContext.notifications[0].level, "info");
-  assert.deepEqual(fastContext.statuses, [
-    { key: "claude-fast", value: undefined },
-    { key: "claude-fast", value: undefined },
-  ]);
-  assert.deepEqual(fastContext.oauthCalls, []);
-
-  await command.handler("status", fastContext.ctx);
-  assert.deepEqual(fastContext.notifications.at(-1), {
-    message: "Usage: /claude-fast",
-    level: "warning",
-  });
-});
-
-test("claude-fast gates request mutation on payload shape, model match, and existing speed", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "claude-fast.json"), {
-    enabled: true,
-    showStatus: true,
-  });
-
-  const claudeFastExtension = await loadFreshExtension("extensions/claude-fast/index.ts");
-  const harness = createExtensionHarness();
-  claudeFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-  const model = {
-    provider: "anthropic",
-    api: "anthropic-messages",
-    id: "claude-opus-4-8",
-    headers: { "anthropic-beta": "existing-beta" },
-  };
-  const fastContext = createFastContext({
-    cwd: projectDir,
-    model,
-    trusted: true,
-    isUsingOAuth: false,
-  });
-
-  await sessionStart({}, fastContext.ctx);
-  assert.deepEqual(fastContext.statuses.at(-1), { key: "claude-fast", value: "fast" });
-  assert.deepEqual(readBetaHeader(model), ["existing-beta", CLAUDE_FAST_BETA]);
-
-  assert.equal(
-    await beforeProviderRequest({ payload: ["not-an-object"] }, fastContext.ctx),
-    undefined,
-  );
-  assert.deepEqual(fastContext.statuses.at(-1), { key: "claude-fast", value: "fast" });
-  assert.deepEqual(readBetaHeader(model), ["existing-beta", CLAUDE_FAST_BETA]);
-
-  assert.equal(
-    await beforeProviderRequest(
-      { payload: { model: "claude-opus-5", input: "hello" } },
-      fastContext.ctx,
-    ),
-    undefined,
-  );
-  assert.deepEqual(fastContext.statuses.at(-1), { key: "claude-fast", value: "fast" });
-  assert.deepEqual(readBetaHeader(model), ["existing-beta", CLAUDE_FAST_BETA]);
-
-  const existingSpeedPayload = { model: "claude-opus-4-8", input: "hello", speed: "slow" };
-  assert.equal(
-    await beforeProviderRequest({ payload: existingSpeedPayload }, fastContext.ctx),
-    undefined,
-  );
-  assert.deepEqual(existingSpeedPayload, {
-    model: "claude-opus-4-8",
-    input: "hello",
-    speed: "slow",
-  });
-  assert.deepEqual(fastContext.statuses.at(-1), { key: "claude-fast", value: "fast" });
-  assert.deepEqual(readBetaHeader(model), ["existing-beta", CLAUDE_FAST_BETA]);
-});
-
-test("openai-fast treats removed model gpt-5.4 as ineligible", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "openai-fast.json"), {
-    enabled: true,
-    showStatus: true,
-  });
-
-  const openAIFastExtension = await loadFreshExtension("extensions/openai-fast/index.ts");
-  const harness = createExtensionHarness();
-  openAIFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-
-  const context = createFastContext({
-    cwd: projectDir,
-    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.4" },
-    trusted: true,
-    isUsingOAuth: true,
-  });
-
-  await sessionStart({}, context.ctx);
-  assert.deepEqual(context.statuses.at(-1), { key: "openai-fast", value: undefined });
-  assert.equal(
-    await beforeProviderRequest({ payload: { model: "gpt-5.4", input: "hello" } }, context.ctx),
-    undefined,
-    "gpt-5.4 must be ineligible after removal from the allowlist",
-  );
-});
-
-test("claude-fast treats removed models claude-opus-4-6 and claude-opus-4-7 as ineligible", async (t) => {
-  const { agentDir, projectDir } = setupTempDirs(t);
-  setAgentDirEnv(t, agentDir);
-
-  writeConfig(path.join(agentDir, "extensions", "claude-fast.json"), {
-    enabled: true,
-    showStatus: true,
-  });
-
-  const claudeFastExtension = await loadFreshExtension("extensions/claude-fast/index.ts");
-  const harness = createExtensionHarness();
-  claudeFastExtension(harness.pi);
-
-  const sessionStart = getHandler(harness, "session_start");
-  const beforeProviderRequest = getHandler(harness, "before_provider_request");
-
-  for (const id of ["claude-opus-4-6", "claude-opus-4-7"]) {
-    const model = { provider: "anthropic", api: "anthropic-messages", id, headers: {} };
-    const context = createFastContext({
-      cwd: projectDir,
-      model,
-      trusted: true,
-      isUsingOAuth: false,
-    });
-
-    await sessionStart({}, context.ctx);
-    assert.deepEqual(context.statuses.at(-1), { key: "claude-fast", value: undefined });
-    assert.equal(
-      await beforeProviderRequest({ payload: { model: id } }, context.ctx),
-      undefined,
-      `${id} must be ineligible after removal from the allowlist`,
-    );
-  }
-});
+}

@@ -112,6 +112,26 @@ function installHint(): string {
   ].join("\n");
 }
 
+function isEnoent(error: unknown): boolean {
+  return !!error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT";
+}
+
+function isMissingBinaryFailure(
+  error: unknown,
+  outputText = "",
+  exitCode?: number | null,
+): boolean {
+  if (exitCode === 127 || isEnoent(error)) return true;
+  const message = error instanceof Error ? error.message : error == null ? "" : String(error);
+  const text = `${message}\n${outputText}`;
+  return (
+    /\bENOENT\b/.test(text) ||
+    /command not found/i.test(text) ||
+    /not recognized as an internal or external command/i.test(text) ||
+    /(?:^|[\s:`])gn(?:\.exe)?:\s*not found\b/im.test(text)
+  );
+}
+
 function formatOutput(stdout: string, stderr: string): { text: string; truncated: boolean } {
   const raw = [stdout, stderr]
     .filter(Boolean)
@@ -160,15 +180,19 @@ export default function gnosisExtension(pi: ExtensionAPI) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${installHint()}\n\nExecution error: ${message}`);
+        const hint = isMissingBinaryFailure(error) ? `${installHint()}\n\n` : "";
+        throw new Error(`${hint}Execution error: ${message}`);
       }
 
       const output = formatOutput(result.stdout ?? "", result.stderr ?? "");
       if (result.killed)
         throw new Error(`gnosis ${params.action} timed out or was cancelled.\n\n${output.text}`);
       if (result.code !== 0) {
+        const hint = isMissingBinaryFailure(undefined, output.text, result.code)
+          ? `\n\n${installHint()}`
+          : "";
         throw new Error(
-          `gnosis ${params.action} failed with exit code ${result.code}.\n\n${output.text}\n\n${installHint()}`,
+          `gnosis ${params.action} failed with exit code ${result.code}.\n\n${output.text}${hint}`,
         );
       }
 

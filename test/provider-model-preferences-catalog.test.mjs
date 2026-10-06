@@ -110,7 +110,7 @@ test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
   const preferences = extractConst("extensions/oracle/index.ts", "PROVIDER_MODEL_PREFERENCES");
   const expectedPatterns = {
     "amazon-bedrock": ["openai.gpt-5.6-sol", "xai.grok-4.6"],
-    baseten: ["zai-org/GLM-5.3"],
+    baseten: ["zai-org/GLM-5.3 "],
     "cloudflare-ai-gateway": [
       "workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813",
       "workers-ai/@cf/zai-org/glm-5.3",
@@ -198,7 +198,7 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
     ],
     "opencode-go": [
       "deepseek-v4-pro",
-      "glm-5.3",
+      "glm-5.3 ",
       "glm-5.2",
       "qwen3.7-plus",
       "mimo-v2.5-pro",
@@ -206,7 +206,7 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
       "minimax-m3",
       "minimax-m2.7",
       "kimi-k3",
-      "kimi-k2.7-code",
+      "kimi-k2.7-code ",
       "grok-4.7 ",
       "grok-4.7",
       "grok-4.6",
@@ -229,10 +229,10 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
       "claude-opus-4-8",
       "claude-sonnet-5",
       "gpt-5.5",
-      "gpt-5.4",
+      "gpt-5.4 ",
       "gpt-5.3-codex",
       "kimi-k3",
-      "glm-5.3",
+      "glm-5.3 ",
       "deepseek-v4.1-flash",
       "gpt-5.4-mini",
       "glm-5.3-flash",
@@ -890,12 +890,8 @@ test("specific frontier spellings precede ambiguous generations in every affecte
   }
 });
 
-test("unified direct API and Codex Fast mode allow GPT-6 while retired allowlists stay unchanged", () => {
+test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", () => {
   const prohibitedModels = ["claude-opus-5-5", "claude-opus-5.5", "grok-4.7"];
-  const unchangedAllowlists = [
-    ["extensions/claude-fast/index.ts", "SUPPORTED_MODELS"],
-    ["extensions/openai-fast/index.ts", "SUPPORTED_MODELS"],
-  ];
   const confirmedDirectOpenAIModels = ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
   const directOpenAIAllowlist = extractConst(
     "extensions/fast/index.ts",
@@ -926,12 +922,5 @@ test("unified direct API and Codex Fast mode allow GPT-6 while retired allowlist
       false,
       `extensions/fast/index.ts unexpectedly fast-enabled ${model}`,
     );
-  }
-
-  for (const [file, constName] of unchangedAllowlists) {
-    const allowlist = extractConst(file, constName);
-    for (const model of [...prohibitedModels, ...confirmedDirectOpenAIModels]) {
-      assert.equal(allowlist.has(model), false, `${file} unexpectedly fast-enabled ${model}`);
-    }
   }
 });

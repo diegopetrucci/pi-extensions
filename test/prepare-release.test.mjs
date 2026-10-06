@@ -47,6 +47,13 @@ async function fixture(t) {
   return { root, input };
 }
 
+function notFoundResult(notFoundOnStdout) {
+  const message = "npm error code E404\nnpm error 404 Not Found";
+  return notFoundOnStdout
+    ? { code: 1, stdout: message, stderr: "" }
+    : { code: 1, stdout: "", stderr: message };
+}
+
 function mockRunner(
   root,
   {
@@ -60,6 +67,7 @@ function mockRunner(
     registryError,
     installError,
     staleTopLevel = false,
+    notFoundOnStdout = false,
     calls = [],
   } = {},
 ) {
@@ -95,7 +103,7 @@ function mockRunner(
       if (registryError) return { code: 1, stdout: "", stderr: registryError };
       if (target[spec] === "published")
         return { code: 0, stdout: JSON.stringify(spec.split("@").at(-1)), stderr: "" };
-      return { code: 1, stdout: "", stderr: "npm error code E404\nnpm error 404 Not Found" };
+      return notFoundResult(notFoundOnStdout);
     }
     assert.equal(args[0], "pack");
     const dryRun = args.includes("--dry-run");
@@ -110,8 +118,7 @@ function mockRunner(
     let shasum;
     if (spec) {
       name = spec.slice(0, spec.lastIndexOf("@"));
-      if (baseline[name] === "absent")
-        return { code: 1, stdout: "", stderr: "npm error code E404\nnpm error 404 Not Found" };
+      if (baseline[name] === "absent") return notFoundResult(notFoundOnStdout);
       shasum = baseline[name] ?? `same:${name}`;
     } else {
       const manifest = JSON.parse(await readFile(path.join(options.cwd, "package.json"), "utf8"));
@@ -370,6 +377,20 @@ test("new absent baseline is changed and exact versions are mandatory", async (t
       cwd: root,
       inputPath: "release.json",
       run: mockRunner(root, { baseline: { "plain-addon": "absent" } }),
+    }),
+    /Changed package plain-addon needs an exact target version/,
+  );
+});
+
+test("stdout-only exact not-found is an absent baseline", async (t) => {
+  const { root, input } = await fixture(t);
+  delete input.versions["plain-addon"];
+  await json(path.join(root, "release.json"), input);
+  await assert.rejects(
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, { baseline: { "plain-addon": "absent" }, notFoundOnStdout: true }),
     }),
     /Changed package plain-addon needs an exact target version/,
   );

@@ -1,88 +1,21 @@
 # claude-fast
 
-A pi extension that enables Anthropic Claude Fast mode for supported Claude Opus models.
+Deprecated standalone leftover. This package no longer enables Claude Fast mode, registers `/claude-fast`, or reads `claude-fast.json`. On startup it clears a leftover `claude-fast` footer status and removes `fast-mode-2026-02-01` from the current model header. It does not inject Fast fields into requests.
 
-This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package. The collection uses the unified [`fast`](../fast) extension instead.
+Fast mode lives in the unified [`fast`](../fast) extension. Install `@diegopetrucci/pi-fast`, or install the collection, which loads `extensions/fast` only.
 
-When active, the extension injects this into eligible Anthropic request payloads:
-
-```json
-{
-  "speed": "fast"
-}
-```
-
-It also adds the required Anthropic beta header value to the current model before requests:
-
-```text
-anthropic-beta: fast-mode-2026-02-01
-```
-
-## Eligibility
-
-Fast mode is only injected when all of these are true:
-
-- The current provider is `anthropic`.
-- The current API is `anthropic-messages`.
-- The current model is `claude-opus-4-8` or `claude-opus-5`.
-- The request payload does not already include `speed`.
-
-Claude Fast mode is available for API-key access and Claude Code subscription/OAuth access when the account has access to Anthropic's Fast mode research preview. For Claude Code subscription users, Anthropic documents this as extra usage credits, not included subscription usage.
-
-## Commands
-
-```text
-/claude-fast
-```
-
-Run `/claude-fast` to toggle Fast mode on or off for the current session/runtime. The command reports the new state in chat, and the footer shows `fast` while Fast mode is active for an eligible model.
-
-The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits.
-
-## Config
-
-Optional global config:
-
-```text
-~/<pi-config-dir>/agent/extensions/claude-fast.json
-```
-
-Optional project config:
-
-```text
-<project>/<pi-config-dir>/claude-fast.json
-```
-
-Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config overrides global config after Pi reports that the project is trusted.
-
-```json
-{
-  "enabled": false,
-  "showStatus": true
-}
-```
-
-- `enabled`: default Fast-mode state when there is no session override.
-- `showStatus`: show a compact `fast` status when Fast mode is active for the current model.
+This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package.
 
 ## Install
-
-### Standalone npm package
 
 ```bash
 pi install npm:@diegopetrucci/pi-claude-fast
 ```
 
-### Collection package
+Installing this package does not enable Fast mode. For the working extension:
 
 ```bash
-pi install npm:@diegopetrucci/pi-extensions
-```
-
-### GitHub package
-
-```bash
-pi install git:github.com/diegopetrucci/pi-extensions
+pi install npm:@diegopetrucci/pi-fast
 ```
 
 Then reload pi:
@@ -90,10 +23,3 @@ Then reload pi:
 ```text
 /reload
 ```
-
-## Notes
-
-- Anthropic Fast mode has separate rate limits and costs more than standard speed.
-- Requests at different speeds do not share prompt-cache prefixes.
-- Anthropic documents Fast mode as unavailable with Priority Tier.
-- If pi adds first-class speed support later, this extension skips payloads that already contain `speed`.

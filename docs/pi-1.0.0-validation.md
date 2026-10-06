@@ -1,3 +1,5 @@
+> **Historical:** package counts and `.pi-fleet-tested-version` marker values below are stale. This file is a point-in-time Pi 1.0.0 validation note, not the current workspace inventory.
+
 # Pi 1.0.0 development compatibility record
 
 > **Automated final validation closed as `validation-completed-with-approved-audit-exception` (2026-10-02):** this is a standalone development compatibility record for the Pi `1.0.0` dependency transition and the accepted targeted work. `pel-9nkv` executed all 13 ordered validation steps: **817 total, 816 passed, 0 failed, 1 Windows skip**; the root plus 27 workspaces packed as **28 packages with no bundled dependencies**; and `npm audit --json` remained **FAIL/exception** for exactly the approved nested `brace-expansion@5.0.9` advisories. This is not a fleet, native-UI, Windows, live-provider, paid-provider, or release certification. Independent final review `review1763e724` completed with development-handoff-only acceptance conditioned on this wording correction; no fully-passing or audit-clean claim is made.

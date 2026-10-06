@@ -336,6 +336,13 @@ test("root package pack output excludes repo-only extension scripts and docs dir
     [],
     `root package must not publish repo-only extension scripts/ or docs/ files: ${offendingFiles.join(", ")}`,
   );
+  assert.equal(
+    packedFiles.has("assets/social-preview.png"),
+    false,
+    "root package must not pack unused social-preview.png",
+  );
+  assert.equal(packedFiles.has("assets/oracle-preview.svg"), true);
+  assert.equal(packedFiles.has("assets/minimal-footer-preview.png"), true);
 });
 
 test("publishable package files allowlists include declared runtime files", () => {

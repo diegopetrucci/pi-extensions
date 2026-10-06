@@ -232,3 +232,61 @@ test("oracle thinking-level resolution clamps unsupported levels for matched mod
     },
   );
 });
+
+const WEAKER_SIBLING_CASES = [
+  ["google", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  ["google-vertex", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  ["meta", "muse-spark-1.3", "muse-spark-1.3-contributor"],
+  ["meta", "muse-spark-1.2", "muse-spark-1.2-contributor"],
+  ["baseten", "thinkingmachines/inkling", "thinkingmachines/inkling-small"],
+  ["baseten", "zai-org/GLM-5.2", "zai-org/GLM-5.2-Fast"],
+  ["kimi-coding", "kimi-for-coding", "kimi-for-coding-highspeed"],
+  ["moonshotai", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+  ["moonshotai-cn", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+  ["vercel-ai-gateway", "moonshotai/kimi-k2.7-code", "moonshotai/kimi-k2.7-code-highspeed"],
+  ["openai", "gpt-5.4", "gpt-5.4-mini"],
+  ["azure-openai-responses", "gpt-5.4", "gpt-5.4-mini"],
+  ["radius", "gpt-5.4", "gpt-5.4-mini"],
+  ["radius", "glm-5.3", "glm-5.3-flash"],
+  ["zai-coding-cn", "glm-5.3", "glm-5.3-flash"],
+  ["zai-coding-cn", "glm-5.3", "glm-5.3-highspeed"],
+];
+
+function catalogModel(provider, id) {
+  const model = getBuiltinModels(provider).find((entry) => entry.id === id);
+  assert.ok(model, `expected ${provider}/${id} in the pinned catalog`);
+  return model;
+}
+
+test("oracle anchored preferences keep stronger ids ahead of weaker siblings", async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  for (const [provider, strongId, weakId] of WEAKER_SIBLING_CASES) {
+    const strong = catalogModel(provider, strongId);
+    const weak = catalogModel(provider, weakId);
+    const both = await selectOracleModel(
+      createModelSelectionContext({
+        model: weak,
+        available: [weak, strong],
+      }),
+    );
+    assert.equal(both.ok, true);
+    assert.equal(
+      both.selection.modelRef,
+      `${provider}/${strongId}`,
+      `${provider} selected ${weakId} ahead of ${strongId}`,
+    );
+
+    const onlyWeak = await selectOracleModel(
+      createModelSelectionContext({
+        model: weak,
+        available: [weak],
+      }),
+    );
+    assert.equal(onlyWeak.ok, true);
+    assert.equal(
+      onlyWeak.selection.modelRef,
+      `${provider}/${weakId}`,
+      `${provider} did not fall back to ${weakId}`,
+    );
+  }
+});

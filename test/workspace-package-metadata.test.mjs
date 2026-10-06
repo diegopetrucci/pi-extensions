@@ -19,34 +19,9 @@ function toPosix(filePath) {
 
 const expectedNodeEngine = ">=22.19.0";
 const expectedCiNodeVersions = ["22.19.0", "24", "26"];
-const explicitEsmLowRiskCohort = new Set([
-  "brrr",
-  "claude-fast",
-  "confirm-destructive",
-  "context-cap",
-  "dirty-repo-guard",
-  "fast",
-  "gnosis",
-  "inline-bash",
-  "notify",
-  "openai-fast",
-  "permission-gate",
-  "quiet-tools",
-  "todo",
-]);
-const explicitEsmComplexCohort = new Set([
-  "agent-workflow-audit",
-  "code-reviewer",
-  "context-inspector",
-  "contrarian",
-  "git-footer",
-  "librarian",
-  "minimal-footer",
-  "oracle",
-  "review",
-  "triage-comments",
-]);
 const documentedNonExecutableWorkspacePackages = new Set(["illustrations-to-explain-things"]);
+// Packages skipped by the executable-entry import. Must stay exactly the non-executable workspace set.
+const executableEntryImportExclusions = documentedNonExecutableWorkspacePackages;
 
 function getRuntimeDeclarations(manifest) {
   const declarations = [];
@@ -248,18 +223,61 @@ test("all executable TypeScript workspace packages declare explicit ESM metadata
   }
 });
 
-test("low-risk explicit ESM extension entries import without typeless package warnings", () => {
-  const entryPaths = getWorkspacePackageDefs()
-    .filter((packageDef) => explicitEsmLowRiskCohort.has(path.basename(packageDef.packageRoot)))
-    .flatMap((packageDef) => {
-      const manifest = readJson(packageDef.manifestPath);
-      return getRuntimeDeclarations(manifest)
-        .filter(({ kind }) => kind === "extension")
-        .map(({ entry }) => resolvePackageEntry(packageDef, entry));
-    });
+function isExecutableExtensionPackage(packageDef) {
+  const manifest = readJson(packageDef.manifestPath);
+  return getRuntimeDeclarations(manifest).some(
+    ({ kind, entry }) => kind === "extension" && /\.ts$/u.test(entry),
+  );
+}
 
+test("every executable workspace entry imports once and the exclusion set is exhaustive", () => {
+  const executablePackages = [];
+  const excludedPackages = [];
+
+  for (const packageDef of getWorkspacePackageDefs()) {
+    const packageDir = path.basename(packageDef.packageRoot);
+    if (isExecutableExtensionPackage(packageDef)) executablePackages.push(packageDef);
+    else excludedPackages.push(packageDir);
+  }
+
+  assert.deepEqual(
+    excludedPackages.sort(),
+    [...executableEntryImportExclusions].sort(),
+    "executable entry import exclusions must list exactly the non-executable workspace packages",
+  );
+  assert.ok(
+    executablePackages.length > excludedPackages.length,
+    "expected executable workspace entries to be imported",
+  );
+
+  const entryPaths = executablePackages.flatMap((packageDef) => {
+    const manifest = readJson(packageDef.manifestPath);
+    return getRuntimeDeclarations(manifest)
+      .filter(({ kind, entry }) => kind === "extension" && /\.ts$/u.test(entry))
+      .map(({ entry }) => resolvePackageEntry(packageDef, entry));
+  });
+  assert.equal(
+    new Set(entryPaths).size,
+    entryPaths.length,
+    "each executable workspace entry should be imported once",
+  );
+
+  // NodeNext sources import sibling TypeScript files with .js specifiers.
   const loaderScript = [
-    'import { pathToFileURL } from "node:url";',
+    'import { existsSync } from "node:fs";',
+    'import { registerHooks } from "node:module";',
+    'import path from "node:path";',
+    'import { fileURLToPath, pathToFileURL } from "node:url";',
+    "registerHooks({",
+    "  resolve(specifier, context, nextResolve) {",
+    '    const parentURL = context.parentURL ?? "";',
+    '    if ((specifier.startsWith("./") || specifier.startsWith("../")) && specifier.endsWith(".js") && parentURL) {',
+    "      const candidate = path.resolve(path.dirname(fileURLToPath(parentURL)), `${specifier.slice(0, -3)}.ts`);",
+    "      if (existsSync(candidate)) return nextResolve(pathToFileURL(candidate).href, context);",
+    "    }",
+    "    return nextResolve(specifier, context);",
+    "  },",
+    "});",
     `const entryPaths = ${JSON.stringify(entryPaths)};`,
     "for (const entryPath of entryPaths) {",
     "  await import(pathToFileURL(entryPath).href);",
@@ -274,47 +292,12 @@ test("low-risk explicit ESM extension entries import without typeless package wa
   assert.equal(
     result.status,
     0,
-    `direct entry import check failed with stderr:\n${result.stderr || "<empty>"}\nstdout:\n${result.stdout || "<empty>"}`,
+    `executable entry import check failed with stderr:\n${result.stderr || "<empty>"}\nstdout:\n${result.stdout || "<empty>"}`,
   );
   assert.doesNotMatch(
     result.stderr,
     /MODULE_TYPELESS_PACKAGE_JSON/,
-    `expected low-risk explicit ESM entry imports to avoid typeless package warnings, got:\n${result.stderr || "<empty>"}`,
-  );
-});
-
-test("complex explicit ESM extension entries import without typeless package warnings", () => {
-  const entryPaths = getWorkspacePackageDefs()
-    .filter((packageDef) => explicitEsmComplexCohort.has(path.basename(packageDef.packageRoot)))
-    .flatMap((packageDef) => {
-      const manifest = readJson(packageDef.manifestPath);
-      return getRuntimeDeclarations(manifest)
-        .filter(({ kind }) => kind === "extension")
-        .map(({ entry }) => resolvePackageEntry(packageDef, entry));
-    });
-
-  const loaderScript = [
-    'import { pathToFileURL } from "node:url";',
-    `const entryPaths = ${JSON.stringify(entryPaths)};`,
-    "for (const entryPath of entryPaths) {",
-    "  await import(pathToFileURL(entryPath).href);",
-    "}",
-  ].join("\n");
-
-  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", loaderScript], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-
-  assert.equal(
-    result.status,
-    0,
-    `complex entry import check failed with stderr:\n${result.stderr || "<empty>"}\nstdout:\n${result.stdout || "<empty>"}`,
-  );
-  assert.doesNotMatch(
-    result.stderr,
-    /MODULE_TYPELESS_PACKAGE_JSON/,
-    `expected complex explicit ESM entry imports to avoid typeless package warnings, got:\n${result.stderr || "<empty>"}`,
+    `expected executable entry imports to avoid typeless package warnings, got:\n${result.stderr || "<empty>"}`,
   );
 });
 
@@ -400,6 +383,11 @@ test("root README keeps grouped extension lists alphabetical and install docs al
     "expected README to show at least one standalone package install command",
   );
   assert.match(rootReadme, /Then reload pi:\s*```text\s*\/reload/is);
+  assert.match(
+    rootReadme,
+    /\[`git-footer`\]\([^)]+\):[^\n]*standalone-only and is not auto-loaded by the `@diegopetrucci\/pi-extensions` collection package/i,
+    "root README git-footer blurb should document the standalone-only collection exception",
+  );
 });
 
 test("workspace READMEs that credit copied upstream sources include concrete attribution links", () => {

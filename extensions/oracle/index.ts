@@ -177,7 +177,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-5.5-pro",
     "gpt-5.5",
     "gpt-5.4-pro",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "gpt-5.3-codex",
     "gpt-5-pro",
     "gpt-5-chat-latest",
@@ -191,20 +191,20 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   ],
   baseten: [
     "moonshotai/Kimi-K3",
-    "moonshotai/Kimi-K2.7-Code",
-    "zai-org/GLM-5.3",
+    "moonshotai/Kimi-K2.7-Code ",
+    "zai-org/GLM-5.3 ",
     "deepseek-ai/DeepSeek-V4-Pro-0813",
     "deepseek-ai/DeepSeek-V4-Pro",
-    "zai-org/GLM-5.2",
+    "zai-org/GLM-5.2 ",
     "zai-org/GLM-5.1",
-    "zai-org/GLM-5",
+    "zai-org/GLM-5 ",
     "moonshotai/Kimi-K2.6",
     "moonshotai/Kimi-K2.5",
     "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
     "nvidia/Nemotron-120B-A12B",
     "openai/gpt-oss-120b",
     "deepseek-ai/DeepSeek-V4-Flash-0731",
-    "thinkingmachines/inkling",
+    "thinkingmachines/inkling ",
     "thinkingmachines/inkling-small",
     "zai-org/GLM-5.2-Fast",
     "zai-org/GLM-4.7",
@@ -220,7 +220,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-astra ",
     "gpt-6-astra",
     "gpt-5.5",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "workers-ai/@cf/moonshotai/kimi-k2.7-code",
     "workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813",
     "workers-ai/@cf/zai-org/glm-5.3",
@@ -267,7 +267,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-luna",
     "gpt-5.6-luna",
     "gpt-5.5",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "gpt-5.3-codex",
     "gemini-3.5-flash",
     "claude-sonnet-5",
@@ -278,14 +278,14 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "grok-4.6",
     "grok-4.5",
     "kimi-k3",
-    "kimi-k2.7-code",
+    "kimi-k2.7-code ",
   ],
   google: [
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-pro-preview",
     "gemini-3.5-flash",
     "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    "gemini-2.5-flash ",
     "gemini-3.1-flash-lite-preview",
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash-lite",
@@ -296,7 +296,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
     "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    "gemini-2.5-flash ",
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash-lite",
   ],
@@ -316,11 +316,11 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "MiniMaxAI/MiniMax-M2.5",
     "Qwen/Qwen3-Coder-Next",
   ],
-  "kimi-coding": ["k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
+  "kimi-coding": ["k3", "kimi-for-coding ", "kimi-for-coding-highspeed"],
   meta: [
-    "muse-spark-1.3",
+    "muse-spark-1.3 ",
     "muse-spark-1.3-contributor",
-    "muse-spark-1.2",
+    "muse-spark-1.2 ",
     "muse-spark-1.2-contributor",
     "muse-spark-1.1",
   ],
@@ -353,7 +353,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-5.5-pro",
     "gpt-5.5",
     "gpt-5.4-pro",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "gpt-5.3-codex",
     "gpt-5-pro",
     "gpt-5-chat-latest",
@@ -397,7 +397,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-5.5-pro",
     "gpt-5.5",
     "gpt-5.4-pro",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "claude-opus-4-8",
     "claude-opus-4-7",
     "claude-opus-4-6",
@@ -411,9 +411,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gemini-3.1-pro",
     "glm-5.2",
     "glm-5.1",
-    "glm-5",
+    "glm-5 ",
     "kimi-k3",
-    "kimi-k2.7-code",
+    "kimi-k2.7-code ",
     "kimi-k2.6",
     "kimi-k2.5",
     "qwen3.6-plus",
@@ -423,7 +423,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   ],
   "opencode-go": [
     "deepseek-v4-pro",
-    "glm-5.3",
+    "glm-5.3 ",
     "glm-5.2",
     "qwen3.7-plus",
     "mimo-v2.5-pro",
@@ -431,7 +431,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "minimax-m3",
     "minimax-m2.7",
     "kimi-k3",
-    "kimi-k2.7-code",
+    "kimi-k2.7-code ",
     "grok-4.7 ",
     "grok-4.7",
     "grok-4.6",
@@ -469,7 +469,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "google/gemini-3.5-flash",
     "google/gemini-2.5-pro",
     "moonshotai/kimi-k3",
-    "moonshotai/kimi-k2.7-code",
+    "moonshotai/kimi-k2.7-code ",
     "~moonshotai/kimi-latest",
     "moonshotai/kimi-k2.6",
     "moonshotai/kimi-k2-thinking",
@@ -495,7 +495,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "qwen3.6-plus",
     "deepseek-v4-pro",
     "glm-5.2",
-    "kimi-k2.7-code",
+    "kimi-k2.7-code ",
     "minimax-m2.5",
   ],
   "qwen-token-plan-cn": [
@@ -505,7 +505,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "qwen3.6-plus",
     "deepseek-v4-pro",
     "glm-5.2",
-    "kimi-k2.7-code",
+    "kimi-k2.7-code ",
     "minimax-m2.5",
   ],
   "qwen-token-plan-individual": [
@@ -535,10 +535,10 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-opus-4-8",
     "claude-sonnet-5",
     "gpt-5.5",
-    "gpt-5.4",
+    "gpt-5.4 ",
     "gpt-5.3-codex",
     "kimi-k3",
-    "glm-5.3",
+    "glm-5.3 ",
     "deepseek-v4.1-flash",
     "gpt-5.4-mini",
     "glm-5.3-flash",
@@ -588,7 +588,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-5.1-codex",
     "openai/gpt-5-codex",
     "moonshotai/kimi-k3",
-    "moonshotai/kimi-k2.7-code",
+    "moonshotai/kimi-k2.7-code ",
     "moonshotai/kimi-k2.7-code-highspeed",
     "moonshotai/kimi-k2.6",
     "moonshotai/kimi-k2-thinking",
@@ -624,10 +624,10 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "moonshotai/kimi-k2.6",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
   ],
-  zai: ["glm-5.3", "glm-5.2", "glm-5-turbo", "glm-4.7"],
-  "zai-coding-cn": ["glm-5.3", "glm-5.3-highspeed", "glm-5.3-flash", "glm-4.6v"],
-  moonshotai: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
-  "moonshotai-cn": ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
+  zai: ["glm-5.3 ", "glm-5.2", "glm-5-turbo", "glm-4.7"],
+  "zai-coding-cn": ["glm-5.3 ", "glm-5.3-highspeed", "glm-5.3-flash", "glm-4.6v"],
+  moonshotai: ["kimi-k3", "kimi-k2.7-code ", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
+  "moonshotai-cn": ["kimi-k3", "kimi-k2.7-code ", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
 };
 
 const ORACLE_SYSTEM_PROMPT = [
@@ -955,6 +955,14 @@ function getProviderPreferenceList(provider: string | undefined): string[] | und
   return PROVIDER_MODEL_PREFERENCES[provider.toLowerCase()];
 }
 
+function matchesPreferencePattern(haystack: string, pattern: string): boolean {
+  const needle = pattern.toLowerCase();
+  if (!needle.endsWith(" ")) return haystack.includes(needle);
+  const separator = haystack.indexOf(" ");
+  const id = separator === -1 ? haystack : haystack.slice(0, separator);
+  return `${id} `.includes(needle);
+}
+
 function selectPreferredModel(
   models: PiModel[],
   provider: string | undefined,
@@ -966,7 +974,7 @@ function selectPreferredModel(
     haystack: `${model.id} ${model.name ?? ""}`.toLowerCase(),
   }));
   for (const pattern of preferences) {
-    const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+    const match = lowered.find((entry) => matchesPreferencePattern(entry.haystack, pattern));
     if (match) return match.model;
   }
   return undefined;
@@ -1784,10 +1792,6 @@ function createOracleExtension(pi: ExtensionAPI, deps: OracleExtensionDeps = {})
           for (const candidate of selectionResult.ordered) pushAttempt(candidate);
         }
 
-        // Keep the known-good session model as a final fallback: the catalog can
-        // advertise models the active provider/subscription cannot actually serve
-        // (legacy snapshots, access-gated tiers), which fail with a not-found/404
-        // error. Falling back lets the run degrade gracefully instead of hard-failing.
         pushAttempt(buildSessionFallbackSelection(ctx, configuredThinkingLevel));
 
         const handleUpdate = (partial: {

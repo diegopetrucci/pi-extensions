@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { initTheme } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition, initTheme } from "@earendil-works/pi-coding-agent";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "..");
@@ -302,5 +302,92 @@ test("quiet-tools collapsed render keeps summaries visible while hiding results 
       state: {},
     }),
     baseResult,
+  );
+});
+
+const bashResult = { content: [{ type: "text", text: "ok" }] };
+
+function quietBashTool() {
+  return createQuietToolDefinition(createBashToolDefinition(repoRoot));
+}
+
+test("quiet-tools clears the delegated bash timer when a running row finishes collapsed", (t) => {
+  const quietTool = quietBashTool();
+  const state = {};
+  t.after(() => {
+    if (state.interval) clearInterval(state.interval);
+  });
+
+  quietTool.renderCall({ command: "echo hello" }, theme, {
+    expanded: true,
+    executionStarted: true,
+    lastComponent: undefined,
+    state,
+  });
+  quietTool.renderResult(bashResult, { expanded: true, isPartial: true }, theme, {
+    isError: false,
+    lastComponent: undefined,
+    state,
+  });
+  assert.equal(typeof state.interval, "object");
+
+  const collapsedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.deepEqual(collapsedFinal.render(200), []);
+  assert.equal(state.interval, undefined);
+  assert.equal(typeof state.endedAt, "number");
+});
+
+test("quiet-tools keeps collapsed bash timing so a later expand is not Took 0.0s", (t) => {
+  const quietTool = quietBashTool();
+  const state = {};
+  t.after(() => {
+    if (state.interval) clearInterval(state.interval);
+  });
+
+  quietTool.renderCall({ command: "echo hello" }, theme, {
+    expanded: false,
+    executionStarted: true,
+    lastComponent: undefined,
+    state,
+  });
+  assert.equal(typeof state.startedAt, "number");
+  state.startedAt = Date.now() - 10_000;
+
+  const collapsedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: false, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.deepEqual(collapsedFinal.render(200), []);
+  const startedAt = state.startedAt;
+  const endedAt = state.endedAt;
+  assert.equal(typeof endedAt, "number");
+  assert.ok(endedAt - startedAt >= 9_000);
+
+  quietTool.renderCall({ command: "echo hello" }, theme, {
+    expanded: true,
+    executionStarted: true,
+    lastComponent: undefined,
+    state,
+  });
+  const expandedFinal = quietTool.renderResult(
+    bashResult,
+    { expanded: true, isPartial: false },
+    theme,
+    { isError: false, lastComponent: undefined, state },
+  );
+  assert.equal(state.startedAt, startedAt);
+  assert.equal(state.endedAt, endedAt);
+  const durationSeconds = ((endedAt - startedAt) / 1000).toFixed(1);
+  assert.notEqual(durationSeconds, "0.0");
+  assert.match(
+    expandedFinal.render(80).join("\n"),
+    new RegExp(`Took ${durationSeconds.replace(".", "\\.")}s`),
   );
 });
