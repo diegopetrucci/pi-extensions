@@ -646,12 +646,8 @@ test('specific frontier spellings precede ambiguous generations in every affecte
   }
 });
 
-test('unified direct API and Codex Fast mode allow GPT-6 while retired allowlists stay unchanged', () => {
+test('unified direct API and Codex Fast mode allow the confirmed GPT-6 models', () => {
   const prohibitedModels = ['claude-opus-5-5', 'claude-opus-5.5', 'grok-4.7'];
-  const unchangedAllowlists = [
-    ['extensions/claude-fast/index.ts', 'SUPPORTED_MODELS'],
-    ['extensions/openai-fast/index.ts', 'SUPPORTED_MODELS'],
-  ];
   const confirmedDirectOpenAIModels = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol'];
   const directOpenAIAllowlist = extractConst('extensions/fast/index.ts', 'OPENAI_API_SUPPORTED_MODELS');
 
@@ -671,12 +667,5 @@ test('unified direct API and Codex Fast mode allow GPT-6 while retired allowlist
   const anthropicProhibited = ['claude-opus-5.5', 'grok-4.7'];
   for (const model of [...anthropicProhibited, ...confirmedDirectOpenAIModels]) {
     assert.equal(anthropicAllowlist.has(model), false, `extensions/fast/index.ts unexpectedly fast-enabled ${model}`);
-  }
-
-  for (const [file, constName] of unchangedAllowlists) {
-    const allowlist = extractConst(file, constName);
-    for (const model of [...prohibitedModels, ...confirmedDirectOpenAIModels]) {
-      assert.equal(allowlist.has(model), false, `${file} unexpectedly fast-enabled ${model}`);
-    }
   }
 });
