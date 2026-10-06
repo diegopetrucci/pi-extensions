@@ -44,12 +44,11 @@ Direct OpenAI API Fast mode requires all of the following:
 
 The direct OpenAI route stays on OpenAI's direct API contract for both API-key
 auth and Pi's `openai` ChatGPT OAuth. Acceptance of `service_tier: "fast"` by
-Pi's `openai` ChatGPT OAuth sign-in endpoint has not been live-verified and
-remains deferred to manual gate `pel-71t6`. This direct route is never forwarded
-to legacy `openai-codex` or its subscription-usage endpoint. The documented
-request shape is support evidence, not live certification; this change was
-validated only with mocked eligibility and request payloads, not live or paid
-provider calls.
+Pi's `openai` ChatGPT OAuth sign-in endpoint has not been live-verified.
+This direct route is never forwarded to legacy `openai-codex` or its
+subscription-usage endpoint. The documented request shape is support evidence,
+not live certification; this change was validated only with mocked eligibility
+and request payloads, not live or paid provider calls.
 
 ### Ultrafast support (initial, fail-closed)
 
@@ -162,7 +161,7 @@ Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`;
 - `enabled`: default Fast-mode state when there is no session override.
 - `showStatus`: show a compact `fast` status when Fast mode is active for the selected model.
 
-The unified extension intentionally does not read `openai-fast.json` or `claude-fast.json`; those files belong to the provider-specific standalone packages and may contain conflicting defaults.
+The unified extension reads only `fast.json`. It does not read `openai-fast.json` or `claude-fast.json`.
 
 ## Install
 
@@ -192,7 +191,7 @@ Then reload pi:
 
 ## Legacy provider-specific packages
 
-The collection package loads this unified extension instead of `openai-fast` and `claude-fast`. Both provider-specific packages remain available as standalone alternatives. Do not load them together with this extension: independent Fast-mode state and duplicate `/fast` registrations can produce conflicting behavior.
+The collection package loads this unified extension only (`extensions/fast/index.ts`). `openai-fast` and `claude-fast` remain published as deprecated standalone leftovers: they warn on session start and do not read config, register commands, or change provider requests.
 
 ## Notes
 
@@ -202,6 +201,6 @@ The collection package loads this unified extension instead of `openai-fast` and
 - Codex Fast availability depends on plan, client, workspace settings, and rollout. Local eligibility is not live-provider certification.
 - Pi's provider catalog remains the source of reported model pricing, including any tiered pricing; this extension does not apply guessed discounts or rewrite cost metadata.
 - OpenAI Codex Fast mode intentionally does not affect API-key models.
-- The retired `openai-fast` and `claude-fast` packages remain legacy standalone boundaries; new provider/auth behavior belongs only to this unified extension.
+- Deprecated `openai-fast` and `claude-fast` packages no longer implement Fast mode. New provider/auth behavior belongs only to this unified extension.
 - Existing `speed` and `service_tier` fields are never overwritten.
 - Pi's model catalog may not include a Fast-mode premium. Cost accounting depends on the provider reporting the effective tier in its streamed response, and this extension does not patch usage totals.

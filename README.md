@@ -53,8 +53,8 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### Deprecated
 
-- [`claude-fast`](./extensions/claude-fast): Standalone-only provider-specific alternative that adds `/claude-fast` for supported Anthropic Claude Opus models. [Deprecated, please use [`fast`](https://github.com/diegopetrucci/pi-extensions/blob/main/extensions/fast) instead.]
-- [`openai-fast`](./extensions/openai-fast): Standalone-only provider-specific alternative that adds `/fast` for ChatGPT-auth GPT-5.5 and GPT-5.6 Codex variants. [Deprecated, please use [`fast`](https://github.com/diegopetrucci/pi-extensions/blob/main/extensions/fast) instead.]
+- [`claude-fast`](./extensions/claude-fast): Deprecated standalone leftover. It no longer changes provider requests; use [`fast`](./extensions/fast).
+- [`openai-fast`](./extensions/openai-fast): Deprecated standalone leftover. It no longer changes provider requests; use [`fast`](./extensions/fast).
 
 ## Install
 
