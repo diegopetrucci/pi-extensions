@@ -34,6 +34,10 @@ const OPENAI_API_PROVIDER_ID = "openai";
 const OPENAI_API_IDS = new Set(["openai-responses", "openai-completions"]);
 const OPENAI_API_FAST_SERVICE_TIER = "fast";
 const OPENAI_API_SUPPORTED_MODELS = new Set(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
+const OPENAI_ULTRAFAST_MODEL = "gpt-6-astra";
+const OPENAI_ULTRAFAST_API_ID = "openai-responses";
+const OPENAI_ULTRAFAST_SERVICE_TIER = "ultrafast";
+const OPENAI_CANONICAL_BASE_URL = "https://api.openai.com/v1";
 
 const DEFAULT_CONFIG: FastConfig = {
 	enabled: false,
@@ -53,6 +57,8 @@ type FastConfig = {
 type SessionState = {
 	config: FastConfig;
 	override: FastOverride;
+	/** Session-only Ultrafast selection; never loaded from configuration. */
+	ultrafast: boolean;
 	lastInjectedAt?: number;
 	lastInjectedModel?: string;
 };
@@ -239,10 +245,83 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
 	};
 }
 
+function isCanonicalOpenAIEndpoint(baseUrl: unknown): boolean {
+	return baseUrl === OPENAI_CANONICAL_BASE_URL || baseUrl === `${OPENAI_CANONICAL_BASE_URL}/`;
+}
+
+function getUltrafastEligibility(ctx: ExtensionContext): Eligibility {
+	const model = ctx.model;
+	if (!model) {
+		return { eligible: false, modelKey: "no-model", reason: "no model is selected" };
+	}
+
+	const key = `${model.provider}/${model.id}`;
+	if (model.provider !== OPENAI_API_PROVIDER_ID) {
+		return {
+			eligible: false,
+			modelKey: key,
+			reason: "Ultrafast mode requires the direct OpenAI provider",
+		};
+	}
+
+	if (model.api !== OPENAI_ULTRAFAST_API_ID) {
+		return {
+			eligible: false,
+			modelKey: key,
+			reason: `Ultrafast mode requires API ${OPENAI_ULTRAFAST_API_ID}`,
+		};
+	}
+
+	if (model.id !== OPENAI_ULTRAFAST_MODEL) {
+		return {
+			eligible: false,
+			modelKey: key,
+			reason: `Ultrafast mode is only enabled for ${OPENAI_ULTRAFAST_MODEL}`,
+		};
+	}
+
+	if (!isCanonicalOpenAIEndpoint(model.baseUrl)) {
+		return {
+			eligible: false,
+			modelKey: key,
+			reason: `Ultrafast mode requires the canonical endpoint ${OPENAI_CANONICAL_BASE_URL}`,
+		};
+	}
+
+	try {
+		if (ctx.modelRegistry.isUsingOAuth(model)) {
+			return {
+				eligible: false,
+				modelKey: key,
+				reason: "Ultrafast mode requires direct OpenAI API-key auth; OAuth is unsupported",
+			};
+		}
+	} catch {
+		return {
+			eligible: false,
+			modelKey: key,
+			reason: "Ultrafast mode requires direct OpenAI API-key auth; auth could not be verified",
+		};
+	}
+
+	return {
+		eligible: true,
+		modelKey: key,
+		provider: "openai",
+		serviceTier: OPENAI_ULTRAFAST_SERVICE_TIER,
+	};
+}
+
 function updateStatus(ctx: ExtensionContext, state: SessionState): void {
 	if (!ctx.hasUI) return;
 	if (!state.config.showStatus) {
 		ctx.ui.setStatus(EXTENSION_ID, undefined);
+		return;
+	}
+
+	if (state.ultrafast) {
+		const eligibility = getUltrafastEligibility(ctx);
+		ctx.ui.setStatus(EXTENSION_ID, eligibility.eligible ? "ultrafast" : undefined);
 		return;
 	}
 
@@ -254,12 +333,21 @@ function updateStatus(ctx: ExtensionContext, state: SessionState): void {
 }
 
 function getStatusMessage(ctx: ExtensionContext, state: SessionState): string {
-	const enabled = isFastEnabled(state);
-	const eligibility = getEligibility(ctx);
-	const active = enabled && eligibility.eligible;
 	const injected = state.lastInjectedAt
 		? ` Last injected for ${state.lastInjectedModel ?? "unknown model"} ${Math.max(0, Math.round((Date.now() - state.lastInjectedAt) / 1000))}s ago.`
 		: "";
+
+	if (state.ultrafast) {
+		const eligibility = getUltrafastEligibility(ctx);
+		if (eligibility.eligible) {
+			return `Ultrafast mode is on (session only) and eligible for ${eligibility.modelKey}; requested service_tier=${OPENAI_ULTRAFAST_SERVICE_TIER}. Actual API pricing is 6x Standard, but Pi's current cost display omits this premium.${injected}`;
+		}
+		return `Ultrafast mode is on (session only), but not eligible for ${eligibility.modelKey}: ${eligibility.reason}.${injected}`;
+	}
+
+	const enabled = isFastEnabled(state);
+	const eligibility = getEligibility(ctx);
+	const active = enabled && eligibility.eligible;
 
 	if (active) {
 		const wireSetting =
@@ -316,7 +404,7 @@ async function injectAnthropicFastHeader(
 	state: SessionState,
 	hasActiveTools: boolean,
 ): Promise<void> {
-	if (!isFastEnabled(state)) return;
+	if (state.ultrafast || !isFastEnabled(state)) return;
 	const eligibility = getEligibility(ctx);
 	if (!eligibility.eligible || eligibility.provider !== "anthropic") return;
 
@@ -337,12 +425,29 @@ async function injectAnthropicFastHeader(
 	headers[outputKey] = next.join(",");
 }
 
+function injectUltrafastPayload(
+	payload: unknown,
+	ctx: ExtensionContext,
+	state: SessionState,
+): PayloadRecord | undefined {
+	if (!state.ultrafast) return undefined;
+	const eligibility = getUltrafastEligibility(ctx);
+	if (!eligibility.eligible || !eligibility.serviceTier) return undefined;
+	if (!isPayloadRecord(payload)) return undefined;
+	if (payload.model !== ctx.model?.id) return undefined;
+	if ("service_tier" in payload) return undefined;
+
+	state.lastInjectedAt = Date.now();
+	state.lastInjectedModel = eligibility.modelKey;
+	return { ...payload, service_tier: eligibility.serviceTier };
+}
+
 function injectFastPayload(
 	payload: unknown,
 	ctx: ExtensionContext,
 	state: SessionState,
 ): PayloadRecord | undefined {
-	if (!isFastEnabled(state)) return undefined;
+	if (state.ultrafast || !isFastEnabled(state)) return undefined;
 	const eligibility = getEligibility(ctx);
 	if (!eligibility.eligible || !eligibility.provider) return undefined;
 	if (!isPayloadRecord(payload)) return undefined;
@@ -362,6 +467,34 @@ function injectFastPayload(
 	return { ...payload, service_tier: eligibility.serviceTier };
 }
 
+function disableUltrafast(ctx: ExtensionContext, state: SessionState, reason?: string): void {
+	state.ultrafast = false;
+	// Do not fall back to ordinary Fast when a selected Ultrafast model becomes ineligible.
+	state.override = "off";
+	updateStatus(ctx, state);
+	if (reason) {
+		ctx.ui.notify(`Ultrafast mode disabled: ${reason}. It remains off until manually enabled.`, "warning");
+	}
+}
+
+function toggleUltrafast(ctx: ExtensionContext, state: SessionState): void {
+	if (state.ultrafast) {
+		disableUltrafast(ctx, state);
+		ctx.ui.notify("Ultrafast mode is off (session only); regular Fast remains off until /fast is toggled.", "info");
+		return;
+	}
+
+	const eligibility = getUltrafastEligibility(ctx);
+	if (!eligibility.eligible) {
+		ctx.ui.notify(`Cannot enable Ultrafast mode for ${eligibility.modelKey}: ${eligibility.reason}.`, "error");
+		return;
+	}
+
+	state.ultrafast = true;
+	updateStatus(ctx, state);
+	ctx.ui.notify(getStatusMessage(ctx, state), "info");
+}
+
 export default function fastExtension(pi: ExtensionAPI) {
 	const states = new WeakMap<object, SessionState>();
 
@@ -371,6 +504,7 @@ export default function fastExtension(pi: ExtensionAPI) {
 			state = {
 				config: loadConfig(ctx),
 				override: "auto",
+				ultrafast: false,
 			};
 			states.set(ctx.sessionManager, state);
 		}
@@ -381,13 +515,26 @@ export default function fastExtension(pi: ExtensionAPI) {
 		const state: SessionState = {
 			config: loadConfig(ctx),
 			override: "auto",
+			ultrafast: false,
 		};
 		states.set(ctx.sessionManager, state);
 		updateStatus(ctx, state);
 	});
 
 	pi.on("model_select", (_event, ctx) => {
-		updateStatus(ctx, getState(ctx));
+		const state = getState(ctx);
+		if (state.ultrafast) {
+			const eligibility = getUltrafastEligibility(ctx);
+			if (!eligibility.eligible) {
+				disableUltrafast(
+					ctx,
+					state,
+					`the selected model ${eligibility.modelKey} is unsupported (${eligibility.reason})`,
+				);
+				return;
+			}
+		}
+		updateStatus(ctx, state);
 	});
 
 	pi.on("before_provider_headers", async (event, ctx) => {
@@ -397,9 +544,36 @@ export default function fastExtension(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		const state = getState(ctx);
+		if (state.ultrafast) {
+			const eligibility = getUltrafastEligibility(ctx);
+			if (!eligibility.eligible) {
+				disableUltrafast(
+					ctx,
+					state,
+					`the current model ${eligibility.modelKey} is unsupported (${eligibility.reason})`,
+				);
+				return undefined;
+			}
+			const nextPayload = injectUltrafastPayload(event.payload, ctx, state);
+			updateStatus(ctx, state);
+			return nextPayload;
+		}
+
 		const nextPayload = injectFastPayload(event.payload, ctx, state);
 		updateStatus(ctx, state);
 		return nextPayload;
+	});
+
+	pi.registerCommand("ultrafast", {
+		description: "Toggle session-only Ultrafast mode for direct OpenAI API-key GPT-6 Astra",
+		getArgumentCompletions: () => null,
+		handler: async (args, ctx) => {
+			if (args.trim()) {
+				ctx.ui.notify("Usage: /ultrafast", "warning");
+				return;
+			}
+			toggleUltrafast(ctx, getState(ctx));
+		},
 	});
 
 	pi.registerCommand("fast", {
@@ -409,14 +583,23 @@ export default function fastExtension(pi: ExtensionAPI) {
 			const state = getState(ctx);
 			const action = args.trim();
 
+			if (action === "ultrafast") {
+				toggleUltrafast(ctx, state);
+				return;
+			}
+
 			if (!action) {
+				if (state.ultrafast) {
+					toggleUltrafast(ctx, state);
+					return;
+				}
 				state.override = isFastEnabled(state) ? "off" : "on";
 				updateStatus(ctx, state);
 				ctx.ui.notify(getStatusMessage(ctx, state), "info");
 				return;
 			}
 
-			ctx.ui.notify("Usage: /fast", "warning");
+			ctx.ui.notify("Usage: /fast [ultrafast]", "warning");
 		},
 	});
 }
