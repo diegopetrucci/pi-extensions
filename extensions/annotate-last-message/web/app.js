@@ -305,9 +305,6 @@ function createSectionCard(section) {
   meta.textContent = lineRange;
   card.append(meta);
 
-  // Render the exact source lines in this section. Do not parse section.text
-  // independently: its opening fence may be in an earlier section separated
-  // by a blank line.
   const preview = document.createElement("div");
   preview.className = "section-preview markdown-content";
 
@@ -316,9 +313,7 @@ function createSectionCard(section) {
   const sourceLines =
     startIndex >= 0 && endIndex >= startIndex && endIndex <= messageData.lines.length
       ? messageData.lines.slice(startIndex, endIndex).map((line) => line.text)
-      : typeof section.text === "string"
-        ? section.text.split("\n")
-        : [];
+      : [];
   for (let idx = 0; idx < sourceLines.length; idx++) {
     const lineDiv = document.createElement("div");
     const sourceIndex = startIndex >= 0 ? startIndex + idx : -1;

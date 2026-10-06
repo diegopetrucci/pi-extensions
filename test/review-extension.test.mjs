@@ -879,8 +879,10 @@ test('review summary prompt preserves the required handoff sections and reviewer
   const summaryPrompt = reviewTestApi.REVIEW_SUMMARY_PROMPT;
   assert.match(summaryPrompt, /^We are leaving a code-review branch and returning to the main coding branch\./);
   assert.match(summaryPrompt, /## Review Scope[\s\S]*## Verdict[\s\S]*## Findings[\s\S]*## Fix Queue[\s\S]*## Constraints & Preferences[\s\S]*## Human Reviewer Callouts \(Non-Blocking\)/);
-  assert.match(summaryPrompt, /If none apply, write "- \(none\)"\./);
-  assert.match(summaryPrompt, /These are informational callouts for humans and are not fix items by themselves\./);
+  assert.ok(summaryPrompt.includes(reviewTestApi.HUMAN_REVIEWER_CALLOUTS));
+  assert.ok(reviewTestApi.REVIEW_RUBRIC.includes(reviewTestApi.HUMAN_REVIEWER_CALLOUTS));
+  assert.match(reviewTestApi.HUMAN_REVIEWER_CALLOUTS, /These are informational callouts for the human reviewer, not fix items\./);
+  assert.match(reviewTestApi.HUMAN_REVIEWER_CALLOUTS, /If none apply, write "- \(none\)"\./);
 });
 
 test('end-review guards no-UI, concurrent runs, stale state cleanup, and cancellation paths', { concurrency: false }, async () => {
