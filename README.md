@@ -17,7 +17,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### UI
 
-- [`git-footer`](./extensions/git-footer): Standalone extension that adds TLH-style git dirty counts, ahead/behind, and optional PR number to pi's built-in footer status area.
+- [`git-footer`](./extensions/git-footer): Adds TLH-style git dirty counts, ahead/behind, and optional PR number to pi's built-in footer status area. This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch plus cached git dirty/ahead/PR status and repo on the first line, context/model on the second, optional `DUMB ZONE`, optional `xp` marker, plus OpenAI Codex usage windows labeled from their reported durations.
 - [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
 
