@@ -20,7 +20,7 @@ Then reload pi:
 
 ## Usage
 
-Run `/annotate-git-diff` inside a git repository. The command opens a native review window with:
+Run `/annotate-git-diff` from an interactive pi TUI session inside a git repository. The command opens a native review window with:
 
 - Monaco-based diff viewing,
 - branch diff, per-commit including working tree, and all-files scopes,
@@ -37,6 +37,7 @@ There is no runtime setting or toggle for submit behavior. To restore the prior 
 
 ## Requirements
 
+- Interactive pi TUI session.
 - Run inside a git repository.
 - Local desktop support for opening a native [Glimpse](https://github.com/mariozechner/glimpse) window.
 - Packaged Monaco and Tailwind assets from this npm package.
@@ -44,6 +45,7 @@ There is no runtime setting or toggle for submit behavior. To restore the prior 
 
 ## Troubleshooting
 
+- `annotate-git-diff requires interactive mode.` → run it from the pi TUI.
 - `Review failed: Not inside a git repository.` → change into a git repo and rerun `/annotate-git-diff`.
 - `No reviewable files found.` → make or fetch reviewable changes, then rerun.
 - `Review failed: Glimpse host not found ...` → the native window runtime is unavailable; reinstall/update the package and rerun from a machine/session that can open native windows.
