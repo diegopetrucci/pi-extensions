@@ -21,7 +21,7 @@ Git status indicators:
 - `↑N`: commits ahead of upstream
 - `↓N`: commits behind upstream
 
-The extension polls git status in the background and caches the latest snapshot. It also performs a best-effort `gh pr view` lookup for the current branch; if `gh` is unavailable or the branch has no PR, the PR segment is omitted.
+The extension polls git status in the background and caches the latest snapshot. It also performs a best-effort `gh pr view` lookup for the current branch; if `gh` is unavailable or the branch has no PR, the PR segment is omitted. Git polling is skipped until Pi reports that the project is trusted, and `git status` is run with fsmonitor disabled.
 
 ## Install
 
