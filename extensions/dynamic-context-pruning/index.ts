@@ -264,46 +264,9 @@ export interface StrategiesConfig {
 export type GateMode = "on" | "off" | "always-apply";
 
 /**
- * State-conditioning hook (pe-s2ho notes): lets the gate use a different
- * break-even threshold depending on whether the agent is mid-loop (actively
- * making tool calls) vs idle (waiting on the user). Both states default to
- * the same threshold today.
- *
- * pe-c5n9 evidence (turn-END definition, since superseded -- see below):
- * the representative-corpus benchmark showed mid_loop candidates carrying
- * ~all realized net benefit while idle candidates carried ~none. That would
- * have argued for a stricter idle default. However, the only live runtime
- * caller (the `context` event handler below) did not yet perform real
- * mid-loop/idle detection at the time, so no default change was made.
- *
- * pe-zy4s update (2026-07-08): real runtime mid_loop/idle detection is now
- * wired through the `context` event handler (`classifyAgentStateFromMessages`),
- * using a turn-START definition (idle = this is the first LLM call of a turn;
- * mid_loop = the agent already made a call or received a tool result this
- * turn) -- see that function's doc comment for the exact runtime-observable
- * semantics. The benchmark's candidate labeling was aligned to this SAME
- * definition (retiring the old turn-END definition above, which was never
- * runtime-observable), and the state-split was re-derived on the
- * representative corpus (~/.the-last-harness/agent/sessions, 460 candidates)
- * under it.
- *
- * The result REVERSES the earlier (turn-END) finding: at r=0.1 the
- * turn-START "idle" population (calls made at the start of a turn) carries
- * essentially ALL the realized net benefit (idle-optimal T=22, total realized
- * net benefit ~20,594 token-units), while "mid_loop" carries essentially NONE
- * (mid_loop-optimal T=1, total realized net benefit ~0.0 on this corpus). This is
- * the OPPOSITE of what the pe-c5n9 evidence (measured under the old,
- * non-runtime-observable turn-END definition) suggested.
- *
- * Per the pe-zy4s decision rule (stricter idle default only if idle itself is
- * shown to be ~worthless): idle is NOT worthless here -- it is the ONLY state
- * carrying value at r=0.1 -- so the idle default stays at
- * DEFAULT_BREAK_EVEN_THRESHOLD. The mid_loop default, by the same benchmark,
- * is now DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD (=1): the measured candidates
- * did not justify a more permissive threshold at r=0.1. Mid_loop pruning can
- * still amortize over enough subsequent calls; state alone does not establish
- * cache warmth or profitability. Both defaults remain config-overridable via
- * gate.breakEvenThresholdByState.
+ * Whether the agent is waiting on the user (`idle`) or already iterating
+ * (`mid_loop`). The `context` handler classifies this via
+ * `classifyAgentStateFromMessages`. Gate defaults are idle 22 and mid_loop 1.
  */
 export type AgentState = "idle" | "mid_loop";
 
@@ -321,7 +284,7 @@ export interface PruneGateConfig {
 	 * for the full rationale and ratio-sensitivity caveats.
 	 */
 	breakEvenThreshold: number;
-	/** Per-agent-state threshold overrides; both default to `breakEvenThreshold`. */
+	/** Per-state overrides. Defaults: idle 22, mid_loop 1. */
 	breakEvenThresholdByState: { idle: number; mid_loop: number };
 }
 
@@ -752,106 +715,6 @@ export function findToolCallPairIndices(
 	return pair;
 }
 
-/** Map raw session-entry provenance to projected message positions when Pi exposes it. */
-function expectedRoleForEntry(entry: MinimalSessionEntry): string | undefined {
-	if (entry.type === "message") return entry.message?.role;
-	if (entry.type === "custom_message") return "custom";
-	if (entry.type === "branch_summary") return "branchSummary";
-	if (entry.type === "compaction") return "compactionSummary";
-	return undefined;
-}
-
-function buildProjectedEntryIdToMessageIndexMap(
-	entries: MinimalSessionEntry[],
-	messages: MinimalMessage[],
-	projection: MinimalSessionProjection,
-): Map<string, number> {
-	const map = new Map<string, number>();
-	const entryIds = new Set(entries.map((entry) => entry.id));
-	let cursor = 0;
-
-	for (const projectedEntry of projection.entries) {
-		let firstMessageIndex: number | undefined;
-		for (const projectedMessage of projectedEntry.messages) {
-			let messageIndex = messages.indexOf(projectedMessage, cursor);
-			if (messageIndex < cursor) messageIndex = -1;
-
-			if (messageIndex < 0 && typeof projectedMessage.timestamp === "number") {
-				messageIndex = messages.findIndex(
-					(candidate, index) =>
-						index >= cursor && candidate.role === projectedMessage.role && candidate.timestamp === projectedMessage.timestamp,
-				);
-			}
-			if (messageIndex < 0) continue;
-			firstMessageIndex ??= messageIndex;
-			cursor = messageIndex + 1;
-		}
-
-		if (firstMessageIndex !== undefined && entryIds.has(projectedEntry.sourceEntry.id)) {
-			map.set(projectedEntry.sourceEntry.id, firstMessageIndex);
-		}
-	}
-	return map;
-}
-
-export function buildEntryIdToMessageIndexMap(
-	entries: MinimalSessionEntry[],
-	messages: MinimalMessage[],
-	projection?: MinimalSessionProjection,
-): Map<string, number> {
-	if (projection) return buildProjectedEntryIdToMessageIndexMap(entries, messages, projection);
-
-	// Older runtimes expose only raw branch entries; preserve their positional
-	// correlation and use role/timestamp only when the counts diverge.
-	const producing = entries.filter((entry) =>
-		entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary" || entry.type === "compaction",
-	);
-	const length = Math.min(producing.length, messages.length);
-	const map = new Map<string, number>();
-	for (let i = 0; i < length; i++) {
-		const entry = producing[i];
-		const expectedRole = expectedRoleForEntry(entry);
-		const candidate = messages[i];
-		// Guard against silent misalignment (e.g. compaction/branch-summary shifted
-		// the projection): only trust the positional zip when roles line up,
-		// otherwise leave it unset so callers fall back to role+timestamp matching.
-		if (expectedRole && candidate?.role !== expectedRole) continue;
-		map.set(entry.id, i);
-	}
-	return map;
-}
-
-/** Last-resort correlation fallback: match by role + timestamp when order-zip counts diverge. */
-export function findMessageIndexByRoleAndTimestamp(
-	entry: MinimalSessionEntry,
-	messages: MinimalMessage[],
-): number | undefined {
-	const message = entry.message;
-	if (!message || typeof message.role !== "string" || typeof message.timestamp !== "number") return undefined;
-	const index = messages.findIndex((m) => m.role === message.role && m.timestamp === message.timestamp);
-	return index >= 0 ? index : undefined;
-}
-
-/** Resolve a session entry id using projection provenance, then legacy role+timestamp fallback. */
-export function resolveMessageIndexForEntry(
-	entryId: string,
-	entries: MinimalSessionEntry[],
-	messages: MinimalMessage[],
-	projection?: MinimalSessionProjection,
-): number | undefined {
-	const zipMap = buildEntryIdToMessageIndexMap(entries, messages, projection);
-	const zipped = zipMap.get(entryId);
-	if (zipped !== undefined) return zipped;
-
-	// An empty projected contribution is an explicit omission/replacement state;
-	// only a validated projection may make that context-edit-aware decision.
-	if (projection?.entries.some((entry) => entry.sourceEntry.id === entryId && entry.messages.length === 0)) return undefined;
-
-	const entry = entries.find((candidate) => candidate.id === entryId);
-	if (!entry) return undefined;
-	return findMessageIndexByRoleAndTimestamp(entry, messages);
-}
-
 // ============================================================================
 // Proposals & persisted decisions
 // ============================================================================
@@ -859,8 +722,8 @@ export function resolveMessageIndexForEntry(
 export type PruneTargetKind = "tool_result_content" | "tool_call_input";
 
 /**
- * Where a decision came from. "manual" decisions (e.g. a future /prune
- * picker, pe-8re9) always bypass the net-benefit gate: user intent wins.
+ * Where a decision came from. Manual decisions from the `/prune` picker
+ * always bypass the net-benefit gate: user intent wins.
  * Absent/unspecified defaults to "auto".
  */
 export type PruneDecisionSource = "auto" | "manual";
@@ -1011,8 +874,7 @@ export interface PruneTombstoneState {
  * re-persisting a just-restored decision) and by the /prune picker (to show
  * accurate status and support prune/restore/re-prune).
  *
- * Idempotent/rebuildable like `rebuildDecisionStateFromEntries`: replaying
- * the same entries any number of times yields identical results.
+ * Idempotent: replaying the same entries any number of times yields identical results.
  */
 export function resolvePruneTombstoneState(entries: MinimalSessionEntry[]): PruneTombstoneState {
 	const lastDecisionByKey = new Map<string, PruneDecisionRecord>();
@@ -1493,8 +1355,7 @@ export interface RebuiltStatsState {
 
 /**
  * Rebuild cumulative stats from persisted CustomEntry records on a branch.
- * Idempotent/rebuildable like `rebuildDecisionStateFromEntries`: duplicate or
- * replayed entries for the same idempotencyKey collapse to a single fold.
+ * Idempotent: duplicate or replayed entries for the same idempotencyKey collapse to a single fold.
  */
 export function rebuildStatsStateFromEntries(entries: MinimalSessionEntry[]): RebuiltStatsState {
 	let stats = emptyCumulativeStats();
@@ -2024,11 +1885,7 @@ export interface PipelineInput {
 	 * absent set behaves as if nothing was ever restored.
 	 */
 	restoredIdempotencyKeys?: ReadonlySet<string>;
-	/**
-	 * State-conditioning hook (pe-s2ho notes): lets the net-benefit gate use a
-	 * different break-even threshold depending on whether the agent is
-	 * mid-loop vs idle. Defaults to "idle" until callers wire real detection.
-	 */
+	/** Omitted defaults to idle. The context handler passes the classified state. */
 	agentState?: AgentState;
 	/** Session working directory (pe-qs8j), forwarded to strategies for path normalization. */
 	cwd?: string;
@@ -2239,30 +2096,6 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 	const contextSizeSnapshot = computeContextSizeSnapshot(input.messages, messages, estimateTokensForText);
 
 	return { messages, newlyAppliedDecisions, newlyAppliedStats, contextSizeSnapshot, gate };
-}
-
-// ============================================================================
-// Session-entry state rebuild (idempotent; tolerates duplicate/replayed entries)
-// ============================================================================
-
-export interface RebuiltDecisionState {
-	decisions: PruneDecisionRecord[];
-	idempotencyKeys: Set<string>;
-}
-
-/** Rebuild in-memory decision state from persisted CustomEntry records on a branch. */
-export function rebuildDecisionStateFromEntries(entries: MinimalSessionEntry[]): RebuiltDecisionState {
-	const decisions: PruneDecisionRecord[] = [];
-	const idempotencyKeys = new Set<string>();
-	for (const entry of entries) {
-		if (entry.type !== "custom" || entry.customType !== DECISION_ENTRY_TYPE) continue;
-		const record = parseDecisionRecord(entry.data);
-		if (!record) continue;
-		if (idempotencyKeys.has(record.idempotencyKey)) continue; // tolerate duplicate/replayed entries
-		idempotencyKeys.add(record.idempotencyKey);
-		decisions.push(record);
-	}
-	return { decisions, idempotencyKeys };
 }
 
 // ============================================================================
@@ -2669,7 +2502,6 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
 		}
 
 		lastContextSizeSnapshot = result.contextSizeSnapshot;
-		void ctx; // ctx currently unused beyond typing; kept for future protections/UI hooks.
 		return { messages: result.messages as never };
 	});
 
