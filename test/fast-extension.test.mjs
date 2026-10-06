@@ -5,8 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { streamSimple as streamAnthropicSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
+import { streamSimple as streamOpenAIResponsesSimple } from '@earendil-works/pi-ai/api/openai-responses';
 import { createExtensionHarness, loadExtension } from './extension-test-helpers.mjs';
 
+const OPENAI_CANONICAL_BASE_URL = 'https://api.openai.com/v1';
 const OPENAI_CODEX_MODELS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'];
 const OPENAI_API_MODELS = ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'];
 const ANTHROPIC_MODELS = ['claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5'];
@@ -78,10 +80,20 @@ function getHandler(harness, name) {
   return handler;
 }
 
-function getCommand(harness) {
-  const command = harness.commands.get('fast');
-  assert.ok(command, 'expected /fast command');
+function getCommand(harness, name = 'fast') {
+  const command = harness.commands.get(name);
+  assert.ok(command, `expected /${name} command`);
   return command;
+}
+
+function ultrafastModel(overrides = {}) {
+  return {
+    provider: 'openai',
+    api: 'openai-responses',
+    id: 'gpt-6-astra',
+    baseUrl: OPENAI_CANONICAL_BASE_URL,
+    ...overrides,
+  };
 }
 
 function betaValues(headers) {
@@ -298,6 +310,365 @@ test('fast enables direct GPT-6.1 Sol only after toggling', async (t) => {
     { model: 'gpt-6.1-sol', input: 'enabled', service_tier: 'fast' },
   );
 
+});
+
+test('ultrafast commands toggle through one session-only implementation without Fast fallback', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const fastCommand = getCommand(harness);
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+  const context = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false });
+
+  await sessionStart({}, context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+
+  await ultrafastCommand.handler('', context.ctx);
+  assert.equal(context.notifications.at(-1).level, 'info');
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode is on .*eligible for .*requested service_tier=ultrafast/);
+  assert.doesNotMatch(context.notifications.at(-1).message, /\bactive\b/i);
+  assert.match(context.notifications.at(-1).message, /actual API pricing is 6x Standard/i);
+  assert.match(context.notifications.at(-1).message, /cost display omits this premium/i);
+  assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'ultrafast' });
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra', input: 'hello' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    input: 'hello',
+    service_tier: 'ultrafast',
+  });
+
+  await fastCommand.handler('', context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+  assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: undefined });
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode is off/);
+
+  await fastCommand.handler('ultrafast', context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'ultrafast',
+  });
+  const stateBeforeUnknownArguments = context.statuses.length;
+  await ultrafastCommand.handler('status', context.ctx);
+  await fastCommand.handler('unknown', context.ctx);
+  assert.equal(context.statuses.length, stateBeforeUnknownArguments);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'ultrafast',
+  });
+
+  await fastCommand.handler('ultrafast', context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+  await fastCommand.handler('', context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'fast',
+  });
+});
+
+test('ultrafast activation fails closed for every initial gate and preserves ordinary Fast state', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+
+  const deniedModels = [
+    { name: 'provider', model: ultrafastModel({ provider: 'openai-codex', api: 'openai-codex-responses' }) },
+    { name: 'API', model: ultrafastModel({ api: 'openai-completions' }) },
+    { name: 'model', model: ultrafastModel({ id: 'gpt-6-astra-preview' }) },
+    { name: 'OAuth auth', model: ultrafastModel(), oauth: true },
+    { name: 'missing endpoint', model: ultrafastModel({ baseUrl: undefined }) },
+    { name: 'malformed endpoint', model: ultrafastModel({ baseUrl: 'not-a-url' }) },
+    { name: 'regional endpoint', model: ultrafastModel({ baseUrl: 'https://us.api.openai.com/v1' }) },
+    { name: 'proxy endpoint', model: ultrafastModel({ baseUrl: 'https://proxy.example.test/v1' }) },
+    { name: 'HTTP endpoint', model: ultrafastModel({ baseUrl: 'http://api.openai.com/v1' }) },
+    { name: 'endpoint query', model: ultrafastModel({ baseUrl: `${OPENAI_CANONICAL_BASE_URL}?proxy=true` }) },
+  ];
+
+  for (const denied of deniedModels) {
+    const context = createContext({
+      cwd: projectDir,
+      model: denied.model,
+      oauth: denied.oauth ?? false,
+    });
+    await sessionStart({}, context.ctx);
+    await ultrafastCommand.handler('', context.ctx);
+    assert.equal(context.notifications.at(-1).level, 'error', `${denied.name} gate must be an error`);
+    assert.match(context.notifications.at(-1).message, /Ultrafast|direct OpenAI|canonical endpoint/);
+    assert.equal(
+      await beforeRequest({ payload: { model: denied.model.id, input: 'blocked' } }, context.ctx),
+      undefined,
+      `${denied.name} gate must not inject a tier`,
+    );
+    assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: undefined });
+    if (denied.name.includes('endpoint')) {
+      assert.deepEqual(context.oauthCalls, [], `${denied.name} must fail before auth inspection`);
+    }
+  }
+
+  const trailingSlash = createContext({
+    cwd: projectDir,
+    model: ultrafastModel({ baseUrl: `${OPENAI_CANONICAL_BASE_URL}/` }),
+    oauth: false,
+  });
+  await sessionStart({}, trailingSlash.ctx);
+  await ultrafastCommand.handler('', trailingSlash.ctx);
+  assert.deepEqual(
+    await beforeRequest({ payload: { model: 'gpt-6-astra' } }, trailingSlash.ctx),
+    { model: 'gpt-6-astra', service_tier: 'ultrafast' },
+  );
+
+  const ordinaryFast = createContext({
+    cwd: projectDir,
+    model: ultrafastModel({ baseUrl: 'https://proxy.example.test/v1' }),
+    oauth: false,
+  });
+  await sessionStart({}, ordinaryFast.ctx);
+  await getCommand(harness).handler('', ordinaryFast.ctx);
+  await ultrafastCommand.handler('', ordinaryFast.ctx);
+  assert.deepEqual(
+    await beforeRequest({ payload: { model: 'gpt-6-astra' } }, ordinaryFast.ctx),
+    { model: 'gpt-6-astra', service_tier: 'fast' },
+    'a rejected Ultrafast activation preserves the previous ordinary Fast state',
+  );
+});
+
+test('ultrafast payloads preserve explicit tiers, malformed inputs, and Anthropic requests', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const modelSelect = getHandler(harness, 'model_select');
+  const beforeHeaders = getHandler(harness, 'before_provider_headers');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+  const context = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false });
+
+  await sessionStart({}, context.ctx);
+  await ultrafastCommand.handler('', context.ctx);
+
+  for (const payload of [
+    ['malformed'],
+    { model: 'gpt-6.1-sol', input: 'mismatched' },
+    { model: 'gpt-6-astra', input: 'default', service_tier: 'default' },
+    { model: 'gpt-6-astra', input: 'fast', service_tier: 'fast' },
+    { model: 'gpt-6-astra', input: 'priority', service_tier: 'priority' },
+    { model: 'gpt-6-astra', input: 'null', service_tier: null },
+  ]) {
+    const original = Array.isArray(payload) ? [...payload] : { ...payload };
+    assert.equal(await beforeRequest({ payload }, context.ctx), undefined);
+    assert.deepEqual(payload, original);
+  }
+
+  const matchingPayload = { model: 'gpt-6-astra', input: 'eligible', custom: { keep: true } };
+  assert.deepEqual(await beforeRequest({ payload: matchingPayload }, context.ctx), {
+    model: 'gpt-6-astra',
+    input: 'eligible',
+    custom: { keep: true },
+    service_tier: 'ultrafast',
+  });
+  assert.deepEqual(matchingPayload, {
+    model: 'gpt-6-astra',
+    input: 'eligible',
+    custom: { keep: true },
+  });
+
+  context.ctx.model = {
+    provider: 'anthropic',
+    api: 'anthropic-messages',
+    id: 'claude-opus-4-8',
+    compat: { forceAdaptiveThinking: true },
+  };
+  const anthropicHeaders = { 'Anthropic-Beta': 'existing-beta' };
+  await beforeHeaders({ headers: anthropicHeaders }, context.ctx);
+  assert.deepEqual(anthropicHeaders, { 'Anthropic-Beta': 'existing-beta' });
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
+  assert.equal(await beforeRequest({ payload: { model: 'claude-opus-4-8', messages: [] } }, context.ctx), undefined);
+
+  context.ctx.model = ultrafastModel();
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+
+  await ultrafastCommand.handler('', context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'ultrafast',
+  });
+  await sessionStart({}, context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+});
+
+test('ultrafast request-time gate loss clears ordinary Fast fallback and stays off after restoration', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+  writeConfig(path.join(agentDir, 'extensions', 'fast.json'), { enabled: true, showStatus: true });
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+  const context = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false });
+
+  await sessionStart({}, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'fast',
+  });
+
+  await ultrafastCommand.handler('', context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'ultrafast',
+  });
+
+  context.ctx.model.baseUrl = 'https://proxy.example.test/v1';
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+  assert.equal(context.notifications.at(-1).level, 'warning');
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
+  assert.match(context.notifications.at(-1).message, /remains off/);
+
+  context.ctx.model.baseUrl = OPENAI_CANONICAL_BASE_URL;
+  assert.equal(
+    await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx),
+    undefined,
+    'restoring the endpoint without model_select must not fall back to configured Fast',
+  );
+
+  await ultrafastCommand.handler('', context.ctx);
+  context.ctx.modelRegistry.isUsingOAuth = () => true;
+  assert.equal(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), undefined);
+  assert.equal(context.notifications.at(-1).level, 'warning');
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
+
+  context.ctx.modelRegistry.isUsingOAuth = () => false;
+  assert.equal(
+    await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx),
+    undefined,
+    'restoring auth without model_select must not reactivate either tier',
+  );
+});
+
+test('ultrafast configuration is ignored and status behavior remains session/UI scoped', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+  writeConfig(path.join(agentDir, 'extensions', 'fast.json'), { enabled: true, showStatus: true, ultrafast: true });
+  writeConfig(path.join(projectDir, CONFIG_DIR_NAME, 'fast.json'), { ultrafast: true });
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+  const context = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false });
+
+  await sessionStart({}, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: 'gpt-6-astra' } }, context.ctx), {
+    model: 'gpt-6-astra',
+    service_tier: 'fast',
+  });
+  assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'fast' });
+
+  await ultrafastCommand.handler('', context.ctx);
+  assert.deepEqual(context.statuses.at(-1), { key: 'fast', value: 'ultrafast' });
+
+  const headlessHarness = createExtensionHarness();
+  const headlessExtension = await loadExtension('extensions/fast/index.ts');
+  headlessExtension(headlessHarness.pi);
+  const headlessSessionStart = getHandler(headlessHarness, 'session_start');
+  const headlessCommand = getCommand(headlessHarness, 'ultrafast');
+  const headless = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false, hasUI: false });
+  await headlessSessionStart({}, headless.ctx);
+  await headlessCommand.handler('', headless.ctx);
+  assert.deepEqual(headless.statuses, []);
+  assert.match(headless.notifications.at(-1).message, /session only/);
+});
+
+test('ultrafast wire capture uses Pi openai-responses streamSimple without real networking', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension('extensions/fast/index.ts');
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, 'session_start');
+  const beforeRequest = getHandler(harness, 'before_provider_request');
+  const ultrafastCommand = getCommand(harness, 'ultrafast');
+  const context = createContext({ cwd: projectDir, model: ultrafastModel(), oauth: false });
+
+  await sessionStart({}, context.ctx);
+
+  const model = {
+    ...ultrafastModel(),
+    name: 'GPT-6 Astra fixture',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  };
+  let fetchCalls = 0;
+
+  const runWire = async (expectedTier) => {
+    let generatedPayload;
+    let capturedUrl;
+    let capturedBody;
+    const stream = streamOpenAIResponsesSimple(
+      model,
+      {
+        systemPrompt: 'fixture system',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'wire' }], timestamp: Date.now() }],
+      },
+      {
+        apiKey: 'sk-fixture-only',
+        onPayload: (payload) => {
+          generatedPayload = payload;
+          return beforeRequest({ payload }, context.ctx);
+        },
+        fetch: async (input, init) => {
+          fetchCalls += 1;
+          capturedUrl = String(input);
+          capturedBody = JSON.parse(init.body);
+          return new Response(JSON.stringify({ error: { message: 'fixture rejection; no fallback expected' } }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        },
+      },
+    );
+    const result = await stream.result();
+
+    assert.equal(generatedPayload.model, 'gpt-6-astra');
+    assert.ok(Array.isArray(generatedPayload.input), 'onPayload must receive Pi\'s generated input');
+    assert.equal('service_tier' in generatedPayload, false, 'Pi must generate the payload before Ultrafast injection');
+    assert.equal(capturedUrl, `${OPENAI_CANONICAL_BASE_URL}/responses`);
+    assert.equal(capturedBody.model, 'gpt-6-astra');
+    if (expectedTier === undefined) {
+      assert.equal('service_tier' in capturedBody, false, 'off mode must leave the generated wire payload unchanged');
+    } else {
+      assert.equal(capturedBody.service_tier, expectedTier);
+    }
+    assert.equal(result.stopReason, 'error');
+  };
+
+  await runWire(undefined);
+  await ultrafastCommand.handler('', context.ctx);
+  await runWire('ultrafast');
+  assert.equal(fetchCalls, 2);
 });
 
 for (const id of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
@@ -591,5 +962,5 @@ test('fast reports unsupported models, respects headless mode, and rejects comma
   await command.handler('', context.ctx);
   assert.match(context.notifications.at(-1).message, /inactive for no-model: no model is selected/);
   await command.handler('status', context.ctx);
-  assert.deepEqual(context.notifications.at(-1), { message: 'Usage: /fast', level: 'warning' });
+  assert.deepEqual(context.notifications.at(-1), { message: 'Usage: /fast [ultrafast]', level: 'warning' });
 });
