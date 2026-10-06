@@ -11,11 +11,9 @@
 
 import type { McpServerConfig } from "@earendil-works/pi-coding-agent";
 
-// ---------------------------------------------------------------------------
-// Local types matching Pi's McpServerConfig shape
-// (McpStdioServerConfig / McpHttpServerConfig / McpOAuthConfig are not part
-//  of the public package exports; we replicate the relevant subset here.)
-// ---------------------------------------------------------------------------
+// Local types matching Pi's McpServerConfig shape.
+// McpStdioServerConfig / McpHttpServerConfig / McpOAuthConfig are not part
+// of the public package exports; we replicate the relevant subset here.
 
 type McpServerConfigBase = {
   description?: string;
@@ -45,10 +43,6 @@ type McpHttpServerConfig = McpServerConfigBase & {
   oauth?: McpOAuthConfig;
 };
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export type ParsedServer = {
   name: string;
   // Cast to McpServerConfig (the public Pi type) for use with pi.registerMcpServer.
@@ -59,10 +53,6 @@ export type ParseResult = {
   servers: ParsedServer[];
   warnings: string[];
 };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -104,10 +94,6 @@ const OAUTH_ALLOWED_FIELDS = new Set([
   "scope",
 ]);
 
-// ---------------------------------------------------------------------------
-// Literal encoding
-// ---------------------------------------------------------------------------
-
 /**
  * Encode a string so Pi's resolve-config-value treats it as a literal.
  *
@@ -128,10 +114,6 @@ export function encodeLiteral(value: string): string {
   const escaped = value.replace(/\$/g, () => "$$");
   return escaped.startsWith("!") ? `$${escaped}` : escaped;
 }
-
-// ---------------------------------------------------------------------------
-// Variable name safety
-// ---------------------------------------------------------------------------
 
 /**
  * Pattern for safe-to-echo variable names.
@@ -158,10 +140,6 @@ export function sanitizeStringForWarning(s: string): string {
   const stripped = s.replace(CONTROL_CHARS_RE, "");
   return stripped.length <= 80 ? stripped : stripped.slice(0, 80) + "\u2026";
 }
-
-// ---------------------------------------------------------------------------
-// Variable expansion
-// ---------------------------------------------------------------------------
 
 type ExpandOk = { ok: true; value: string };
 type ExpandFail = { ok: false; missingVar: string };
@@ -205,19 +183,16 @@ export function expandVars(
   let missingVar: string | undefined;
 
   const result = template.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
-    // Already failed — skip remaining matches (placeholder return value unused)
     if (missingVar !== undefined) return "";
 
     const sepIdx = expr.indexOf(":-");
     if (sepIdx >= 0) {
-      // ${VAR:-default}
       const varName = expr.slice(0, sepIdx);
       const defaultVal = expr.slice(sepIdx + 2);
       const val = lookupVar(env, varName);
       return val !== undefined ? val : defaultVal;
     }
 
-    // ${VAR} — no default
     const varName = expr;
     const val = lookupVar(env, varName);
     if (val === undefined) {
@@ -233,10 +208,6 @@ export function expandVars(
   return { ok: true, value: result };
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -244,10 +215,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((e) => typeof e === "string");
 }
-
-// ---------------------------------------------------------------------------
-// Parsing
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a Claude Code-style `.mcp.json` file and return Pi-ready server
@@ -264,7 +231,6 @@ export function parseMcpJson(
   const warnings: string[] = [];
   const servers: ParsedServer[] = [];
 
-  // --- JSON parse -----------------------------------------------------------
   let root: unknown;
   try {
     root = JSON.parse(text);
@@ -281,7 +247,6 @@ export function parseMcpJson(
 
   const mcpServers = root["mcpServers"];
   if (mcpServers === undefined) {
-    // No mcpServers key — nothing to do, not a warning.
     return { servers, warnings };
   }
 
@@ -290,42 +255,33 @@ export function parseMcpJson(
     return { servers, warnings };
   }
 
-  // --- Iterate servers ------------------------------------------------------
   for (const [name, rawEntry] of Object.entries(mcpServers)) {
     const safeName = sanitizeStringForWarning(name);
     const warn = (msg: string) =>
       warnings.push(`project-mcp-json: server "${safeName}": ${msg}`);
 
-    // 1. Validate server name
     if (!SERVER_NAME_RE.test(name)) {
       warn("invalid name (allowed: letters, digits, _ and -); skipping");
       continue;
     }
 
-    // 2. Entry must be an object
     if (!isRecord(rawEntry)) {
       warn("entry must be an object; skipping");
       continue;
     }
 
-    // 3. Check for explicitly rejected fields
+    let rejectedField: string | undefined;
     for (const rejected of REJECTED_FIELDS) {
       if (rejected in rawEntry) {
-        warn(`field "${rejected}" is not allowed; skipping`);
+        rejectedField = rejected;
         break;
       }
     }
-    // Re-check after the loop (continue inside the for-of won't skip the server)
-    let hasRejected = false;
-    for (const rejected of REJECTED_FIELDS) {
-      if (rejected in rawEntry) {
-        hasRejected = true;
-        break;
-      }
+    if (rejectedField !== undefined) {
+      warn(`field "${rejectedField}" is not allowed; skipping`);
+      continue;
     }
-    if (hasRejected) continue;
 
-    // 4. Check for unknown fields (strict allowlist — never spread)
     const unknownFields = Object.keys(rawEntry).filter(
       (k) => !ALL_KNOWN_FIELDS.has(k)
     );
@@ -336,7 +292,6 @@ export function parseMcpJson(
       continue;
     }
 
-    // 5. Type determination
     const rawType = rawEntry["type"];
     if (rawType !== undefined && typeof rawType !== "string") {
       warn("type must be a string; skipping");
@@ -352,13 +307,11 @@ export function parseMcpJson(
     const hasCommand = "command" in rawEntry;
     const hasUrl = "url" in rawEntry;
 
-    // 6. Reject command + url together
     if (hasCommand && hasUrl) {
       warn("cannot have both command and url; skipping");
       continue;
     }
 
-    // 7. Determine server kind
     let kind: "stdio" | "http";
     if (typeStr !== undefined) {
       kind = STDIO_TYPE_VALUES.has(typeStr) ? "stdio" : "http";
@@ -371,7 +324,6 @@ export function parseMcpJson(
       continue;
     }
 
-    // Validate kind-vs-fields consistency
     if (kind === "stdio" && hasUrl) {
       warn("type stdio cannot have a url field; skipping");
       continue;
@@ -381,12 +333,11 @@ export function parseMcpJson(
       continue;
     }
 
-    // --- Parse per-kind ---------------------------------------------------
     if (kind === "stdio") {
-      const parsed = parseStdioEntry(name, rawEntry, env, warn);
+      const parsed = parseStdioEntry(rawEntry, env, warn);
       if (parsed !== null) servers.push({ name, config: parsed });
     } else {
-      const parsed = parseHttpEntry(name, rawEntry, env, warn);
+      const parsed = parseHttpEntry(rawEntry, env, warn);
       if (parsed !== null) servers.push({ name, config: parsed });
     }
   }
@@ -394,17 +345,11 @@ export function parseMcpJson(
   return { servers, warnings };
 }
 
-// ---------------------------------------------------------------------------
-// stdio
-// ---------------------------------------------------------------------------
-
 function parseStdioEntry(
-  name: string,
   raw: Record<string, unknown>,
   env: Record<string, string>,
   warn: (msg: string) => void
 ): McpStdioServerConfig | null {
-  // command (required, string)
   const rawCommand = raw["command"];
   if (typeof rawCommand !== "string" || rawCommand.length === 0) {
     warn("command must be a non-empty string; skipping");
@@ -416,7 +361,6 @@ function parseStdioEntry(
     return null;
   }
 
-  // args (optional, string[])
   const rawArgs = raw["args"];
   if (rawArgs !== undefined && !isStringArray(rawArgs)) {
     warn("args must be an array of strings; skipping");
@@ -432,7 +376,6 @@ function parseStdioEntry(
     expandedArgs.push(res.value);
   }
 
-  // env (optional, Record<string, string>)
   const rawEnv = raw["env"];
   if (rawEnv !== undefined && !isRecord(rawEnv)) {
     warn("env must be an object; skipping");
@@ -455,7 +398,6 @@ function parseStdioEntry(
     }
   }
 
-  // cwd (optional, string)
   const rawCwd = raw["cwd"];
   if (rawCwd !== undefined && typeof rawCwd !== "string") {
     warn("cwd must be a string; skipping");
@@ -483,17 +425,11 @@ function parseStdioEntry(
   return config;
 }
 
-// ---------------------------------------------------------------------------
-// http
-// ---------------------------------------------------------------------------
-
 function parseHttpEntry(
-  name: string,
   raw: Record<string, unknown>,
   env: Record<string, string>,
   warn: (msg: string) => void
 ): McpHttpServerConfig | null {
-  // url (required, string)
   const rawUrl = raw["url"];
   if (typeof rawUrl !== "string" || rawUrl.length === 0) {
     warn("url must be a non-empty string; skipping");
@@ -505,7 +441,6 @@ function parseHttpEntry(
     return null;
   }
 
-  // headers (optional, Record<string, string>)
   const rawHeaders = raw["headers"];
   if (rawHeaders !== undefined && !isRecord(rawHeaders)) {
     warn("headers must be an object; skipping");
@@ -527,7 +462,6 @@ function parseHttpEntry(
     }
   }
 
-  // oauth (optional)
   const rawOauth = raw["oauth"];
   let parsedOauth: McpOAuthConfig | undefined;
   if (rawOauth !== undefined) {
@@ -610,10 +544,6 @@ function parseHttpEntry(
 
   return config;
 }
-
-// ---------------------------------------------------------------------------
-// Shared fields (timeout, description)
-// ---------------------------------------------------------------------------
 
 type SharedFields = Pick<McpServerConfigBase, "timeout" | "description">;
 
