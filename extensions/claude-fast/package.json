@@ -1,7 +1,7 @@
 {
   "name": "@diegopetrucci/pi-claude-fast",
   "version": "0.1.15",
-  "description": "A pi extension that enables Anthropic Claude Fast mode for supported Claude Opus models by injecting speed=fast.",
+  "description": "Deprecated standalone leftover. Does not change provider requests; use @diegopetrucci/pi-fast.",
   "keywords": [
     "pi-package",
     "pi",
@@ -17,7 +17,6 @@
   },
   "files": [
     "index.ts",
-    "claude-fast.example.json",
     "README.md",
     ".pi-fleet-tested-version"
   ],
