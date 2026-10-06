@@ -191,7 +191,7 @@ Then reload pi:
 
 ## Legacy provider-specific packages
 
-The collection package loads this unified extension only (`extensions/fast/index.ts`). `openai-fast` and `claude-fast` remain published as deprecated standalone leftovers: they warn on session start and do not read config, register commands, or change provider requests.
+The collection package loads this unified extension only (`extensions/fast/index.ts`). `openai-fast` and `claude-fast` remain published as deprecated standalone leftovers. On session start they warn, clear their leftover footer status, and remove `fast-mode-2026-02-01` from the current model header. They do not read config, register commands, or inject Fast fields into requests.
 
 ## Notes
 

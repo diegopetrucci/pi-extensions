@@ -1,6 +1,6 @@
 # openai-fast
 
-Deprecated standalone leftover. This package no longer enables Codex Fast mode, registers `/fast`, reads `openai-fast.json`, or changes provider requests.
+Deprecated standalone leftover. This package no longer enables Codex Fast mode, registers `/fast`, or reads `openai-fast.json`. On startup it clears a leftover `openai-fast` footer status and removes `fast-mode-2026-02-01` from the current model header. It does not inject Fast fields into requests.
 
 Fast mode lives in the unified [`fast`](../fast) extension. Install `@diegopetrucci/pi-fast`, or install the collection, which loads `extensions/fast` only.
 
