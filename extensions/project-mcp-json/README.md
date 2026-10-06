@@ -4,6 +4,10 @@ A pi extension that reads a Claude Code-style `.mcp.json` from the project
 working directory and registers the configured MCP servers with pi via
 `pi.registerMcpServer`.
 
+> **Requires Pi 1.0 or later.** The `pi.registerMcpServer` API used by this
+> extension was introduced in Pi 1.0. On older Pi versions the extension loads
+> silently and emits a one-time notice instead of registering any servers.
+
 ## Why
 
 Different AI coding environments use different files to configure MCP servers:
@@ -84,16 +88,14 @@ if a parent directory is trusted.
 
 Other approaches and their limitations:
 
-- **Delete the entry (or set it to `null`)** in `trust.json` 
-  
-  this resumes nearest-ancestor lookup (step 3b), *not* a direct fallback to
+- **Delete the entry (or set it to `null`)** in `trust.json`: this resumes
+  nearest-ancestor lookup (step 3b), *not* a direct fallback to
   `defaultProjectTrust`.  If any ancestor directory has a saved `true`, that
   decision is found first and loading is re-enabled.  `defaultProjectTrust`
   (step 3c) only applies when the nearest-ancestor walk finds no decision at
   all.  Deleting/nulling an entry is therefore *not* a reliable denial when
   any ancestor path is trusted.
-- **Set `defaultProjectTrust` to `"never"`** in `~/.pi/agent/settings.json`
-  
+- **Set `defaultProjectTrust` to `"never"`** in `~/.pi/agent/settings.json`:
   this prevents loading only when the nearest-ancestor walk finds no saved
   decision (neither `true` nor `false`).  A saved `true` for the project or
   any ancestor takes precedence; use an explicit saved `false` for the

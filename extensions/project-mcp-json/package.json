@@ -29,7 +29,7 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
   },
   "type": "module",
   "engines": {

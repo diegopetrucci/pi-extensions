@@ -38,6 +38,21 @@ import path from "node:path";
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI): void {
+  // Guard: pi.registerMcpServer was introduced in Pi 1.0.  If the API is
+  // absent (older Pi version), emit a single session-start notice and bail
+  // out rather than crashing or emitting per-server errors.
+  if (typeof (pi as unknown as Record<string, unknown>).registerMcpServer !== "function") {
+    pi.on("session_start", (_event, ctx) => {
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          "project-mcp-json: Pi >=1.0 is required to register MCP servers. Please upgrade Pi.",
+          "info"
+        );
+      }
+    });
+    return;
+  }
+
   /** Names of servers this extension has successfully registered this session. */
   const ownRegistrations = new Set<string>();
 

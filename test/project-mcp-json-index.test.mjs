@@ -638,3 +638,69 @@ test('settings.json with BOM prefix: defaultProjectTrust=always still loads serv
   assert.equal(registered.length, 1, 'server should load with BOM-prefixed settings.json');
   assert.equal(registered[0].name, 'myserver');
 });
+
+// ---------------------------------------------------------------------------
+// Tests: missing pi.registerMcpServer API (Pi < 1.0)
+// ---------------------------------------------------------------------------
+
+test('pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, registers nothing', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  createPiResources(projectDir);
+
+  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
+
+  // Build a pi object without registerMcpServer (simulates Pi < 1.0)
+  const handlers = new Map();
+  const pi = {
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+      return () => {};
+    },
+    // registerMcpServer intentionally omitted
+  };
+  ext(pi);
+
+  const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
+  const handler = handlers.get('session_start');
+  assert.ok(handler, 'session_start handler should be registered');
+  await handler({ type: 'session_start', reason: 'startup' }, ctx);
+
+  assert.equal(notifications.length, 1, 'should emit exactly one notice');
+  assert.ok(
+    notifications[0].message.toLowerCase().includes('pi >=1.0') ||
+    notifications[0].message.toLowerCase().includes('pi >= 1.0') ||
+    notifications[0].message.toLowerCase().includes('1.0'),
+    'notice should mention Pi 1.0 requirement'
+  );
+  assert.equal(notifications[0].type, 'info', 'notice should use info level');
+});
+
+test('pi.registerMcpServer absent + no UI: registers nothing, no notice emitted', async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDirEnv(t, agentDir);
+
+  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  createPiResources(projectDir);
+
+  const ext = await loadFreshExtension('extensions/project-mcp-json/index.ts');
+
+  const handlers = new Map();
+  const pi = {
+    on(eventName, handler) {
+      handlers.set(eventName, handler);
+      return () => {};
+    },
+    // registerMcpServer intentionally omitted
+  };
+  ext(pi);
+
+  const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
+  const handler = handlers.get('session_start');
+  assert.ok(handler, 'session_start handler should be registered');
+  await handler({ type: 'session_start', reason: 'startup' }, ctx);
+
+  assert.equal(notifications.length, 0, 'should emit no notice without UI');
+});
