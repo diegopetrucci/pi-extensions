@@ -55,8 +55,7 @@ test('annotation HTML replaces placeholders in one pass without corrupting inlin
   const markerTokens = '__INLINE_DATA__ | __INLINE_JS__ | __INLINE_MD_RENDERER_JS__ | __INLINE_THEME__';
   const scriptText = "</script><script>alert('not executable')</script>";
   const data = {
-    text: [replacementTokens, markerTokens, 'Unicode: café • 日本語 • 🚀', scriptText].join('\n'),
-    lines: [{ number: 1, text: `${replacementTokens} ${markerTokens}` }],
+    lines: [{ number: 1, text: `${replacementTokens} ${markerTokens} Unicode: café • 日本語 • 🚀` }],
     sections: [
       {
         id: 'section-1',
@@ -64,7 +63,6 @@ test('annotation HTML replaces placeholders in one pass without corrupting inlin
         startLine: 1,
         endLine: 1,
         preview: scriptText,
-        text: `${markerTokens} ${replacementTokens}`,
       },
     ],
   };
@@ -87,7 +85,6 @@ test('annotation HTML replaces placeholders in one pass without corrupting inlin
 
 test('annotation HTML injects the active theme without importing global runtime state', () => {
   const data = {
-    text: 'Hello',
     lines: [{ number: 1, text: 'Hello' }],
     sections: [],
   };
@@ -113,7 +110,6 @@ test('annotation HTML injects the active theme without importing global runtime 
 
 test('annotation HTML keeps the original page title', () => {
   const html = buildAnnotateLastMessageHtml({
-    text: 'Hello',
     lines: [{ number: 1, text: 'Hello' }],
     sections: [],
   });

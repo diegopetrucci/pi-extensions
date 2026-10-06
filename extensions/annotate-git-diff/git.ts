@@ -24,10 +24,8 @@ interface ReviewBaseInfo {
 }
 
 interface WorkingTreeStatusInfo {
-	hasChanges: boolean;
 	hasReviewableChanges: boolean;
 	hasUntracked: boolean;
-	hasTrackedDeletions: boolean;
 	hasRenames: boolean;
 	untrackedPaths: string[];
 }
@@ -67,7 +65,7 @@ async function runBashAllowFailure(pi: ExtensionAPI, repoRoot: string, script: s
 	return result.stdout;
 }
 
-export async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
+async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
 	const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd });
 	if (result.code !== 0) {
 		throw new Error("Not inside a git repository.");
@@ -170,10 +168,8 @@ function parseNameStatus(output: string): ChangedPath[] {
 
 function parseStatusPorcelainZ(output: string): WorkingTreeStatusInfo {
 	const info: WorkingTreeStatusInfo = {
-		hasChanges: false,
 		hasReviewableChanges: false,
 		hasUntracked: false,
-		hasTrackedDeletions: false,
 		hasRenames: false,
 		untrackedPaths: [],
 	};
@@ -190,9 +186,6 @@ function parseStatusPorcelainZ(output: string): WorkingTreeStatusInfo {
 		const path = token.slice(3);
 		const isRenameOrCopy = code.includes("R") || code.includes("C");
 		const isReviewablePath = code !== "!!" && path.length > 0 && isIncludedReviewPath(path);
-		if (code !== "!!") {
-			info.hasChanges = true;
-		}
 		if (isReviewablePath) {
 			info.hasReviewableChanges = true;
 		}
@@ -201,9 +194,8 @@ function parseStatusPorcelainZ(output: string): WorkingTreeStatusInfo {
 				info.hasUntracked = true;
 				info.untrackedPaths.push(path);
 			}
-		} else if (isReviewablePath) {
-			if (code.includes("D")) info.hasTrackedDeletions = true;
-			if (isRenameOrCopy) info.hasRenames = true;
+		} else if (isReviewablePath && isRenameOrCopy) {
+			info.hasRenames = true;
 		}
 
 		index += isRenameOrCopy ? 2 : 1;
@@ -653,7 +645,7 @@ export async function getReviewWindowData(
 	};
 }
 
-export async function listRangeCommits(
+async function listRangeCommits(
 	pi: ExtensionAPI,
 	repoRoot: string,
 	range: string,
