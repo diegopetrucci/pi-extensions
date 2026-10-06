@@ -1,6 +1,6 @@
 # fast
 
-A pi extension that provides one `/fast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models. It selects the provider-specific Fast-mode request shape from the currently selected model.
+A pi extension that provides `/fast` and `/ultrafast` toggles for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models. It selects the provider-specific Fast-mode request shape from the currently selected model.
 
 For eligible direct OpenAI API models it injects:
 
@@ -51,6 +51,30 @@ request shape is support evidence, not live certification; this change was
 validated only with mocked eligibility and request payloads, not live or paid
 provider calls.
 
+### Ultrafast support (initial, fail-closed)
+
+Ultrafast is intentionally narrower than ordinary Fast mode. It requires all of
+the following on every activation and provider request:
+
+- Provider `openai`.
+- API `openai-responses`.
+- Model `gpt-6-astra`.
+- Direct API-key auth, not Codex OAuth or direct OpenAI OAuth.
+- Base URL exactly `https://api.openai.com/v1` (a single trailing slash is also accepted).
+
+It does not support Chat Completions, preview models, regional or proxy endpoints,
+or Anthropic Ultrafast. Eligible payloads receive the requested
+`service_tier: "ultrafast"` only when they do not already contain a
+`service_tier` field. Existing values and mismatched/malformed payloads are left
+untouched. The extension reports a requested tier; it does not claim that OpenAI
+accepted or applied it, and it never silently falls back to ordinary Fast.
+
+OpenAI documents this request shape in the [Ultrafast API guide](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+and lists the account/model pricing in its [API pricing](https://developers.openai.com/api/docs/pricing).
+Actual Ultrafast API pricing is **6x Standard**, while Pi's current cost display
+omits that premium. Treat the activation warning as a deliberate paid-usage
+warning.
+
 OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
@@ -91,11 +115,26 @@ Anthropic Fast mode supports both API-key and Claude Code OAuth access when the 
 
 ```text
 /fast
+/ultrafast
+/fast ultrafast
 ```
 
-Run `/fast` to toggle Fast mode for the current session/runtime. The enabled state follows model changes: switching between eligible OpenAI and Anthropic models automatically changes the request format without resetting the toggle. The footer shows `fast` only while the selected model is eligible and Fast mode is enabled.
+Run `/fast` to toggle ordinary Fast mode for the current session/runtime. The
+enabled state follows model changes: switching between eligible OpenAI and
+Anthropic models automatically changes the request format without resetting the
+toggle. The footer shows `fast` only while the selected model is eligible and
+Fast mode is enabled.
 
-The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits.
+`/ultrafast` and `/fast ultrafast` are equivalent toggles for the session-only
+Ultrafast override. Ultrafast defaults off, is never enabled by global or project
+configuration, and can be undone with either command. Running ordinary `/fast`
+while Ultrafast is selected turns Ultrafast off rather than silently switching to
+another paid tier. Switching to an unsupported model or endpoint disables
+Ultrafast and does not re-enable it when `gpt-6-astra` is selected again. The
+footer uses `ultrafast` while an eligible request is selected; status text says
+that the tier is requested, not remotely applied.
+
+The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits. Ultrafast verification is mocked-only: tests use local eligibility checks, fake payloads, and a fake fetch through Pi's `openai-responses` `streamSimple`; they make no live or paid provider requests.
 
 ## Config
 
