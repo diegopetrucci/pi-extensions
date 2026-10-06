@@ -59,7 +59,7 @@ The review prompt prioritizes:
 5. simplicity and maintainability
 6. tests and validation gaps
 
-The final output is concise and includes a verdict, findings, validation notes, a scope check, and run details that show the final selected model and effective thinking level.
+The model report is concise and includes a verdict, findings, validation notes, and a scope check. The tool appends a run-details suffix with the final selected model, effective thinking level, turn count, tool calls, duration, working directory, and tools used.
 
 ## Read-only guarantees
 
