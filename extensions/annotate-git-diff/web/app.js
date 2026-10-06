@@ -2102,7 +2102,7 @@ function setupMonaco() {
 	if (reviewAssetConfig.bootstrapError) {
 		showAssetFailure(
 			"The review window could not finish loading.",
-			"TLH could not load its packaged review assets. Close this window and rerun /annotate-git-diff after reinstalling or updating TLH.",
+			"annotate-git-diff could not load its packaged review assets. Close this window and rerun /annotate-git-diff after reinstalling or updating the annotate-git-diff package.",
 			reviewAssetConfig.bootstrapError,
 		);
 		return;
@@ -2112,7 +2112,7 @@ function setupMonaco() {
 	if (!vsBaseUrl) {
 		showAssetFailure(
 			"The review window could not finish loading.",
-			"TLH could not locate its packaged Monaco assets. Close this window and rerun /annotate-git-diff after reinstalling or updating TLH.",
+			"annotate-git-diff could not locate its packaged Monaco assets. Close this window and rerun /annotate-git-diff after reinstalling or updating the annotate-git-diff package.",
 		);
 		return;
 	}
@@ -2120,7 +2120,7 @@ function setupMonaco() {
 	if (!window.require || typeof window.require.config !== "function") {
 		showAssetFailure(
 			"The review window could not finish loading.",
-			"TLH could not initialize the packaged Monaco loader. Close this window and rerun /annotate-git-diff.",
+			"annotate-git-diff could not initialize the packaged Monaco loader. Close this window and rerun /annotate-git-diff.",
 		);
 		return;
 	}
@@ -2175,7 +2175,7 @@ function setupMonaco() {
 	};
 	const loadTimeoutId = setTimeout(() => {
 		settleFailure(
-			"TLH timed out while loading the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
+			"annotate-git-diff timed out while loading the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
 			"Timed out waiting for Monaco to finish loading.",
 		);
 	}, 10000);
@@ -2189,7 +2189,7 @@ function setupMonaco() {
 	} catch (error) {
 		clearTimeout(loadTimeoutId);
 		settleFailure(
-			"TLH could not configure the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
+			"annotate-git-diff could not configure the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
 			error,
 		);
 		return;
@@ -2281,7 +2281,7 @@ function setupMonaco() {
 		(error) => {
 			clearTimeout(loadTimeoutId);
 			settleFailure(
-				"TLH could not load the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
+				"annotate-git-diff could not load the packaged Monaco editor. Close this window and rerun /annotate-git-diff.",
 				error,
 			);
 		},
