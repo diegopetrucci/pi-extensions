@@ -2,7 +2,7 @@
  * Inline Bash Extension - expands inline bash commands in user prompts.
  *
  * Start pi with this extension:
- *   pi -e ./examples/extensions/inline-bash.ts
+ *   pi -e ./extensions/inline-bash/index.ts
  *
  * Then type prompts with inline bash:
  *   What's in !{pwd}?
@@ -36,33 +36,32 @@ export default function (pi: ExtensionAPI) {
 			return { action: "continue" };
 		}
 
-		// Don't process if it's a whole-line bash command (starts with !)
-		// This preserves the existing !command behavior
 		if (text.trimStart().startsWith("!") && !text.trimStart().startsWith("!{")) {
 			return { action: "continue" };
 		}
 
-		// Check if there are any inline bash patterns
-		if (!PATTERN.test(text)) {
+		PATTERN.lastIndex = 0;
+		const matches: Array<{ start: number; end: number; command: string }> = [];
+		let match = PATTERN.exec(text);
+		while (match) {
+			matches.push({
+				start: match.index,
+				end: match.index + match[0].length,
+				command: match[1],
+			});
+			match = PATTERN.exec(text);
+		}
+		if (matches.length === 0) {
 			return { action: "continue" };
 		}
 
-		// Reset regex state after test()
-		PATTERN.lastIndex = 0;
-
-		let result = text;
+		const parts: string[] = [];
+		let cursor = 0;
 		const expansions: Array<{ command: string; output: string; error?: string }> = [];
 
-		// Find all matches first (to avoid issues with replacing while iterating)
-		const matches: Array<{ full: string; command: string }> = [];
-		let match = PATTERN.exec(text);
-		while (match) {
-			matches.push({ full: match[0], command: match[1] });
-			match = PATTERN.exec(text);
-		}
-
-		// Execute each command and collect results
-		for (const { full, command } of matches) {
+		for (const { start, end, command } of matches) {
+			parts.push(text.slice(cursor, start));
+			cursor = end;
 			try {
 				const bashResult = await pi.exec("bash", ["-c", command], {
 					timeout: TIMEOUT_MS,
@@ -81,15 +80,16 @@ export default function (pi: ExtensionAPI) {
 					expansions.push({ command, output: trimmed });
 				}
 
-				result = result.replace(full, trimmed);
+				parts.push(trimmed);
 			} catch (err) {
 				const errorMsg = err instanceof Error ? err.message : String(err);
 				expansions.push({ command, output: "", error: errorMsg });
-				result = result.replace(full, `[error: ${errorMsg}]`);
+				parts.push(`[error: ${errorMsg}]`);
 			}
 		}
+		parts.push(text.slice(cursor));
+		const result = parts.join("");
 
-		// Show what was expanded (if UI available)
 		if (ctx.hasUI && expansions.length > 0) {
 			const summary = expansions
 				.map((e) => {
