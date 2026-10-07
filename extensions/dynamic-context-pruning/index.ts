@@ -7,10 +7,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-// ============================================================================
-// Types (kept intentionally minimal/structural so pure helpers stay testable
-// without depending on the full @earendil-works/pi-ai type graph).
-// ============================================================================
+// Structural stand-ins so pure helpers stay testable without the full pi-ai type graph.
 
 export interface MinimalTextContent {
   type: "text";
@@ -149,21 +146,17 @@ export function sessionProjectionToMessages(
   return projection.entries.flatMap((entry) => entry.messages);
 }
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 const EXTENSION_ID = "dynamic-context-pruning";
 const CONFIG_FILE_NAME = "dynamic-context-pruning.json";
 const DECISION_ENTRY_TYPE = "dynamic-context-pruning:decision";
 const STATS_ENTRY_TYPE = "dynamic-context-pruning:stats";
 /**
- * Restore/undo entries (pe-8re9): a lightweight tombstone that records "the
- * decision with this idempotencyKey should be treated as reverted". See
- * `resolvePruneTombstoneState` for the exact chronological resolution rule.
+ * Restore/undo entries: a lightweight tombstone that records "the decision
+ * with this idempotencyKey should be treated as reverted". See
+ * `resolvePruneTombstoneState` for the chronological last-event-wins rule.
  */
 const RESTORE_ENTRY_TYPE = "dynamic-context-pruning:restore";
-/** strategyId used for user-initiated prunes from the /prune picker (pe-8re9). Always source:"manual". */
+/** strategyId used for user-initiated prunes from the /prune picker. Always source:"manual". */
 const MANUAL_STRATEGY_ID = "manual";
 
 const DEFAULT_RECENT_TURNS = 4;
@@ -173,7 +166,7 @@ const DEFAULT_CACHED_PRICE_RATIO = 0.1;
 
 /**
  * Default net-benefit gate threshold (max amortization calls). Recalibrated
- * (pe-c5n9) from the representative-corpus benchmark (~/.the-last-harness/
+ * from the representative-corpus benchmark (~/.the-last-harness/
  * agent/sessions, 1,390+ session files, 556 candidates): this is the
  * hindsight-optimal break-even T at cachedPriceRatio r=0.1 (aggressive
  * prompt caching, the common Anthropic case). IMPORTANT caveats:
@@ -189,7 +182,7 @@ const DEFAULT_CACHED_PRICE_RATIO = 0.1;
 const DEFAULT_BREAK_EVEN_THRESHOLD = 22;
 
 /**
- * Default mid_loop break-even threshold (pe-zy4s follow-up). The package's own
+ * Default mid_loop break-even threshold. The package's own
  * representative-corpus benchmark (turn-START state definition — the same one
  * the runtime `context` handler uses) favored rejecting mid_loop candidates
  * at cachedPriceRatio r=0.1 (mid_loop-optimal T=1, total realized
@@ -240,10 +233,6 @@ const DEFAULT_ERROR_PURGE_MIN_TURNS_OLD = 4;
 const DEDUPE_STRATEGY_ID = "dedupe";
 const ERROR_PURGE_STRATEGY_ID = "error-purge";
 
-// ============================================================================
-// Config
-// ============================================================================
-
 export interface PruneProtections {
   /** Tool names (case-insensitive) whose calls are never pruned. */
   toolNames: string[];
@@ -257,7 +246,7 @@ export interface PruneThresholds {
   /**
    * Minimum raw text characters a fresh AUTOMATIC prune proposal must remove
    * (original text chars minus placeholder chars) to be considered at all
-   * (pe-qdzb). Enforced by `runDynamicContextPruningPipeline` BEFORE the
+   * Enforced by `runDynamicContextPruningPipeline` BEFORE the
    * net-benefit gate (see `PruneGateConfig`/`gate`, which uses break-even token
    * math and is a separate, later check): text-only candidates below this floor
    * are dropped up front and never reach gate/batch consideration. Image-bearing
@@ -269,7 +258,7 @@ export interface PruneThresholds {
   minCharsSaved: number;
 }
 
-/** Per-strategy toggles/config (pe-u8gd, pe-qs8j). Each strategy can be disabled independently. */
+/** Per-strategy toggles/config. Each strategy can be disabled independently. */
 export interface StrategiesConfig {
   dedupe: { enabled: boolean };
   errorPurge: {
@@ -277,11 +266,10 @@ export interface StrategiesConfig {
     /** A tool call's input is only eligible for purging once it is older than this many turns. */
     minTurnsOld: number;
   };
-  /** Superseded file-ops strategy (pe-qs8j): stale read/write/edit outputs replaced by a placeholder. */
+  /** Superseded file-ops strategy: stale read/write/edit outputs replaced by a placeholder. */
   supersededFileOps: { enabled: boolean };
 }
 
-/** Net-benefit gate operating mode (pe-s2ho). */
 export type GateMode = "on" | "off" | "always-apply";
 
 /**
@@ -484,11 +472,6 @@ async function writeConfig(config: DynamicContextPruningConfig): Promise<void> {
   await fs.writeFile(configPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-// ============================================================================
-// Token estimator (chars/4-style; deliberately simple, good enough for
-// relative before/after accounting used by later savings-accounting work).
-// ============================================================================
-
 export function estimateTokensForText(text: string): number {
   if (!text) return 0;
   return Math.max(0, Math.ceil(text.length / 4));
@@ -510,7 +493,7 @@ export function estimateTokensForContent(
 export type TokenEstimator = (text: string) => number;
 
 /**
- * Classify the agent's current state from the message payload alone (pe-zy4s):
+ * Classify the agent's current state from the message payload alone:
  * this is the runtime-observable definition used both by the live `context`
  * event handler and (via re-export) by the offline benchmark, so the two can
  * never drift apart.
@@ -527,7 +510,7 @@ export type TokenEstimator = (text: string) => number;
  *    default: nothing suggests an in-progress loop).
  *
  * The benchmark (scripts/benchmark.mjs) reclassifies its candidate labels to
- * this SAME definition (pe-zy4s), reusing this function directly, so the
+ * this SAME definition, reusing this function directly, so the
  * defaults below rest on evidence measured with the exact definition the
  * runtime observes. (An earlier turn-end-based benchmark definition -- "idle"
  * meant "this IS the turn's last assistant message", only knowable in
@@ -544,7 +527,7 @@ export function classifyAgentStateFromMessages(messages: MinimalMessage[]): Agen
   return "idle";
 }
 
-/** Resolve which break-even threshold applies for a given agent state (pe-s2ho state-conditioning hook). */
+/** Resolve which break-even threshold applies for a given agent state. */
 export function resolveBreakEvenThreshold(
   gateConfig: PruneGateConfig,
   agentState: AgentState,
@@ -578,7 +561,7 @@ function estimateMessageTokens(message: MinimalMessage, estimateTokens: TokenEst
 
 /**
  * Sum estimated tokens for messages from `fromIndex` to the end of the array.
- * Used both for cache-bust tail sizing (pe-s2ho cost model) and for raw/
+ * Used both for cache-bust tail sizing and for raw/
  * effective context-size snapshots. Clamped to valid indices; an out-of-range
  * `fromIndex` (e.g. the very last message, or beyond) degrades gracefully.
  */
@@ -594,10 +577,6 @@ export function estimateTailTokens(
   }
   return total;
 }
-
-// ============================================================================
-// Protections
-// ============================================================================
 
 function globToRegExp(glob: string): RegExp {
   let pattern = "^";
@@ -706,10 +685,6 @@ export function computeTurnsElapsedSince(messages: MinimalMessage[], index: numb
   return count;
 }
 
-// ============================================================================
-// Correlation
-// ============================================================================
-
 export interface ToolCallPairIndices {
   assistantIndex?: number;
   toolCallBlockIndex?: number;
@@ -722,7 +697,7 @@ export interface ToolCallPairIndices {
  * toolCallIds against the same `messages` array (e.g. the pipeline's
  * per-decision protection/savings/apply passes) should build this once and
  * pass it to `findToolCallPairIndices` and friends to avoid an O(n) rescan
- * per decision (pe-e0zd).
+ * per decision.
  */
 export function buildToolCallPairIndex(
   messages: MinimalMessage[],
@@ -798,10 +773,6 @@ export function findToolCallPairIndices(
   return pair;
 }
 
-// ============================================================================
-// Proposals & persisted decisions
-// ============================================================================
-
 export type PruneTargetKind = "tool_result_content" | "tool_call_input";
 
 /**
@@ -826,7 +797,7 @@ export interface ProposedPrune {
 export interface PruneDecisionRecord {
   idempotencyKey: string;
   strategyId: string;
-  correlation: { type: "toolCallId"; toolCallId: string } | { type: "entryId"; entryId: string };
+  correlation: { type: "toolCallId"; toolCallId: string };
   kind: PruneTargetKind;
   reason: string;
   placeholder?: string;
@@ -843,15 +814,11 @@ export function buildIdempotencyKey(proposal: ProposedPrune): string {
  * omitting `strategyId` (unlike `idempotencyKey`). Two decisions from
  * different strategies that both replace the same tool result's content
  * share this key even though their idempotencyKeys differ — that's exactly
- * the overlap pe-j7sb collapses before gating/apply (see
+ * the overlap the pipeline collapses before gating/apply (see
  * `runDynamicContextPruningPipeline`).
  */
 function buildDecisionTargetKey(decision: PruneDecisionRecord): string {
-  const correlationId =
-    decision.correlation.type === "toolCallId"
-      ? decision.correlation.toolCallId
-      : decision.correlation.entryId;
-  return `${decision.kind}:${decision.correlation.type}:${correlationId}`;
+  return `${decision.kind}:${decision.correlation.type}:${decision.correlation.toolCallId}`;
 }
 
 export function proposalToDecisionRecord(
@@ -885,8 +852,6 @@ export function parseDecisionRecord(data: unknown): PruneDecisionRecord | undefi
   let correlation: PruneDecisionRecord["correlation"] | undefined;
   if (rawCorrelation?.type === "toolCallId" && typeof rawCorrelation.toolCallId === "string") {
     correlation = { type: "toolCallId", toolCallId: rawCorrelation.toolCallId };
-  } else if (rawCorrelation?.type === "entryId" && typeof rawCorrelation.entryId === "string") {
-    correlation = { type: "entryId", entryId: rawCorrelation.entryId };
   }
   if (!correlation) return undefined;
 
@@ -901,10 +866,6 @@ export function parseDecisionRecord(data: unknown): PruneDecisionRecord | undefi
     source,
   };
 }
-
-// ============================================================================
-// Restore / undo (pe-8re9): tombstones that reverse a persisted decision
-// ============================================================================
 
 /**
  * A restore record is a tombstone: it records that the decision identified by
@@ -1013,10 +974,6 @@ export function resolvePruneTombstoneState(entries: MinimalSessionEntry[]): Prun
   return { activeDecisions, activeIdempotencyKeys, restoredKeys, lastDecisionByKey };
 }
 
-// ============================================================================
-// Apply step (content-replacement only; never drops messages)
-// ============================================================================
-
 export function buildPlaceholderText(reason: string, charsRemoved: number): string {
   return `[pruned by ${EXTENSION_ID}: ${reason} (${charsRemoved} chars removed)]`;
 }
@@ -1031,8 +988,7 @@ function isImageBearingToolResultTarget(
   decision: PruneDecisionRecord,
   pairIndex?: Map<string, ToolCallPairIndices>,
 ): boolean {
-  if (decision.kind !== "tool_result_content" || decision.correlation.type !== "toolCallId")
-    return false;
+  if (decision.kind !== "tool_result_content") return false;
   const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
   if (pair.resultIndex === undefined) return false;
   const target = messages[pair.resultIndex];
@@ -1056,11 +1012,6 @@ export function applyPruneDecision(
   decision: PruneDecisionRecord,
   pairIndex?: Map<string, ToolCallPairIndices>,
 ): ApplyResult {
-  if (decision.correlation.type !== "toolCallId") {
-    // v1 only ever targets tool call/result pairs; entryId correlation is
-    // reserved for future strategies and intentionally not applied yet.
-    return { applied: false, charsRemoved: 0 };
-  }
   const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
 
   if (decision.kind === "tool_result_content") {
@@ -1081,7 +1032,7 @@ export function applyPruneDecision(
     }
     if (pair.resultIndex === undefined) return { applied: false, charsRemoved: 0 };
     const resultMessage = messages[pair.resultIndex] as MinimalToolResultMessage;
-    // Only errored-call inputs may ever be redacted (ticket invariant).
+    // Only errored-call inputs may ever be redacted.
     if (!resultMessage.isError) return { applied: false, charsRemoved: 0 };
 
     const assistantMessage = messages[pair.assistantIndex] as MinimalAssistantMessage;
@@ -1132,7 +1083,6 @@ export function isDecisionProtected(
   recencyBoundaryIndex: number,
   pairIndex?: Map<string, ToolCallPairIndices>,
 ): boolean {
-  if (decision.correlation.type !== "toolCallId") return true; // no safe way to check protections yet
   const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
   if (
     pair.resultIndex !== undefined &&
@@ -1154,15 +1104,71 @@ export function isDecisionProtected(
   return false;
 }
 
-// ============================================================================
-// Savings estimation, cache cost model & net-benefit gate (pe-s2ho)
-// ============================================================================
-
 export interface DecisionSavingsEstimate {
   /** Earliest message index this decision changes; used for cache-bust tail sizing. */
   position: number;
   /** Estimated tokens removed by this decision, via the shared estimator. */
   tokensRemoved: number;
+}
+
+type DecisionApplyPreview =
+  | {
+      kind: "tool_result_content";
+      position: number;
+      before: (MinimalTextContent | MinimalImageContent)[];
+      after: (MinimalTextContent | MinimalImageContent)[];
+    }
+  | {
+      kind: "tool_call_input";
+      position: number;
+      beforeArgs: Record<string, unknown>;
+      afterArgs: Record<string, unknown>;
+    };
+
+/**
+ * Non-mutating before/after for one decision. A shallow array copy keeps the
+ * caller's messages intact; pair-index positions stay valid because slice()
+ * preserves length and order. Undefined when the target is absent or apply
+ * would no-op.
+ */
+function previewDecisionApply(
+  messages: MinimalMessage[],
+  decision: PruneDecisionRecord,
+  pairIndex?: Map<string, ToolCallPairIndices>,
+): DecisionApplyPreview | undefined {
+  const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
+  const preview = messages.slice();
+  const result = applyPruneDecision(preview, decision, pairIndex);
+  if (!result.applied) return undefined;
+
+  if (decision.kind === "tool_result_content") {
+    if (pair.resultIndex === undefined) return undefined;
+    return {
+      kind: "tool_result_content",
+      position: pair.resultIndex,
+      before: (messages[pair.resultIndex] as MinimalToolResultMessage).content,
+      after: (preview[pair.resultIndex] as MinimalToolResultMessage).content,
+    };
+  }
+
+  if (decision.kind === "tool_call_input") {
+    if (pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined)
+      return undefined;
+    const beforeBlock = (messages[pair.assistantIndex] as MinimalAssistantMessage).content[
+      pair.toolCallBlockIndex
+    ] as MinimalToolCallContent;
+    const afterBlock = (preview[pair.assistantIndex] as MinimalAssistantMessage).content[
+      pair.toolCallBlockIndex
+    ] as MinimalToolCallContent;
+    return {
+      kind: "tool_call_input",
+      position: pair.assistantIndex,
+      beforeArgs: beforeBlock.arguments ?? {},
+      afterArgs: afterBlock.arguments ?? {},
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -1177,101 +1183,45 @@ export function estimateDecisionSavings(
   estimateTokens: TokenEstimator = estimateTokensForText,
   pairIndex?: Map<string, ToolCallPairIndices>,
 ): DecisionSavingsEstimate | undefined {
-  if (decision.correlation.type !== "toolCallId") return undefined;
-  const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
-
-  // Apply against a shallow copy of the array (not the message objects) so
-  // the caller's messages/content are never mutated by this preview. Indices
-  // in `pairIndex` (built from `messages`) remain valid against `preview`
-  // since slice() preserves length/order.
-  const preview = messages.slice();
-  const result = applyPruneDecision(preview, decision, pairIndex);
-  if (!result.applied) return undefined;
-
-  if (decision.kind === "tool_result_content") {
-    if (pair.resultIndex === undefined) return undefined;
-    const before = messages[pair.resultIndex] as MinimalToolResultMessage;
-    const after = preview[pair.resultIndex] as MinimalToolResultMessage;
-    const tokensBefore = estimateTokensForContent(before.content);
-    const tokensAfter = estimateTokensForContent(after.content);
-    return { position: pair.resultIndex, tokensRemoved: Math.max(0, tokensBefore - tokensAfter) };
+  const preview = previewDecisionApply(messages, decision, pairIndex);
+  if (!preview) return undefined;
+  if (preview.kind === "tool_result_content") {
+    const tokensRemoved =
+      estimateTokensForContent(preview.before) - estimateTokensForContent(preview.after);
+    return { position: preview.position, tokensRemoved: Math.max(0, tokensRemoved) };
   }
-
-  if (decision.kind === "tool_call_input") {
-    if (pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined)
-      return undefined;
-    const beforeBlock = (messages[pair.assistantIndex] as MinimalAssistantMessage).content[
-      pair.toolCallBlockIndex
-    ] as MinimalToolCallContent;
-    const afterBlock = (preview[pair.assistantIndex] as MinimalAssistantMessage).content[
-      pair.toolCallBlockIndex
-    ] as MinimalToolCallContent;
-    const tokensBefore = estimateTokens(JSON.stringify(beforeBlock.arguments ?? {}));
-    const tokensAfter = estimateTokens(JSON.stringify(afterBlock.arguments ?? {}));
-    return {
-      position: pair.assistantIndex,
-      tokensRemoved: Math.max(0, tokensBefore - tokensAfter),
-    };
-  }
-
-  return undefined;
+  const tokensRemoved =
+    estimateTokens(JSON.stringify(preview.beforeArgs)) -
+    estimateTokens(JSON.stringify(preview.afterArgs));
+  return { position: preview.position, tokensRemoved: Math.max(0, tokensRemoved) };
 }
 
 /**
- * Estimate the character savings of a single decision (pe-qdzb), i.e. the
- * same before/after delta basis as `estimateDecisionSavings` but measured in
- * raw characters rather than estimated tokens. Used by the pipeline to
- * enforce `thresholds.minCharsSaved` against fresh automatic proposals
- * *before* they reach the net-benefit gate. Returns undefined under the same
- * conditions as `estimateDecisionSavings` (target absent / would not apply).
- * Mirrors `estimateDecisionSavings`'s `Math.max(0, ...)` clamp, so a
- * decision whose placeholder text would be LONGER than the original content
- * (negative savings) is reported as 0 chars saved, not a negative number.
+ * Character savings for one decision: original text or argument JSON minus
+ * the placeholder. Same no-op conditions as `estimateDecisionSavings`.
+ * Clamped at 0 so a longer placeholder is reported as no savings. The
+ * pipeline uses this as the minimum-size floor before the net-benefit gate.
  */
 export function estimateDecisionCharsSaved(
   messages: MinimalMessage[],
   decision: PruneDecisionRecord,
   pairIndex?: Map<string, ToolCallPairIndices>,
 ): number | undefined {
-  if (decision.correlation.type !== "toolCallId") return undefined;
-  const pair = findToolCallPairIndices(messages, decision.correlation.toolCallId, pairIndex);
-
-  // Same non-mutating preview approach as `estimateDecisionSavings`.
-  const preview = messages.slice();
-  const result = applyPruneDecision(preview, decision, pairIndex);
-  if (!result.applied) return undefined;
-
-  if (decision.kind === "tool_result_content") {
-    if (pair.resultIndex === undefined) return undefined;
-    const before = messages[pair.resultIndex] as MinimalToolResultMessage;
-    const after = preview[pair.resultIndex] as MinimalToolResultMessage;
-    const charsBefore = contentTextLength(before.content);
-    const charsAfter = contentTextLength(after.content);
-    return Math.max(0, charsBefore - charsAfter);
+  const preview = previewDecisionApply(messages, decision, pairIndex);
+  if (!preview) return undefined;
+  if (preview.kind === "tool_result_content") {
+    return Math.max(0, contentTextLength(preview.before) - contentTextLength(preview.after));
   }
-
-  if (decision.kind === "tool_call_input") {
-    if (pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined)
-      return undefined;
-    const beforeBlock = (messages[pair.assistantIndex] as MinimalAssistantMessage).content[
-      pair.toolCallBlockIndex
-    ] as MinimalToolCallContent;
-    const afterBlock = (preview[pair.assistantIndex] as MinimalAssistantMessage).content[
-      pair.toolCallBlockIndex
-    ] as MinimalToolCallContent;
-    const charsBefore = JSON.stringify(beforeBlock.arguments ?? {}).length;
-    const charsAfter = JSON.stringify(afterBlock.arguments ?? {}).length;
-    return Math.max(0, charsBefore - charsAfter);
-  }
-
-  return undefined;
+  return Math.max(
+    0,
+    JSON.stringify(preview.beforeArgs).length - JSON.stringify(preview.afterArgs).length,
+  );
 }
 
 /**
- * Cache-aware cost model (pe-s2ho ticket NOTES, binding over the looser prose
- * in the ticket body): prompt caches are prefix-based, so pruning at message
- * position p invalidates ('busts') the cached tail from p onward exactly
- * once. Modelled per NOTES as:
+ * Cache-aware cost model: prompt caches are prefix-based, so pruning at
+ * message position p invalidates ('busts') the cached tail from p onward
+ * exactly once:
  *
  *   penalty          ~= (1 - r) * tailTokensAfterEarliestChange
  *   recurringSaving  ~= r * tokensRemoved
@@ -1326,7 +1276,7 @@ export interface NetBenefitGateResult {
 }
 
 /**
- * Net-benefit gate (pe-s2ho): decides whether fresh, automatic prune
+ * Net-benefit gate: decides whether fresh, automatic prune
  * proposals are worth the one-time cache bust they cause. Batch-aware: since
  * prompt caches are a single linear prefix, every candidate in one pipeline
  * pass is "behind" the earliest changed position and shares that one cache
@@ -1409,11 +1359,6 @@ export function evaluateNetBenefitGate(
     cost,
   };
 }
-
-// ============================================================================
-// Savings accounting & stats API (consumed by pe-8re9 /context-pruning stats
-// and the pe-e9pv benchmark harness)
-// ============================================================================
 
 export interface PruneStatsRecord {
   idempotencyKey: string;
@@ -1530,10 +1475,6 @@ export function computeContextSizeSnapshot(
   };
 }
 
-// ============================================================================
-// Strategy registry (populated by follow-up tickets pe-u8gd/pe-qs8j)
-// ============================================================================
-
 export interface StrategyProposeInput {
   messages: MinimalMessage[];
   protections: PruneProtections;
@@ -1546,7 +1487,7 @@ export interface StrategyProposeInput {
    */
   config: DynamicContextPruningConfig;
   /**
-   * Session working directory (pe-qs8j), used to normalize relative file
+   * Session working directory, used to normalize relative file
    * paths (e.g. from read/write/edit tool args) against an absolute base so
    * the same file referenced via different relative/absolute spellings is
    * recognized as the same path. Optional/backward-compatible: undefined
@@ -1562,15 +1503,10 @@ export interface PruneStrategy {
   propose(input: StrategyProposeInput): ProposedPrune[];
 }
 
-// ----------------------------------------------------------------------
-// Argument canonicalization (shared by the dedupe strategy; exported for
-// direct unit testing of key-order/nesting/whitespace behavior).
-// ----------------------------------------------------------------------
-
 /**
  * Recursively canonicalize a parsed tool-call arguments value: object keys
  * are sorted (recursively); array order and all string/number/boolean VALUES
- * are left untouched (per ticket: never normalize argument values beyond
+ * are left untouched (never normalize argument values beyond
  * structural key ordering). Serializing the result via JSON.stringify then
  * yields a deterministic, whitespace-free representation regardless of the
  * original key order.
@@ -1596,7 +1532,7 @@ export function buildDedupeKey(toolName: string, args: unknown): string {
   return `${toolName.trim().toLowerCase()}::${canonicalizeArgumentsJSON(args)}`;
 }
 
-/** Exported for /prune picker item building (pe-8re9) and direct unit testing. */
+/** Exported for /prune picker item building and direct unit testing. */
 export interface ToolCallOccurrence {
   toolCallId: string;
   toolName: string;
@@ -1646,10 +1582,6 @@ export function collectCompletedToolCallOccurrences(
   return occurrences;
 }
 
-// ----------------------------------------------------------------------
-// Strategy 1: deduplication (pe-u8gd)
-// ----------------------------------------------------------------------
-
 /** Placeholder text for a duplicate tool result whose content was replaced. */
 export function buildDedupePlaceholder(toolName: string, newestToolCallId: string): string {
   return `[pruned by ${EXTENSION_ID}: duplicate ${toolName} call result; see newest occurrence (call ${newestToolCallId})]`;
@@ -1688,10 +1620,6 @@ export const dedupeStrategy: PruneStrategy = {
   },
 };
 
-// ----------------------------------------------------------------------
-// Strategy 2: error-input purge (pe-u8gd)
-// ----------------------------------------------------------------------
-
 export const errorPurgeStrategy: PruneStrategy = {
   id: ERROR_PURGE_STRATEGY_ID,
   propose(input: StrategyProposeInput): ProposedPrune[] {
@@ -1716,10 +1644,6 @@ export const errorPurgeStrategy: PruneStrategy = {
   },
 };
 
-// ----------------------------------------------------------------------
-// Strategy 3: superseded file operations (pe-qs8j)
-// ----------------------------------------------------------------------
-//
 // When the same file path is read and/or written multiple times in a
 // session, older read/write/edit tool *outputs* for that path can become
 // stale relative to a later operation. This strategy proposes replacing
@@ -1916,7 +1840,7 @@ export const supersededFileOpsStrategy: PruneStrategy = {
       // `group` is already in message/chronological order because
       // `collectCompletedToolCallOccurrences` iterates messages in order.
       //
-      // Single reverse pass (pe-e0zd): instead of `group.slice(i + 1).find(...)`
+      // Single reverse pass: instead of `group.slice(i + 1).find(...)`
       // per index (O(k^2) allocations+scans for a group of size k), walk the
       // group back-to-front and maintain:
       //  - `nearestLaterSuccessfulWrite`: the nearest (chronologically first)
@@ -2040,10 +1964,6 @@ function collectProposals(input: StrategyProposeInput): ProposedPrune[] {
   return proposals;
 }
 
-// ============================================================================
-// Pipeline
-// ============================================================================
-
 export interface PipelineInput {
   messages: MinimalMessage[];
   config: DynamicContextPruningConfig;
@@ -2052,7 +1972,7 @@ export interface PipelineInput {
   knownIdempotencyKeys: ReadonlySet<string>;
   /**
    * Idempotency keys most-recently restored/undone via the /prune picker
-   * (pe-8re9; see `resolvePruneTombstoneState`). Fresh AUTOMATIC proposals
+   * (see `resolvePruneTombstoneState`: last event wins). Fresh AUTOMATIC proposals
    * matching one of these keys are dropped so a restored decision does not
    * silently re-apply on the very next context event. Manual re-prunes
    * always use a fresh idempotencyKey namespaced by "manual" (see
@@ -2063,7 +1983,7 @@ export interface PipelineInput {
   restoredIdempotencyKeys?: ReadonlySet<string>;
   /** Omitted defaults to idle. The context handler passes the classified state. */
   agentState?: AgentState;
-  /** Session working directory (pe-qs8j), forwarded to strategies for path normalization. */
+  /** Session working directory, forwarded to strategies for path normalization. */
   cwd?: string;
 }
 
@@ -2085,7 +2005,7 @@ export interface PipelineResult {
  * single place that mutates content. Pairing invariants are preserved by
  * construction: messages/blocks are never added or removed, only replaced.
  *
- * Net-benefit gate (pe-s2ho): only NEW, automatic (non-manual) proposals are
+ * Net-benefit gate: only NEW, automatic (non-manual) proposals are
  * gated; already-persisted decisions stay applied (their cache bust already
  * happened) and manual decisions always bypass the gate (user intent wins).
  */
@@ -2116,8 +2036,8 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
     input.config.protections.recentTurns,
   );
   // Built once and reused across all protection/savings/apply checks below so
-  // each per-decision lookup is O(1) instead of an O(n) rescan of `messages`
-  // (pe-e0zd). Positions are stable across the apply loop below (and against
+  // each per-decision lookup is O(1) instead of an O(n) rescan of `messages`.
+  // Positions are stable across the apply loop below (and against
   // `input.messages`) because decisions only ever replace a message's
   // content at its existing index, never insert/remove/reorder messages.
   const pairIndex = buildToolCallPairIndex(messages);
@@ -2154,18 +2074,12 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
   const freshManual = dedupedFresh.filter((decision) => decision.source === "manual");
   const freshAutomaticUnfiltered = dedupedFresh.filter((decision) => decision.source !== "manual");
 
-  // Minimum-size floor (pe-qdzb): drop fresh automatic proposals whose
-  // character savings (original content chars minus placeholder chars) fall
-  // below `thresholds.minCharsSaved`, BEFORE gate evaluation so dropped
-  // candidates never consume batch/earliest-position gate consideration.
-  // Applies to automatic proposals only; manual (`freshManual` above) and
-  // already-persisted decisions (`input.persistedDecisions`, applied later)
-  // bypass this floor entirely, same as the net-benefit gate. Tool-result
-  // candidates containing images also bypass this raw-text floor because
-  // images have no character count; their token savings still go through the
-  // existing net-benefit gate. A floor of 0 (the config default before
-  // pe-c5n9's DEFAULT_MIN_CHARS_SAVED constant was introduced) is a no-op:
-  // every non-negative delta clears it.
+  // Minimum-size floor: drop fresh automatic proposals whose character
+  // savings fall below `thresholds.minCharsSaved` BEFORE gate evaluation, so
+  // dropped candidates never consume batch/earliest-position consideration.
+  // Manual and already-persisted decisions bypass this floor. Image-bearing
+  // tool results bypass it too (no character count) and still hit the token
+  // gate. A floor of 0 is a no-op.
   const minCharsSaved = input.config.thresholds.minCharsSaved;
   const freshAutomatic =
     minCharsSaved <= 0
@@ -2177,7 +2091,7 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
         });
 
   // Collapse fresh AUTOMATIC candidates that target the same (kind,
-  // correlation) down to a single decision (pe-j7sb). Two strategies (e.g.
+  // correlation) down to a single decision. Two strategies (e.g.
   // `dedupe` and `superseded-file-ops`) can independently propose a decision
   // for the exact same tool result; their idempotencyKeys differ (each
   // embeds its own strategyId) so the self-dedup above does not catch this,
@@ -2216,12 +2130,9 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
   // target's tokensRemoved even though the apply-loop guard further down
   // correctly skips applying the fresh candidate — corrupting the gate's
   // net-benefit math (and potentially flipping ACCEPT/REJECT) even though no
-  // double-apply occurs. Only decisions with `correlation.type ===
-  // "toolCallId"` are applyable targets worth tracking here; anything else is
-  // ignored safely (it cannot collide with a toolCallId-keyed target).
+  // double-apply occurs.
   const claimedTargetKeys = new Set<string>();
   for (const decision of [...input.persistedDecisions, ...freshManual]) {
-    if (decision.correlation.type !== "toolCallId") continue;
     claimedTargetKeys.add(buildDecisionTargetKey(decision));
   }
 
@@ -2269,8 +2180,8 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
   // `applyPruneDecision` unconditionally re-applies its placeholder even when
   // the target is already a placeholder and reports `applied: true`, so
   // without this guard the second candidate would silently overwrite the
-  // first's placeholder AND still be credited full stats/newlyAppliedDecisions
-  // (pe-j7sb). The pre-gate collapse above already prevents this among fresh
+  // first's placeholder AND still be credited full stats/newlyAppliedDecisions.
+  // The pre-gate collapse above already prevents this among fresh
   // automatic candidates; this guard additionally covers persisted-vs-fresh
   // (and any other) overlap within a single call.
   const appliedTargetKeys = new Set<string>();
@@ -2309,10 +2220,6 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 
   return { messages, newlyAppliedDecisions, newlyAppliedStats, contextSizeSnapshot, gate };
 }
-
-// ============================================================================
-// /prune picker helpers (pe-8re9)
-// ============================================================================
 
 function resolveSessionProjection(ctx: ExtensionContext): MinimalSessionProjection | undefined {
   try {
@@ -2404,7 +2311,6 @@ export function buildActiveResultDecisionMap(
   const map = new Map<string, PruneDecisionRecord>();
   for (const decision of activeDecisions) {
     if (decision.kind !== "tool_result_content") continue;
-    if (decision.correlation.type !== "toolCallId") continue;
     if (!map.has(decision.correlation.toolCallId))
       map.set(decision.correlation.toolCallId, decision);
   }
@@ -2465,10 +2371,6 @@ export function formatPrunableItemsReport(items: PrunableItem[]): string[] {
   if (items.length === 0) return ["No prunable tool results found in the current model context."];
   return items.map((item, index) => `${index + 1}. ${formatPrunableItemOption(item)}`);
 }
-
-// ============================================================================
-// /context-pruning control + status/stats helpers (pe-8re9)
-// ============================================================================
 
 export type StrategyKey = "dedupe" | "errorPurge" | "supersededFileOps";
 
@@ -2659,10 +2561,6 @@ export function formatStatsReport(stats: CumulativePruneStats): string[] {
   return lines;
 }
 
-// ============================================================================
-// Extension wiring
-// ============================================================================
-
 function notify(
   ctx: ExtensionContext,
   message: string,
@@ -2722,9 +2620,6 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
       persistedDecisions,
       knownIdempotencyKeys,
       restoredIdempotencyKeys,
-      // Real mid-loop/idle agent-state detection (pe-zy4s): derived straight from
-      // the message payload via classifyAgentStateFromMessages -- see its doc
-      // comment for the exact runtime-observable definition.
       agentState: classifyAgentStateFromMessages(event.messages as unknown as MinimalMessage[]),
       cwd: ctx.sessionManager.getCwd(),
     });
@@ -2805,11 +2700,8 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
       const activeByToolCallId = buildActiveResultDecisionMap(persistedDecisions);
       const restoredToolCallIds = new Set(
         Array.from(lastDecisionByKey.values())
-          .filter(
-            (d) =>
-              d.correlation.type === "toolCallId" && restoredIdempotencyKeys.has(d.idempotencyKey),
-          )
-          .map((d) => (d.correlation as { type: "toolCallId"; toolCallId: string }).toolCallId),
+          .filter((d) => restoredIdempotencyKeys.has(d.idempotencyKey))
+          .map((d) => d.correlation.toolCallId),
       );
       const items = buildPrunableItems(messages, activeByToolCallId, restoredToolCallIds);
 
@@ -2839,12 +2731,8 @@ export default function dynamicContextPruningExtension(pi: ExtensionAPI) {
         const latestActive = buildActiveResultDecisionMap(persistedDecisions);
         const latestRestoredToolCallIds = new Set(
           Array.from(lastDecisionByKey.values())
-            .filter(
-              (d) =>
-                d.correlation.type === "toolCallId" &&
-                restoredIdempotencyKeys.has(d.idempotencyKey),
-            )
-            .map((d) => (d.correlation as { type: "toolCallId"; toolCallId: string }).toolCallId),
+            .filter((d) => restoredIdempotencyKeys.has(d.idempotencyKey))
+            .map((d) => d.correlation.toolCallId),
         );
         const latestItems = buildPrunableItems(
           latestMessages,
