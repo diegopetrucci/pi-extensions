@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-claude-fast",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Deprecated standalone leftover. Does not change provider requests; use @diegopetrucci/pi-fast.",
   "keywords": [
     "pi-package",

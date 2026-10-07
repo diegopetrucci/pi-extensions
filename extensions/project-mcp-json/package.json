@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-project-mcp-json",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that reads Claude Code-style .mcp.json files and registers the configured servers with pi.registerMcpServer.",
   "keywords": [
     "pi-package",
