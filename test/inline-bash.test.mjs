@@ -90,3 +90,80 @@ test('inline-bash leaves whole-line bash syntax untouched for RPC input', async 
   );
   assert.deepEqual(harness.execCalls, []);
 });
+
+test('inline-bash inserts $& command output as raw text', async () => {
+  const { handler } = await loadInputHandler(async () => ({
+    stdout: '$&\n',
+    stderr: '',
+    code: 0,
+  }));
+
+  assert.deepEqual(
+    await handler(
+      {
+        type: 'input',
+        text: 'value !{printf $&} done',
+        source: 'rpc',
+      },
+      { hasUI: false },
+    ),
+    {
+      action: 'transform',
+      text: 'value $& done',
+      images: undefined,
+    },
+  );
+});
+
+test('inline-bash inserts $$ command output as raw text', async () => {
+  const { handler } = await loadInputHandler(async () => ({
+    stdout: '$$\n',
+    stderr: '',
+    code: 0,
+  }));
+
+  assert.deepEqual(
+    await handler(
+      {
+        type: 'input',
+        text: 'value !{printf $$} done',
+        source: 'rpc',
+      },
+      { hasUI: false },
+    ),
+    {
+      action: 'transform',
+      text: 'value $$ done',
+      images: undefined,
+    },
+  );
+});
+
+test('inline-bash keeps !{...} inside command output next to a later expansion', async () => {
+  const { handler, harness } = await loadInputHandler(async (_command, args) => {
+    const command = args[1];
+    if (command === 'echo-nested') return { stdout: '!{uname}\n', stderr: '', code: 0 };
+    if (command === 'uname') return { stdout: 'Linux\n', stderr: '', code: 0 };
+    throw new Error(`unexpected command ${command}`);
+  });
+
+  assert.deepEqual(
+    await handler(
+      {
+        type: 'input',
+        text: 'run !{echo-nested} then !{uname}',
+        source: 'rpc',
+      },
+      { hasUI: false },
+    ),
+    {
+      action: 'transform',
+      text: 'run !{uname} then Linux',
+      images: undefined,
+    },
+  );
+  assert.deepEqual(harness.execCalls, [
+    ['bash', ['-c', 'echo-nested'], { timeout: 30000 }],
+    ['bash', ['-c', 'uname'], { timeout: 30000 }],
+  ]);
+});
