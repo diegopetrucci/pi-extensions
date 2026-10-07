@@ -7,7 +7,7 @@ This is adapted from the original `confirm-destructive.ts` example in [`earendil
 ## What it checks
 
 - clearing the current session
-- switching sessions when the current session has user messages
+- switching sessions when a user message is newer than the last assistant (or a user message with no assistant)
 - forking from an entry
 
 ## Install
