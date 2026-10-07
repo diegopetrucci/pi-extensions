@@ -370,15 +370,27 @@ test("trust integration: host trusted + different cwd → project server NOT spa
   setEnv(t, "PI_CODING_AGENT_DIR", agentDir);
 
   const mod = await loadExtension("extensions/code-reviewer/index.ts");
-  const { SUBAGENT_MCP_TOOLS, disposeSubagentSession, createCodeReviewerRuntimeGuardExtension } =
-    mod.__test__;
+  const {
+    SUBAGENT_MCP_TOOLS,
+    disposeSubagentSession,
+    createCodeReviewerRuntimeGuardExtension,
+    resolveSubagentProjectTrusted,
+  } = mod.__test__;
 
-  // The subagent runs in `differentCwd` but the trusted project dir is `projectDir`.
-  // resolveSubagentProjectTrusted(ctx, differentCwd) → false because realpaths differ.
+  // Derive projectTrusted via the real helper: trusted host whose cwd is projectDir,
+  // but subagent runs in differentCwd — realpaths differ, so helper returns false.
+  const hostCtx = { cwd: realpathSync(projectDir), isProjectTrusted: () => true };
+  const projectTrusted = resolveSubagentProjectTrusted(hostCtx, differentCwd);
+  assert.equal(
+    projectTrusted,
+    false,
+    "trusted host + different cwd → projectTrusted must be false",
+  );
+
   const session = await makeSession(mod, {
     cwd: differentCwd,
     agentDir,
-    projectTrusted: false, // derived from cwd mismatch; explicitly false here
+    projectTrusted,
     guardFactory: createCodeReviewerRuntimeGuardExtension({ cwd: differentCwd, maxTurns: 5 }),
     tools: ["read", ...SUBAGENT_MCP_TOOLS],
   });

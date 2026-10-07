@@ -9,6 +9,7 @@ import {
 import { Container, truncateToWidth } from "@earendil-works/pi-tui";
 
 const QUIET_TOOL_NAMES = new Set(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+const MAX_MCP_ARG_LENGTH = 2000;
 
 type ToolRenderCall = NonNullable<ToolRenderers["renderCall"]>;
 type ToolRenderResult = NonNullable<ToolRenderers["renderResult"]>;
@@ -201,7 +202,21 @@ function formatQuietCallLine(toolName: string, args: unknown, theme: RenderTheme
 }
 
 function formatMcpCallLine(toolName: string, args: unknown, theme: RenderTheme): string {
-  const argsStr = args != null ? sanitizeInlineText(JSON.stringify(args)) : "";
+  let argsStr = "";
+  if (args != null) {
+    let raw: string | undefined;
+    try {
+      raw = JSON.stringify(args);
+    } catch {
+      // circular references, BigInt, etc.
+    }
+    if (raw === undefined) {
+      argsStr = "[\u2026]";
+    } else {
+      const capped = raw.length > MAX_MCP_ARG_LENGTH ? raw.slice(0, MAX_MCP_ARG_LENGTH) : raw;
+      argsStr = sanitizeInlineText(capped);
+    }
+  }
   return `${formatToolTitle(toolName, theme)}${argsStr ? ` ${theme.fg("toolOutput", argsStr)}` : ""}`;
 }
 

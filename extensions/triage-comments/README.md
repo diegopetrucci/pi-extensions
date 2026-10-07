@@ -84,6 +84,7 @@ Verdicts are one of `valid`, `invalid`, `partially valid`, `subjective`, or `nee
 - The slash command only collects/selects comments and asks the main agent to run triage.
 - The subagent is explicitly instructed not to implement changes.
 - Runtime guards block write tools, filesystem mutation through shell syntax, mutating git commands, and mutating GitHub CLI/API calls.
+- Runtime guards apply to built-in tools only; configured MCP tools pass the guard, run without confirmation, and are limited only by prompt guidance.
 - The generated prompt tells the main agent to summarize findings and ask which handling option to take before implementation.
 - Suggested responses are drafts for the user/agent to adapt; the extension does not post them to GitHub.
 

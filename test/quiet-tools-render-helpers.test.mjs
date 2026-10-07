@@ -344,6 +344,55 @@ test("createQuietResolver handles next() returning undefined: collapsed is quiet
   );
 });
 
+test("formatMcpCallLine: circular and BigInt args render a placeholder without throwing via collapsed render path", () => {
+  const resolver = createQuietResolver(() => true);
+
+  function renderCollapsedLine(args) {
+    const renderers = resolver("mcp__s__t", () => undefined);
+    const comp = renderers.renderCall(args, theme, {
+      expanded: false,
+      executionStarted: false,
+      lastComponent: undefined,
+      state: {},
+    });
+    return comp.render(200);
+  }
+
+  // Circular object: JSON.stringify throws → placeholder
+  const circular = {};
+  circular.self = circular;
+  const circularLines = renderCollapsedLine(circular);
+  assert.equal(circularLines.length, 2, "circular: 2 lines rendered");
+  assert.match(circularLines[0], /\[…\]/, "circular: placeholder present in first line");
+
+  // BigInt in object: JSON.stringify throws → placeholder
+  const bigintLines = renderCollapsedLine({ n: 42n });
+  assert.equal(bigintLines.length, 2, "BigInt: 2 lines rendered");
+  assert.match(bigintLines[0], /\[…\]/, "BigInt: placeholder present in first line");
+});
+
+test("formatMcpCallLine: ~1 MB string arg renders bounded output via collapsed render path", () => {
+  const resolver = createQuietResolver(() => true);
+  const hugeArg = { data: "x".repeat(1_000_000) };
+  const renderers = resolver("mcp__s__t", () => undefined);
+  const comp = renderers.renderCall(hugeArg, theme, {
+    expanded: false,
+    executionStarted: false,
+    lastComponent: undefined,
+    state: {},
+  });
+  const lines = comp.render(200);
+  assert.equal(lines.length, 2, "huge arg: 2 lines rendered");
+  assert.ok(
+    lines[0].length < 1000,
+    `huge arg: output length ${lines[0].length} must be bounded (well under 1 MB)`,
+  );
+  assert.ok(
+    !lines[0].includes("x".repeat(2001)),
+    "huge arg: output must not contain the uncapped string",
+  );
+});
+
 test("createQuietResolver timing state: tracks startedAt and clears interval on final result", () => {
   const resolver = createQuietResolver(() => true);
   const renderers = resolver("read", () => ({

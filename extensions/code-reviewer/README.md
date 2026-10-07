@@ -66,6 +66,7 @@ The model report is concise and includes a verdict, findings, validation notes, 
 
 - The subagent is explicitly instructed not to implement changes.
 - Runtime guards block write/edit tools, shell control operators, pipelines, redirection, path traversal outside the checkout, mutating `git`/`gh` commands, `npm`/publish commands, and other filesystem mutation.
+- Runtime guards apply to built-in tools only; configured MCP tools pass the guard, run without confirmation, and are limited only by prompt guidance.
 - Built-in file-inspection tools are preferred over shell commands for local files.
 
 ## Example
