@@ -9,13 +9,12 @@ import { gzipPayloadEqual } from "./gzip-payload.mjs";
 import { discoverPackages, findRoot, isExactNotFound, releaseOrder } from "./release-workspace.mjs";
 
 export { gzipPayloadEqual } from "./gzip-payload.mjs";
-export { discoverPackages } from "./release-workspace.mjs";
 
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org";
-export const TRUSTED_REPOSITORY = "diegopetrucci/pi-extensions";
-export const TRUSTED_WORKFLOW = "publish.yml";
-export const TRUSTED_ENVIRONMENT = "npm-release";
+const TRUSTED_REPOSITORY = "diegopetrucci/pi-extensions";
+const TRUSTED_WORKFLOW = "publish.yml";
+const TRUSTED_ENVIRONMENT = "npm-release";
 const PUBLISHED_VISIBILITY_RETRY_INTERVAL_MS = 5_000;
 // npm accepted pi-context-cap@0.1.11 during v0.1.66 but kept returning 404 for
 // longer than the old one-minute retry window. Keep this bounded while allowing
@@ -24,7 +23,7 @@ const PUBLISHED_VISIBILITY_RETRY_ATTEMPTS = 121;
 const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const RELEASE_VERSION_RE = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
-export async function defaultRun(file, args, options = {}) {
+async function defaultRun(file, args, options = {}) {
   try {
     const result = await execFileAsync(file, args, {
       cwd: options.cwd,

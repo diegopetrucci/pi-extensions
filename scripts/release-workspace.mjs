@@ -45,7 +45,7 @@ function workspacePatterns(manifest) {
   return [];
 }
 
-export async function walkDirectories(base) {
+async function walkDirectories(base) {
   const result = [];
   for (const entry of await readdir(base, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === "node_modules" || entry.name === ".git") continue;
@@ -55,7 +55,7 @@ export async function walkDirectories(base) {
   return result;
 }
 
-export function globRegex(pattern) {
+function globRegex(pattern) {
   const escaped = pattern
     .replaceAll("\\", "/")
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")

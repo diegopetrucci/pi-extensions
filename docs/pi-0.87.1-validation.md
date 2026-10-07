@@ -1,5 +1,7 @@
 # Pi 0.87.1 development-baseline validation
 
+> Superseded as the current development-baseline record by [`pi-0.99.0-validation.md`](./pi-0.99.0-validation.md); this document remains the historical Pi 0.87.1 evidence.
+
 > **Development baseline only:** This record documents Pi `0.87.1` development compatibility. It does not certify the fleet; all `.pi-fleet-tested-version` markers remain `0.84.4`.
 
 This record supersedes [`pi-0.85.1-validation.md`](./pi-0.85.1-validation.md) as the current development-baseline record. The 0.85.1 record remains the historical record of that work.
