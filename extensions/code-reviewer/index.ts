@@ -1676,7 +1676,7 @@ function appendRunDetails(report: string, details: ReviewDetails): string {
     : "thinking unknown";
   const suffix = `\n\n---\nRun details: ${modelSummary}; ${thinkingSummary}; ${details.turns} turn(s); ${details.toolCalls.length} tool call(s); duration ${duration}; cwd ${details.cwd}; tools ${toolSummary}.`;
   if (!trimmed)
-    return `## Verdict\nNo review output was produced.\n\n## Findings\n- major — Missing review output. Evidence: the isolated code_reviewer session returned no assistant text. Why it matters: the review could not be completed.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.\n\n## Run details\n- ${suffix.trim()}`;
+    return `## Verdict\nNo review output was produced.\n\n## Findings\n- major — Missing review output. Evidence: the isolated code_reviewer session returned no assistant text. Why it matters: the review could not be completed.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.${suffix}`;
   return `${trimmed}${suffix}`;
 }
 
@@ -1949,7 +1949,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
         details.error = failure.error;
         details.endedAt = Date.now();
         lastContent = appendRunDetails(
-          `## Verdict\nReview failed.\n\n## Findings\n- major — Review execution failed. Evidence: ${message}. Why it matters: the requested read-only review did not complete.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.\n\n## Run details\n- failure: ${message}`,
+          `## Verdict\nReview failed.\n\n## Findings\n- major — Review execution failed. Evidence: ${message}. Why it matters: the requested read-only review did not complete.\n\n## Validation\n- none\n\n## Scope check\nReview could not be completed.`,
           details,
         );
         emit();

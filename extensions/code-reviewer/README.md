@@ -4,8 +4,6 @@ Adds a `code_reviewer` subagent tool that adapts The Last Harness [`code-reviewe
 
 Use it when you want an isolated second-pass review of a proposed change against the local checkout. The subagent uses read-only built-in tools plus any configured MCP tools, checks ticket fit and scope first, then looks for diff mismatches, correctness bugs, security/safety issues, unnecessary complexity, and missing validation.
 
-This package is adapted from the TLH code-reviewer workflow for use as a standalone pi extension.
-
 ## Install
 
 ### Standalone npm package
