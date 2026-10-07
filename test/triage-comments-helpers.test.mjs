@@ -180,3 +180,37 @@ test("triage-comments helper formatting covers selection parsing, filter context
     /^bash git status --short x+…$/,
   );
 });
+
+test("triage-comments inline filter renumbers displayed comments without a pre-filter number", async () => {
+  const { applyInlineCommentFilter } = await loadTriageTestUtils();
+  const filter = {
+    hideResolved: true,
+    hideOutdated: false,
+    label: "hiding resolved inline review comments",
+  };
+  const comment = (id, displayNumber, reviewThread) => ({
+    id,
+    body: `body ${id}`,
+    metadata: { source: "pull_request_review_comment", displayNumber },
+    sourceLabel: "review comment",
+    displayNumber,
+    sortIndex: displayNumber,
+    reviewThread,
+  });
+
+  const filtered = applyInlineCommentFilter(
+    [
+      comment("resolved", 1, { metadataAvailable: true, isResolved: true, isOutdated: false }),
+      comment("kept", 2, { metadataAvailable: true, isResolved: false, isOutdated: false }),
+    ],
+    filter,
+  );
+
+  assert.equal(filtered.summary.displayedCount, 1);
+  assert.equal(filtered.comments.length, 1);
+  assert.equal(filtered.comments[0].id, "kept");
+  assert.equal(filtered.comments[0].displayNumber, 1);
+  assert.equal(filtered.comments[0].metadata.displayNumber, 1);
+  assert.equal(filtered.comments[0].metadata.preFilterDisplayNumber, undefined);
+  assert.equal(filtered.comments[0].metadata.source, "pull_request_review_comment");
+});

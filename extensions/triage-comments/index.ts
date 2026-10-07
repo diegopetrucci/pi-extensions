@@ -181,6 +181,69 @@ const SAFE_GIT_BRANCH_FLAGS = new Set([
   "--no-merged",
 ]);
 const SAFE_GIT_GLOBAL_FLAGS = new Set(["--no-pager", "--no-optional-locks"]);
+const SAFE_GIT_CONFIG_OVERRIDES = [
+  "core.pager=cat",
+  "core.fsmonitor=false",
+  "diff.external=",
+  "log.showSignature=false",
+];
+const GIT_SUBCOMMAND_SAFE_FLAGS: Partial<Record<string, string[]>> = {
+  blame: ["--no-textconv"],
+  diff: ["--no-ext-diff", "--no-textconv"],
+  log: ["--no-ext-diff", "--no-textconv"],
+  show: ["--no-ext-diff", "--no-textconv"],
+  whatchanged: ["--no-ext-diff", "--no-textconv"],
+};
+const GIT_OPTIONS_REQUIRING_LOCAL_FILE = [
+  {
+    flag: "--pathspec-from-file",
+    blockedPrefixes: ["--pathspec"],
+    reason:
+      "Triage bash blocks git --pathspec-from-file because it can read local files outside built-in path guards.",
+  },
+  {
+    flag: "--ignore-revs-file",
+    blockedPrefixes: ["--ignore-rev"],
+    reason:
+      "Triage bash blocks git --ignore-revs-file because it can read local files outside built-in path guards.",
+  },
+] as const;
+const GIT_SUBCOMMAND_OPTIONS_REQUIRING_LOCAL_FILE: Partial<
+  Record<string, Array<{ reason: string; matches: (token: string) => boolean }>>
+> = {
+  blame: [
+    {
+      reason:
+        "Triage bash blocks git blame --contents because it can read local files outside built-in path guards.",
+      matches: (token) => {
+        if (!token.startsWith("--")) return false;
+        const option = token.split("=", 1)[0]?.toLowerCase() ?? "";
+        return option === "--contents" || option.startsWith("--con");
+      },
+    },
+    {
+      reason:
+        "Triage bash blocks git blame -S because it can read local revs files outside built-in path guards.",
+      matches: (token) => token === "-S" || (token.startsWith("-S") && token.length > 2),
+    },
+  ],
+  "ls-files": [
+    {
+      reason:
+        "Triage bash blocks git ls-files -X/--exclude-from because it can read local files outside built-in path guards.",
+      matches: (token) => token === "-X" || (token.startsWith("-X") && token.length > 2),
+    },
+    {
+      reason:
+        "Triage bash blocks git ls-files -X/--exclude-from because it can read local files outside built-in path guards.",
+      matches: (token) => {
+        if (!token.startsWith("--")) return false;
+        const option = token.split("=", 1)[0]?.toLowerCase() ?? "";
+        return option === "--exclude-from" || option.startsWith("--exclude-f");
+      },
+    },
+  ],
+};
 const GH_GLOBAL_OPTIONS_WITH_VALUE = new Set([
   "--repo",
   "-R",
@@ -771,6 +834,10 @@ function getExecutableName(token: string): string {
   return path.basename(token).toLowerCase();
 }
 
+function shellQuoteToken(token: string): string {
+  return `'${token.replace(/'/g, `'"'"'`)}'`;
+}
+
 function getShellSyntaxReason(command: string): string | undefined {
   return tokenizeShellCommand(command).reason;
 }
@@ -893,8 +960,24 @@ function isSafeGitRemoteCommand(tokens: string[], subcommandIndex: number): bool
   return remoteAction === "show" || remoteAction === "get-url";
 }
 
-function getUnsafeGitArgumentReason(tokens: string[]): string | undefined {
-  for (const token of tokens.slice(1)) {
+function isBlockedGitLocalFileOption(
+  token: string,
+  flag: string,
+  blockedPrefixes: readonly string[],
+): boolean {
+  if (!token.startsWith("--")) return false;
+  const option = token.split("=", 1)[0]?.toLowerCase() ?? "";
+  if (option === flag) return true;
+  return blockedPrefixes.some((prefix) => option.startsWith(prefix));
+}
+
+function getUnsafeGitArgumentReason(
+  tokens: string[],
+  parsed: { subcommand?: string; index: number },
+): string | undefined {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lowerToken = token.toLowerCase();
     if (token === "--no-index" || token.startsWith("--no-index=")) {
       return "Triage bash blocks git --no-index because it can inspect arbitrary filesystem paths outside the checkout.";
     }
@@ -913,8 +996,29 @@ function getUnsafeGitArgumentReason(tokens: string[]): string | undefined {
     if (token === "--textconv" || token.startsWith("--textconv=")) {
       return "Triage bash blocks git --textconv because it can execute external text conversion filters.";
     }
+    if (token === "--filters" || token.startsWith("--filters=")) {
+      return "Triage bash blocks git --filters because it can execute clean/smudge filters from local config.";
+    }
+    if (token === "--show-signature" || lowerToken.startsWith("--show-signat")) {
+      return "Triage bash blocks git signature verification flags because they can execute configured GPG helpers.";
+    }
+    if (token === "--help" || token.startsWith("--help=")) {
+      return "Triage bash blocks git help output because it can execute configured help, man, or browser helpers.";
+    }
+    if (token.includes("%G") || /%\((?:[^)]*signature[^)]*)\)/i.test(token)) {
+      return "Triage bash blocks git signature format atoms because they can execute configured GPG helpers.";
+    }
     if (token === "--output" || token.startsWith("--output=")) {
       return "Triage bash blocks git output-writing flags.";
+    }
+    for (const { flag, blockedPrefixes, reason } of GIT_OPTIONS_REQUIRING_LOCAL_FILE) {
+      if (isBlockedGitLocalFileOption(token, flag, blockedPrefixes)) return reason;
+    }
+    if (index > parsed.index) {
+      for (const option of GIT_SUBCOMMAND_OPTIONS_REQUIRING_LOCAL_FILE[parsed.subcommand ?? ""] ??
+        []) {
+        if (option.matches(token)) return option.reason;
+      }
     }
     const pathReason = getUnsafeGitTokenPathReason(token);
     if (pathReason) return pathReason;
@@ -922,12 +1026,32 @@ function getUnsafeGitArgumentReason(tokens: string[]): string | undefined {
   return undefined;
 }
 
+function buildSafeGitCommand(tokens: string[]): string {
+  const parsed = getGitSubcommand(tokens);
+  const prefix = [
+    "git",
+    "--no-pager",
+    "--no-optional-locks",
+    ...SAFE_GIT_CONFIG_OVERRIDES.flatMap((value) => ["-c", value]),
+  ];
+  const subcommand = parsed.subcommand;
+  if (!subcommand) return prefix.map(shellQuoteToken).join(" ");
+  const args = tokens.slice(parsed.index + 1);
+  const injectedFlags = (GIT_SUBCOMMAND_SAFE_FLAGS[subcommand] ?? []).filter(
+    (flag) => !args.includes(flag),
+  );
+  return [...prefix, subcommand, ...injectedFlags, ...args].map(shellQuoteToken).join(" ");
+}
+
 function getBlockedGitReason(command: string): string | undefined {
   const tokens = tokenizeSegment(command);
   if (getExecutableName(tokens[0] ?? "") !== "git") return undefined;
   const parsed = getGitSubcommand(tokens);
   if (parsed.reason) return parsed.reason;
-  const argumentReason = getUnsafeGitArgumentReason(tokens);
+  if (parsed.subcommand === "help") {
+    return "Triage bash blocks git help because it can execute configured help, man, or browser helpers.";
+  }
+  const argumentReason = getUnsafeGitArgumentReason(tokens, parsed);
   if (argumentReason) return argumentReason;
   if (!parsed.subcommand) return undefined;
   if (parsed.subcommand === "branch") {
@@ -1138,6 +1262,9 @@ function createTriageRuntimeGuardExtension(options: {
         const command = typeof input.command === "string" ? input.command : "";
         const reason = getBlockedBashReason(command);
         if (reason) return { block: true, reason };
+        const tokens = tokenizeSegment(command.trim());
+        if (getExecutableName(tokens[0] ?? "") === "git")
+          input.command = buildSafeGitCommand(tokens);
       }
 
       return undefined;
@@ -1375,10 +1502,8 @@ function parseTriageCommandArgs(args: string): ParsedTriageCommandArgs {
 
   if (normalized === "--help" || normalized === "-h" || normalized === "help")
     return { help: true };
-  if (normalized === "paste" || normalized === "manual")
-    return { mode: "paste", pastePrefill: rest || undefined };
-  if (normalized === "pr" || normalized === "pull" || normalized === "pull-request")
-    return { mode: "pr", target: rest || undefined };
+  if (normalized === "paste") return { mode: "paste", pastePrefill: rest || undefined };
+  if (normalized === "pr") return { mode: "pr", target: rest || undefined };
   if (looksLikePrTarget(trimmed)) return { mode: "pr", target: trimmed };
 
   return { error: `Unknown /triage-comments option: ${first}\n${TRIAGE_COMMAND_USAGE}` };
@@ -2089,14 +2214,6 @@ function applyInlineCommentFilter(
     kept.push(comment);
   }
 
-  const commentsWithFilterMetadata = kept.map((comment) => ({
-    ...comment,
-    metadata: compactRecord({
-      ...comment.metadata,
-      preFilterDisplayNumber: comment.displayNumber,
-    }),
-  }));
-
   const summary: AppliedInlineCommentFilter = {
     filter,
     originalCount: comments.length,
@@ -2107,7 +2224,7 @@ function applyInlineCommentFilter(
     keptInlineWithoutThreadMetadataCount,
   };
 
-  return { comments: assignDisplayNumbers(commentsWithFilterMetadata), summary };
+  return { comments: assignDisplayNumbers(kept), summary };
 }
 
 function parseSelectionList(input: string, max: number): SelectionParseResult {
@@ -2421,7 +2538,9 @@ export const __test__ = {
   createMcpSubagentFactories,
   disposeSubagentSession,
   createTriageRuntimeGuardExtension,
+  applyInlineCommentFilter,
   assertToolPathInsideCwd,
+  buildSafeGitCommand,
   buildCommandPayload,
   buildSystemPrompt,
   buildUserPrompt,
