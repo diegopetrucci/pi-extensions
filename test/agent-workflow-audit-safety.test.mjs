@@ -84,7 +84,7 @@ test("agent-workflow-audit bash guard keeps execution to documented read-only or
     ["git checkout main", /blocks git checkout/],
     ["gh pr review 12", /blocks gh pr review/],
     ["npm publish", /blocks package registry\/account\/config mutation commands/],
-    ['python -c "print(1)"', /blocks (inline Python execution|path-changing flags)/],
+    ['python -c "print(1)"', /blocks path-changing flags/],
     ["cd src", /blocks shell cd/],
     ["cat package.json", /blocks direct cat commands/],
     [
