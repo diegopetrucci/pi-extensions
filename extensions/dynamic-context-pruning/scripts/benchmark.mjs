@@ -1,52 +1,6 @@
 #!/usr/bin/env node
 /**
- * dynamic-context-pruning: offline benchmark harness (pe-e9pv).
- *
- * Standalone, READ-ONLY evidence generator for the v2 go/no-go decision.
- * Replays real (or fixture) pi session JSONL files through the extension's
- * exported strategy/pipeline/cost-model helpers, without ever writing back
- * to a session file or changing any runtime extension behavior.
- *
- * For every point in a session's message sequence where an LLM call would
- * have happened (approximated as "immediately before each assistant
- * message"), this script asks: "what would the strategies propose pruning
- * right now, and what would the cache-aware cost model predict?" It then
- * uses the fact that replay knows the actual future of the session to also
- * report REALIZED net benefit: how many subsequent calls actually happened,
- * and what net benefit the prune would really have produced.
- *
- * Usage:
- *   node extensions/dynamic-context-pruning/scripts/benchmark.mjs [paths...] [options]
- *
- * Options:
- *   --limit N       Only process the first N session files found (default: no limit).
- *   --ratio R       Cached-price ratio(s) to model. Repeatable and/or comma-separated
- *                   (e.g. --ratio 0.1,0.2 or --ratio 0.1 --ratio 0.2). Default: 0.1.
- *   --sweep-max N   Explicit ceiling for the auto-expanding break-even threshold sweep
- *                   (overrides the corpus-derived ceiling). Default: auto-expand from 30.
- *   --json          Emit a full machine-readable JSON dump instead of aligned text.
- *   --simulate-compression       Additionally simulate v2-style RANGE compression (pe-ckbd;
- *                                docs/v2-design.md §1/§4 go/no-go evidence) alongside (never
- *                                mixed into) the deterministic results. See "Compression-
- *                                simulation mode" below for the full model.
- *   --sim-summary-fraction F     Summary size as a fraction of range tokens (repeatable/
- *                                comma-separated, e.g. 0.1,0.15,0.3). Default: 0.15.
- *   --sim-summary-min-tokens N   Floor on summary tokens regardless of fraction. Default: 200.
- *   --sim-summarizer-cost-mult M Relative per-token price of the summarizer call vs the main
- *                                model. Default: 1.0 (same per-token price as the main model;
- *                                a deliberate simplification -- ignores latency/availability).
- *   --sim-min-range-tokens N     Minimum contiguous range size to be considered. Default: 2000.
- *   --help          Print this usage text.
- *
- * With no positional paths, defaults to every *.jsonl file found (recursively)
- * under ~/.pi/agent/sessions. Positional args may be individual .jsonl files
- * or directories (searched recursively for *.jsonl).
- *
- * Requires a Node.js version with native TypeScript type-stripping support
- * for `import()` of .ts files (Node >= 22.6 with --experimental-strip-types,
- * or a newer LTS where this is unflagged/default) — the same mechanism this
- * repo's test suite (test dir, *.test.mjs files) already uses to import
- * extensions' index.ts modules directly without a build step.
+ * Offline benchmark for dynamic-context-pruning. Run with --help for usage.
  */
 
 import * as fs from "node:fs/promises";
@@ -77,7 +31,7 @@ const {
 const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
 const DEFAULT_RATIOS = [0.1];
 
-// Compression-simulation mode defaults (pe-ckbd). See the "Compression-simulation
+// Compression-simulation mode defaults. See the "Compression-simulation
 // mode" section below for the full model these back.
 const DEFAULT_SIM_MIN_RANGE_TOKENS = 2000;
 const DEFAULT_SIM_SUMMARY_FRACTIONS = [0.15];
@@ -85,7 +39,7 @@ const DEFAULT_SIM_SUMMARY_MIN_TOKENS = 200;
 const DEFAULT_SIM_SUMMARIZER_COST_MULT = 1.0;
 // Back-compat starting bound: without --sweep-max and without needing expansion, a
 // corpus that doesn't push the argmax to the boundary reports identical numbers to
-// before this ticket (pe-7oej).
+// before the auto-expanding sweep.
 const THRESHOLD_SWEEP_MAX = 30;
 // Hard runaway guard for auto-expansion when no --sweep-max is given: even a
 // corpus-derived ceiling is clamped to this so a pathological candidate set can't
@@ -107,7 +61,7 @@ function printUsage() {
       "  --sweep-max N Explicit ceiling for the auto-expanding threshold sweep (overrides the",
       "                corpus-derived ceiling). Default: auto-expand from 30 as needed.",
       "  --json        Emit a full machine-readable JSON dump instead of aligned text.",
-      "  --simulate-compression       Additionally simulate v2-style range compression (pe-ckbd);",
+      "  --simulate-compression       Additionally simulate v2-style range compression;",
       "                               see docs/v2-design.md §1/§4. SIMULATED results are reported",
       "                               alongside (never mixed into) the deterministic results.",
       "  --sim-summary-fraction F     Summary size as a fraction of range tokens (repeatable/",
@@ -372,7 +326,7 @@ export function resolveActiveBranch(entries) {
 
 /**
  * Classify the agent state at the call boundary immediately before
- * `assistantIndex` (pe-zy4s: aligned to the SAME runtime-observable
+ * `assistantIndex` (aligned to the SAME runtime-observable
  * definition the live `context` event handler uses -- see
  * `classifyAgentStateFromMessages`'s doc comment in index.ts for the exact
  * semantics). This is a re-export/thin wrapper so the benchmark and the
@@ -421,7 +375,7 @@ export function replaySession(
   messages,
   { ratios = DEFAULT_RATIOS, config: configOverride } = {},
 ) {
-  // `configOverride` (pe-qdzb) lets callers (e.g. tests isolating a specific
+  // `configOverride` lets callers (e.g. tests isolating a specific
   // strategy/gate behavior on a small fixture) replay against a
   // non-default config, most commonly to zero out `thresholds.minCharsSaved`
   // so a tiny fixture's proposal isn't filtered by the real-world default
@@ -509,7 +463,7 @@ export function replaySession(
 }
 
 // ============================================================================
-// Compression-simulation mode (pe-ckbd): v2 go/no-go evidence WITHOUT
+// Compression-simulation mode: v2 go/no-go evidence WITHOUT
 // building v2. Simulates v2-style agentic RANGE compression (docs/v2-design.md
 // §1.1: the `compress` tool's range mode -- one or more contiguous message
 // spans, each replaced by a single summary) during the same replay pass
@@ -602,7 +556,7 @@ export function computeSimulatedRangeExclusions(messages, pairIndex, protections
 
 /**
  * Identify plausible v2-style compression RANGES for one session
- * (deliberately conservative, per pe-ckbd): contiguous spans of complete,
+ * (deliberately conservative): contiguous spans of complete,
  * non-recent, non-protected messages that approximate what v2's `compress`
  * tool (range mode; docs/v2-design.md §1.1) would target.
  *
@@ -697,7 +651,7 @@ export function identifySimulatedRanges(
 
 /**
  * Model the simulated compression outcome + REALIZED net benefit for one
- * identified range, at a given summary-size fraction (pe-ckbd cost model):
+ * identified range, at a given summary-size fraction:
  *
  *   summaryTokens      = max(fraction * rangeTokens, summaryMinTokens)
  *   oneTimeCost        = cacheBustPenalty(earliest range position)
@@ -859,7 +813,7 @@ export function sweepThreshold(candidates, ratio, max = THRESHOLD_SWEEP_MAX) {
 }
 
 /**
- * Derive a sane, corpus-based ceiling for auto-expanding the threshold sweep (pe-7oej).
+ * Derive a sane, corpus-based ceiling for auto-expanding the threshold sweep.
  *
  * Once the tested max T reaches the largest finite breakEvenCalls seen across the
  * candidate set, every larger T accepts exactly the same set of candidates -- the
@@ -884,7 +838,7 @@ export function deriveSweepCeiling(candidates, ratio) {
 }
 
 /**
- * Auto-expanding threshold sweep (pe-7oej): starts at `initialMax` (default 30, the
+ * Auto-expanding threshold sweep: starts at `initialMax` (default 30, the
  * historical hardcoded cap) and, while the recommended T is still pinned to the max
  * tested T, doubles the max tested T and re-sweeps -- until the argmax is strictly
  * interior (recommended < maxTested) or a ceiling is hit.
@@ -894,7 +848,7 @@ export function deriveSweepCeiling(candidates, ratio) {
  * derived from the corpus via deriveSweepCeiling (itself capped at HARD_SWEEP_CEILING).
  *
  * On a corpus that never pins to the boundary, this returns byte-identical numbers to
- * the pre-pe-7oej sweepThreshold(candidates, ratio, 30) call (back-compat).
+ * the fixed sweepThreshold(candidates, ratio, 30) call (back-compat).
  */
 export function sweepThresholdWithAutoExpand(
   candidates,
@@ -1057,7 +1011,7 @@ function renderAggregateSummary(aggregate, ratios) {
 }
 
 /**
- * Render the SIMULATED-vs-deterministic side-by-side comparison (pe-ckbd).
+ * Render the SIMULATED-vs-deterministic side-by-side comparison.
  *
  * NON-OVERLAP SIMPLIFICATION (documented, not modeled): deterministic and
  * SIMULATED populations are computed fully independently. A SIMULATED range
