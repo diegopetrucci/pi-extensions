@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-openai-fast",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Deprecated standalone leftover. Does not change provider requests; use @diegopetrucci/pi-fast.",
   "keywords": [
     "pi-package",
