@@ -206,11 +206,37 @@ function inspectFinalAssistant(messages: unknown[]): AuditAssistantOutcome {
   return { ok: false, reason: "Agent Workflow Audit subagent produced no assistant message" };
 }
 
-function isAbortLikeError(error: unknown): boolean {
-  if (error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError")
-    return true;
-  const message = error instanceof Error ? error.message : String(error);
-  return /aborted|cancelled|canceled/i.test(message);
+function classifyRunFailure(
+  error: unknown,
+  callerAborted: boolean,
+): { status: "aborted" | "error"; message: string; error?: string } {
+  const message = callerAborted
+    ? "Aborted"
+    : error instanceof Error
+      ? error.message
+      : String(error);
+  return {
+    status: callerAborted ? "aborted" : "error",
+    message,
+    error: callerAborted ? undefined : message,
+  };
+}
+
+function createAuditAbortController(abortChild: () => void, onCallerAbort: () => void) {
+  let callerAborted = false;
+  return {
+    get callerAborted() {
+      return callerAborted;
+    },
+    abortForCleanup() {
+      abortChild();
+    },
+    abortFromCaller() {
+      callerAborted = true;
+      onCallerAbort();
+      abortChild();
+    },
+  };
 }
 
 function renderCollapsedReport(report: string, lineLimit = COLLAPSED_REPORT_LINES): string {
@@ -766,9 +792,7 @@ function getBlockedPackageManagerReason(commandName: string, tokens: string[]): 
       index += 1;
     }
   }
-  const runnerIndex = lowerTokens.findIndex((token) =>
-    ["node", "python", "python3", "ruby", "php"].includes(token),
-  );
+  const runnerIndex = lowerTokens.findIndex((token) => ["node", "ruby", "php"].includes(token));
   if (runnerIndex >= 0) {
     const runnerReason = getBlockedInterpreterReason(
       lowerTokens[runnerIndex],
@@ -1050,9 +1074,6 @@ function getBlockedInterpreterReason(commandName: string, tokens: string[]): str
   ) {
     return `Agent Workflow Audit blocks inline/preload ${commandName} execution; run documented project scripts instead.`;
   }
-  if (["python", "python3"].includes(commandName) && hasInlineFlag(lowerTokens, ["-c"])) {
-    return "Agent Workflow Audit blocks inline Python execution; run documented project scripts instead.";
-  }
   if (["ruby", "php"].includes(commandName) && hasInlineFlag(lowerTokens, ["-e", "-r"])) {
     return `Agent Workflow Audit blocks inline/preload ${commandName} execution; run documented project scripts instead.`;
   }
@@ -1304,7 +1325,7 @@ function buildSystemPrompt(options: {
     ? "Plan-only mode is active. Do not run project commands with bash. Read instructions and manifests, infer the likely workflow, and report what would be tried plus remaining uncertainty."
     : "Execution mode is active. Try documented setup, build, lint, test, run, and other obvious project commands when they are safe and relevant. A runtime guard blocks deploy/publish/VCS-mutating/destructive commands; if a command is blocked, report it as a workflow/safety finding instead of trying to bypass it.";
 
-  return `You are Agent Workflow Audit, an isolated subagent running inside The Last Harness. Your job is to stress-test how efficiently an agent can operate in the current repository and return a concise final audit report to the parent session.
+  return `You are Agent Workflow Audit, an isolated subagent. Your job is to stress-test how efficiently an agent can operate in the current repository and return a concise final audit report to the parent session.
 
 Working directory: ${options.cwd}
 Turn budget: ${options.maxTurns} turns total, including your final answer.
@@ -1446,21 +1467,24 @@ async function runAudit(
   let unsubscribe: (() => void) | undefined;
   let runTimeout: NodeJS.Timeout | undefined;
   let abortListenerAdded = false;
-  let aborted = Boolean(ctx.signal?.aborted);
 
   const emit = () => updateAuditUi(ctx, details, lastContent);
-  const abort = () => {
-    aborted = true;
-    details.status = "aborted";
-    details.endedAt = Date.now();
-    lastContent = "Aborted";
-    emit();
-    void session?.abort();
-  };
+  const abortController = createAuditAbortController(
+    () => {
+      void session?.abort();
+    },
+    () => {
+      details.status = "aborted";
+      details.endedAt = Date.now();
+      lastContent = "Aborted";
+      emit();
+    },
+  );
+  const abortFromCaller = () => abortController.abortFromCaller();
 
-  if (ctx.signal?.aborted) abort();
+  if (ctx.signal?.aborted) abortFromCaller();
   if (ctx.signal && !ctx.signal.aborted) {
-    ctx.signal.addEventListener("abort", abort);
+    ctx.signal.addEventListener("abort", abortFromCaller);
     abortListenerAdded = true;
   }
 
@@ -1519,6 +1543,9 @@ async function runAudit(
     await (created.session as any).bindExtensions?.({ mode: "json" });
     unsubscribe = session.subscribe((event) => {
       switch (event.type) {
+        case "message_start":
+          if (event.message.role === "assistant") lastContent = "";
+          break;
         case "message_update":
           if (event.assistantMessageEvent?.type === "text_delta") {
             lastContent += event.assistantMessageEvent.delta ?? "";
@@ -1553,7 +1580,7 @@ async function runAudit(
       }
     });
 
-    if (!aborted) {
+    if (!abortController.callerAborted) {
       const promptPromise = session.prompt(
         buildUserPrompt({
           cwd,
@@ -1565,12 +1592,11 @@ async function runAudit(
       );
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         runTimeout = setTimeout(() => {
-          abort();
-          reject(
-            new Error(
-              `/agent-workflow-audit timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`,
-            ),
+          const timeoutError = new Error(
+            `/agent-workflow-audit timed out after ${Math.round(MAX_RUN_MS / 1000)} seconds.`,
           );
+          reject(timeoutError);
+          abortController.abortForCleanup();
         }, MAX_RUN_MS);
       });
       await Promise.race([promptPromise, timeoutPromise]);
@@ -1585,7 +1611,7 @@ async function runAudit(
     if (outcome.ok) {
       lastContent = outcome.answer;
       details.status = "done";
-    } else if (aborted) {
+    } else if (abortController.callerAborted) {
       lastContent = "Aborted";
       details.status = "aborted";
     } else {
@@ -1596,10 +1622,10 @@ async function runAudit(
     emit();
     return { report: lastContent, details };
   } catch (error) {
-    const wasAbort = aborted || isAbortLikeError(error);
-    const message = wasAbort ? "Aborted" : error instanceof Error ? error.message : String(error);
-    details.status = wasAbort ? "aborted" : "error";
-    details.error = wasAbort ? undefined : message;
+    const failure = classifyRunFailure(error, abortController.callerAborted);
+    const { message } = failure;
+    details.status = failure.status;
+    details.error = failure.error;
     details.endedAt = Date.now();
     lastContent = message;
     details.reportLength = lastContent.length;
@@ -1607,7 +1633,7 @@ async function runAudit(
     return { report: `## Agent Workflow Audit failed\n\n${message}`, details };
   } finally {
     if (runTimeout) clearTimeout(runTimeout);
-    if (ctx.signal && abortListenerAdded) ctx.signal.removeEventListener("abort", abort);
+    if (ctx.signal && abortListenerAdded) ctx.signal.removeEventListener("abort", abortFromCaller);
     unsubscribe?.();
     await disposeSubagentSession(session);
   }
@@ -1619,6 +1645,8 @@ export const __test__ = {
   resolveSubagentProjectTrusted,
   createMcpSubagentFactories,
   disposeSubagentSession,
+  classifyRunFailure,
+  createAuditAbortController,
   createAuditRuntimeGuardExtension,
   appendRunBoundary,
   assertToolPathInsideCwd,
