@@ -8,12 +8,10 @@ import { promisify } from "node:util";
 import { gzipPayloadEqual } from "./gzip-payload.mjs";
 import { discoverPackages, findRoot, isExactNotFound, releaseOrder } from "./release-workspace.mjs";
 
-export { discoverPackages } from "./release-workspace.mjs";
-
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org";
 
-export async function defaultRun(file, args, options = {}) {
+async function defaultRun(file, args, options = {}) {
   try {
     const result = await execFileAsync(file, args, {
       cwd: options.cwd,

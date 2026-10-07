@@ -67,7 +67,7 @@ function expandWorkspacePattern(pattern) {
   return candidates;
 }
 
-export function getWorkspacePackageManifestPaths() {
+function getWorkspacePackageManifestPaths() {
   const rootManifest = readJson(path.join(repoRoot, "package.json"));
   const manifestPaths = new Set();
 
