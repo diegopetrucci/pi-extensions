@@ -1,34 +1,45 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import test from "node:test";
 
 import {
   PROVIDER_POLICY_CONTRACT,
   createModelSelectionContext,
   loadRoleTestUtils,
-} from './support/provider-policy-contract-support.mjs';
+} from "./support/provider-policy-contract-support.mjs";
 
-for (const [role, method] of [['contrarian', 'selectContrarianModel'], ['code-reviewer', 'selectCodeReviewerModel']]) {
+for (const [role, method] of [
+  ["contrarian", "selectContrarianModel"],
+  ["code-reviewer", "selectCodeReviewerModel"],
+]) {
   test(`${role} selects Astra across providers ahead of GPT-5.6`, async () => {
     const utils = await loadRoleTestUtils(role);
-    const result = await utils[method](createModelSelectionContext({
-      model: { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
-      available: [
-        { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true },
-        { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true },
-        { provider: 'openai-codex', id: 'gpt-6-astra', reasoning: true },
-      ],
-    }));
+    const result = await utils[method](
+      createModelSelectionContext({
+        model: { provider: "anthropic", id: "claude-opus-5", reasoning: true },
+        available: [
+          { provider: "openai", id: "gpt-5.6-sol", reasoning: true },
+          { provider: "openai", id: "gpt-6.1-sol", reasoning: true },
+          { provider: "openai-codex", id: "gpt-6-astra", reasoning: true },
+        ],
+      }),
+    );
     assert.equal(result.ok, true);
-    assert.equal(result.selection.modelRef ?? `${result.selection.provider}/${result.selection.id}`, 'openai-codex/gpt-6-astra');
+    assert.equal(
+      result.selection.modelRef ?? `${result.selection.provider}/${result.selection.id}`,
+      "openai-codex/gpt-6-astra",
+    );
   });
 }
 
 for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
   test(`${fixture.role} contract: ${fixture.description}`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
-    const result = await utils[fixture.method](createModelSelectionContext(fixture.ctx), ...(fixture.args ?? []));
+    const result = await utils[fixture.method](
+      createModelSelectionContext(fixture.ctx),
+      ...(fixture.args ?? []),
+    );
 
-    if (fixture.role === 'librarian') {
+    if (fixture.role === "librarian") {
       assert.deepEqual(
         result.map((candidate) => candidate.details.modelRef),
         fixture.expected.orderedModelRefs,
@@ -38,7 +49,9 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
         fixture.expected.thinkingLevels,
       );
       if (fixture.expected.firstCandidateProperties) {
-        for (const [property, expected] of Object.entries(fixture.expected.firstCandidateProperties)) {
+        for (const [property, expected] of Object.entries(
+          fixture.expected.firstCandidateProperties,
+        )) {
           assert.deepEqual(result[0].details[property], expected);
         }
       }
@@ -51,10 +64,13 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
     assert.equal(result.ok, true);
     if (!result.ok) return;
 
-    const selectedModelRef = result.selection.modelRef ?? `${result.selection.provider}/${result.selection.id}`;
+    const selectedModelRef =
+      result.selection.modelRef ?? `${result.selection.provider}/${result.selection.id}`;
     assert.equal(selectedModelRef, fixture.expected.selectionModelRef);
     assert.deepEqual(
-      result.ordered.map((candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`),
+      result.ordered.map(
+        (candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`,
+      ),
       fixture.expected.orderedModelRefs,
     );
     for (const [property, expected] of Object.entries(fixture.expected.selectionProperties ?? {})) {
@@ -69,34 +85,48 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.orderingAndFallbackCases) {
 for (const fixture of PROVIDER_POLICY_CONTRACT.scopedModelSelectionCases) {
   test(`${fixture.role} contract: automatic model candidates honor the current session scope`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
-    const result = await utils[fixture.method](createModelSelectionContext(fixture.ctx), ...(fixture.args ?? []));
-    const actualModelRefs = fixture.role === 'librarian'
-      ? result.map((candidate) => candidate.details.modelRef)
-      : result.ordered.map((candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`);
+    const result = await utils[fixture.method](
+      createModelSelectionContext(fixture.ctx),
+      ...(fixture.args ?? []),
+    );
+    const actualModelRefs =
+      fixture.role === "librarian"
+        ? result.map((candidate) => candidate.details.modelRef)
+        : result.ordered.map(
+            (candidate) => candidate.modelRef ?? `${candidate.provider}/${candidate.id}`,
+          );
 
     assert.deepEqual(actualModelRefs, fixture.expectedModelRefs);
   });
 }
 
-for (const role of ['oracle', 'contrarian', 'code-reviewer']) {
+for (const role of ["oracle", "contrarian", "code-reviewer"]) {
   test(`${role} honors session scope while keeping a GPT-6.1 Sol override explicit where supported`, async () => {
     const utils = await loadRoleTestUtils(role);
-    const newer = { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true };
-    const scoped = { provider: 'openai', id: 'gpt-6-sol', reasoning: true };
+    const newer = { provider: "openai", id: "gpt-6.1-sol", reasoning: true };
+    const scoped = { provider: "openai", id: "gpt-6-sol", reasoning: true };
     const ctx = createModelSelectionContext({
       model: scoped,
       available: [newer, scoped],
       scopedModels: [{ model: scoped }],
     });
-    const method = role === 'oracle' ? 'selectOracleModel' : role === 'contrarian' ? 'selectContrarianModel' : 'selectCodeReviewerModel';
+    const method =
+      role === "oracle"
+        ? "selectOracleModel"
+        : role === "contrarian"
+          ? "selectContrarianModel"
+          : "selectCodeReviewerModel";
     const automatic = await utils[method](ctx);
     assert.equal(automatic.ok, true);
     if (!automatic.ok) return;
-    assert.equal(automatic.selection.modelRef ?? `${automatic.selection.provider}/${automatic.selection.id}`, 'openai/gpt-6-sol');
+    assert.equal(
+      automatic.selection.modelRef ?? `${automatic.selection.provider}/${automatic.selection.id}`,
+      "openai/gpt-6-sol",
+    );
 
-    if (role !== 'code-reviewer') {
-      const explicit = await utils.findAvailableModel(ctx, 'openai/gpt-6.1-sol');
-      assert.equal(`${explicit.provider}/${explicit.id}`, 'openai/gpt-6.1-sol');
+    if (role !== "code-reviewer") {
+      const explicit = await utils.findAvailableModel(ctx, "openai/gpt-6.1-sol");
+      assert.equal(`${explicit.provider}/${explicit.id}`, "openai/gpt-6.1-sol");
     }
   });
 }
@@ -105,13 +135,13 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.emptyScopedModelSelectionCases) {
   test(`${fixture.role} contract: reports when the current session scope has no authenticated models`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
     const ctx = createModelSelectionContext({
-      model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
-      available: [{ provider: 'openai', id: 'gpt-5.5', reasoning: true }],
-      scopedModels: [{ model: { provider: 'custom', id: 'missing', reasoning: true } }],
+      model: { provider: "openai", id: "gpt-5.5", reasoning: true },
+      available: [{ provider: "openai", id: "gpt-5.5", reasoning: true }],
+      scopedModels: [{ model: { provider: "custom", id: "missing", reasoning: true } }],
     });
     const invoke = () => utils[fixture.method](ctx, ...(fixture.args ?? []));
 
-    if (fixture.type === 'throws') {
+    if (fixture.type === "throws") {
       await assert.rejects(invoke, new Error(fixture.expectedMessage));
       return;
     }
@@ -120,25 +150,33 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.emptyScopedModelSelectionCases) {
   });
 }
 
-for (const role of ['oracle', 'contrarian']) {
+for (const role of ["oracle", "contrarian"]) {
   test(`${role} contract: current-session fallback cannot escape a non-empty model scope`, async () => {
     const utils = await loadRoleTestUtils(role);
-    const outOfScope = { provider: 'openai', id: 'gpt-5.5', reasoning: true };
-    const scoped = { provider: 'custom', id: 'small', reasoning: false };
+    const outOfScope = { provider: "openai", id: "gpt-5.5", reasoning: true };
+    const scoped = { provider: "custom", id: "small", reasoning: false };
 
     assert.equal(
       utils.buildSessionFallbackSelection(
-        createModelSelectionContext({ model: outOfScope, available: [outOfScope, scoped], scopedModels: [{ model: scoped }] }),
-        'high',
+        createModelSelectionContext({
+          model: outOfScope,
+          available: [outOfScope, scoped],
+          scopedModels: [{ model: scoped }],
+        }),
+        "high",
       ),
       undefined,
     );
     assert.equal(
       utils.buildSessionFallbackSelection(
-        createModelSelectionContext({ model: scoped, available: [outOfScope, scoped], scopedModels: [{ model: scoped }] }),
-        'high',
+        createModelSelectionContext({
+          model: scoped,
+          available: [outOfScope, scoped],
+          scopedModels: [{ model: scoped }],
+        }),
+        "high",
       ).modelRef,
-      'custom/small',
+      "custom/small",
     );
   });
 }
@@ -157,8 +195,11 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.parseModelPreferenceCases) {
 for (const fixture of PROVIDER_POLICY_CONTRACT.exactProviderQualifiedMatchingCases) {
   test(`${fixture.role} contract: exact provider-qualified model references beat fuzzy substring matches`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
-    const match = await utils.findAvailableModel(createModelSelectionContext(fixture.ctx), fixture.requestedModelRef);
-    assert.ok(match, 'expected a matched model');
+    const match = await utils.findAvailableModel(
+      createModelSelectionContext(fixture.ctx),
+      fixture.requestedModelRef,
+    );
+    assert.ok(match, "expected a matched model");
     assert.equal(`${match.provider}/${match.id}`, fixture.expectedModelRef);
   });
 }
@@ -166,9 +207,10 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.exactProviderQualifiedMatchingCas
 for (const fixture of PROVIDER_POLICY_CONTRACT.noAuthenticatedModelCases) {
   test(`${fixture.role} contract: reports when no authenticated models are available`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
-    const invoke = () => utils[fixture.method](createModelSelectionContext(fixture.ctx), ...(fixture.args ?? []));
+    const invoke = () =>
+      utils[fixture.method](createModelSelectionContext(fixture.ctx), ...(fixture.args ?? []));
 
-    if (fixture.type === 'throws') {
+    if (fixture.type === "throws") {
       await assert.rejects(invoke, new Error(fixture.expectedMessage));
       return;
     }
@@ -181,7 +223,10 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.thinkingLevelCases) {
   test(`${fixture.role} contract: ${fixture.description}`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
     for (const assertion of fixture.assertions) {
-      assert.deepEqual(utils[assertion.method ?? fixture.method](...assertion.args), assertion.expected);
+      assert.deepEqual(
+        utils[assertion.method ?? fixture.method](...assertion.args),
+        assertion.expected,
+      );
     }
   });
 }
@@ -190,7 +235,11 @@ for (const fixture of PROVIDER_POLICY_CONTRACT.availabilityErrorCases) {
   test(`${fixture.role} contract: model availability detection stays distinct from transient failures`, async () => {
     const utils = await loadRoleTestUtils(fixture.role);
     for (const entry of fixture.messages) {
-      assert.equal(utils[fixture.method](entry.message), entry.expected, `${fixture.role} misclassified ${entry.message ?? 'undefined'}`);
+      assert.equal(
+        utils[fixture.method](entry.message),
+        entry.expected,
+        `${fixture.role} misclassified ${entry.message ?? "undefined"}`,
+      );
     }
   });
 }

@@ -2,1208 +2,1362 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 
 const IMAGE_TOKEN_ESTIMATE = 1200;
 const DETAIL_TEXT_LIMIT = 16_000;
 const PREVIEW_TEXT_LIMIT = 700;
-const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
+const COMPACTION_SUMMARY_PREFIX =
+  "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
 const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
-const BRANCH_SUMMARY_PREFIX = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
+const BRANCH_SUMMARY_PREFIX =
+  "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
 const BRANCH_SUMMARY_SUFFIX = "</summary>";
 
 const CATEGORY_META = {
-	system: {
-		label: "System prompt",
-		shortLabel: "System",
-		color: "#8b5cf6",
-		description: "Current system prompt, project instructions, loaded guidance, and extension-added prompt text.",
-	},
-	toolSchemas: {
-		label: "Tool schemas",
-		shortLabel: "Tools",
-		color: "#06b6d4",
-		description: "Active tool definitions, descriptions, and JSON schemas sent to the provider.",
-	},
-	user: {
-		label: "User messages",
-		shortLabel: "User",
-		color: "#22c55e",
-		description: "Your prompts and user-role text that stays in the active conversation.",
-	},
-	assistant: {
-		label: "Assistant responses",
-		shortLabel: "Assistant",
-		color: "#60a5fa",
-		description: "Visible assistant text responses kept in context.",
-	},
-	thinking: {
-		label: "Assistant thinking",
-		shortLabel: "Thinking",
-		color: "#f97316",
-		description: "Reasoning/thinking blocks returned by reasoning models when present in the session.",
-	},
-	toolCalls: {
-		label: "Tool calls",
-		shortLabel: "Calls",
-		color: "#facc15",
-		description: "Assistant tool-call arguments, including paths, commands, and edit payloads.",
-	},
-	toolResults: {
-		label: "Tool results",
-		shortLabel: "Results",
-		color: "#ef4444",
-		description: "Tool output returned to the model, usually the largest contributor in coding sessions.",
-	},
-	bash: {
-		label: "User bash",
-		shortLabel: "Bash",
-		color: "#a3e635",
-		description: "User-run ! bash commands and their outputs when included in model context.",
-	},
-	summaries: {
-		label: "Summaries",
-		shortLabel: "Summaries",
-		color: "#ec4899",
-		description: "Compaction and branch summaries replacing earlier history.",
-	},
-	custom: {
-		label: "Custom context",
-		shortLabel: "Custom",
-		color: "#14b8a6",
-		description: "Extension-injected custom messages that participate in context.",
-	},
-	images: {
-		label: "Images",
-		shortLabel: "Images",
-		color: "#f59e0b",
-		description: "Image blocks, estimated conservatively because providers tokenize images differently.",
-	},
-	providerDelta: {
-		label: "Provider / serialization delta",
-		shortLabel: "Delta",
-		color: "#64748b",
-		description: "Unattributed difference between local estimates and pi's footer-compatible provider total.",
-	},
+  system: {
+    label: "System prompt",
+    shortLabel: "System",
+    color: "#8b5cf6",
+    description:
+      "Current system prompt, project instructions, loaded guidance, and extension-added prompt text.",
+  },
+  toolSchemas: {
+    label: "Tool schemas",
+    shortLabel: "Tools",
+    color: "#06b6d4",
+    description: "Active tool definitions, descriptions, and JSON schemas sent to the provider.",
+  },
+  user: {
+    label: "User messages",
+    shortLabel: "User",
+    color: "#22c55e",
+    description: "Your prompts and user-role text that stays in the active conversation.",
+  },
+  assistant: {
+    label: "Assistant responses",
+    shortLabel: "Assistant",
+    color: "#60a5fa",
+    description: "Visible assistant text responses kept in context.",
+  },
+  thinking: {
+    label: "Assistant thinking",
+    shortLabel: "Thinking",
+    color: "#f97316",
+    description:
+      "Reasoning/thinking blocks returned by reasoning models when present in the session.",
+  },
+  toolCalls: {
+    label: "Tool calls",
+    shortLabel: "Calls",
+    color: "#facc15",
+    description: "Assistant tool-call arguments, including paths, commands, and edit payloads.",
+  },
+  toolResults: {
+    label: "Tool results",
+    shortLabel: "Results",
+    color: "#ef4444",
+    description:
+      "Tool output returned to the model, usually the largest contributor in coding sessions.",
+  },
+  bash: {
+    label: "User bash",
+    shortLabel: "Bash",
+    color: "#a3e635",
+    description: "User-run ! bash commands and their outputs when included in model context.",
+  },
+  summaries: {
+    label: "Summaries",
+    shortLabel: "Summaries",
+    color: "#ec4899",
+    description: "Compaction and branch summaries replacing earlier history.",
+  },
+  custom: {
+    label: "Custom context",
+    shortLabel: "Custom",
+    color: "#14b8a6",
+    description: "Extension-injected custom messages that participate in context.",
+  },
+  images: {
+    label: "Images",
+    shortLabel: "Images",
+    color: "#f59e0b",
+    description:
+      "Image blocks, estimated conservatively because providers tokenize images differently.",
+  },
+  providerDelta: {
+    label: "Provider / serialization delta",
+    shortLabel: "Delta",
+    color: "#64748b",
+    description:
+      "Unattributed difference between local estimates and pi's footer-compatible provider total.",
+  },
 } as const;
 
 type CategoryId = keyof typeof CATEGORY_META;
 
 type CommandOptions = {
-	open: boolean;
-	keep: boolean;
-	redact: boolean;
-	defaultDataset: DatasetId;
-	help: boolean;
+  open: boolean;
+  keep: boolean;
+  redact: boolean;
+  defaultDataset: DatasetId;
+  help: boolean;
 };
 
 type DatasetId = "current" | "full";
 
 type MinimalContentBlock = {
-	type?: string;
-	text?: string;
-	thinking?: string;
-	name?: string;
-	id?: string;
-	arguments?: Record<string, unknown>;
-	data?: string;
-	mimeType?: string;
-	source?: {
-		type?: string;
-		mediaType?: string;
-		data?: string;
-	};
+  type?: string;
+  text?: string;
+  thinking?: string;
+  name?: string;
+  id?: string;
+  arguments?: Record<string, unknown>;
+  data?: string;
+  mimeType?: string;
+  source?: {
+    type?: string;
+    mediaType?: string;
+    data?: string;
+  };
 };
 
 type MinimalMessage = {
-	role?: string;
-	content?: unknown;
-	timestamp?: number;
-	provider?: string;
-	model?: string;
-	api?: string;
-	stopReason?: string;
-	usage?: unknown;
-	toolCallId?: string;
-	toolName?: string;
-	details?: unknown;
-	/** Pi keeps nested tool calls here as bounded metadata; they are not transcript content. */
-	nestedCalls?: unknown;
-	customType?: string;
-	display?: boolean;
-	summary?: string;
-	fromId?: string;
-	tokensBefore?: number;
-	command?: string;
-	output?: string;
-	exitCode?: number;
-	cancelled?: boolean;
-	truncated?: boolean;
-	fullOutputPath?: string;
-	excludeFromContext?: boolean;
+  role?: string;
+  content?: unknown;
+  timestamp?: number;
+  provider?: string;
+  model?: string;
+  api?: string;
+  stopReason?: string;
+  usage?: unknown;
+  toolCallId?: string;
+  toolName?: string;
+  details?: unknown;
+  /** Pi keeps nested tool calls here as bounded metadata; they are not transcript content. */
+  nestedCalls?: unknown;
+  customType?: string;
+  display?: boolean;
+  summary?: string;
+  fromId?: string;
+  tokensBefore?: number;
+  command?: string;
+  output?: string;
+  exitCode?: number;
+  cancelled?: boolean;
+  truncated?: boolean;
+  fullOutputPath?: string;
+  excludeFromContext?: boolean;
 };
 
 type MinimalEntry = {
-	type?: string;
-	id?: string;
-	parentId?: string | null;
-	timestamp?: string;
-	message?: MinimalMessage;
-	customType?: string;
-	content?: unknown;
-	display?: boolean;
-	details?: unknown;
-	summary?: string;
-	fromId?: string;
-	tokensBefore?: number;
-	firstKeptEntryId?: string;
+  type?: string;
+  id?: string;
+  parentId?: string | null;
+  timestamp?: string;
+  message?: MinimalMessage;
+  customType?: string;
+  content?: unknown;
+  display?: boolean;
+  details?: unknown;
+  summary?: string;
+  fromId?: string;
+  tokensBefore?: number;
+  firstKeptEntryId?: string;
 };
 
 type MinimalProjectionEntry = {
-	sourceEntry: MinimalEntry;
-	messages: MinimalMessage[];
+  sourceEntry: MinimalEntry;
+  messages: MinimalMessage[];
 };
 
 type MinimalSessionProjection = {
-	entries: MinimalProjectionEntry[];
-	messages?: MinimalMessage[];
+  entries: MinimalProjectionEntry[];
+  messages?: MinimalMessage[];
 };
 
 type AnalysisResult = {
-	segments: Segment[];
-	messageCount: number;
+  segments: Segment[];
+  messageCount: number;
 };
 
 type Segment = {
-	id: string;
-	category: CategoryId;
-	label: string;
-	source: string;
-	role: string;
-	tokens: number;
-	chars: number;
-	turn: number;
-	sequence: number;
-	entryId?: string;
-	timestamp?: string;
-	toolName?: string;
-	toolCallId?: string;
-	path?: string;
-	command?: string;
-	excluded?: boolean;
-	displayOnly?: boolean;
-	preview: string;
-	detail: string;
-	note?: string;
+  id: string;
+  category: CategoryId;
+  label: string;
+  source: string;
+  role: string;
+  tokens: number;
+  chars: number;
+  turn: number;
+  sequence: number;
+  entryId?: string;
+  timestamp?: string;
+  toolName?: string;
+  toolCallId?: string;
+  path?: string;
+  command?: string;
+  excluded?: boolean;
+  displayOnly?: boolean;
+  preview: string;
+  detail: string;
+  note?: string;
 };
 
 type CategoryStat = {
-	id: CategoryId;
-	label: string;
-	shortLabel: string;
-	color: string;
-	description: string;
-	tokens: number;
-	displayTokens: number;
-	percent: number;
-	segments: number;
+  id: CategoryId;
+  label: string;
+  shortLabel: string;
+  color: string;
+  description: string;
+  tokens: number;
+  displayTokens: number;
+  percent: number;
+  segments: number;
 };
 
 type AggregateStat = {
-	key: string;
-	label: string;
-	tokens: number;
-	segments: number;
-	percent: number;
+  key: string;
+  label: string;
+  tokens: number;
+  segments: number;
+  percent: number;
 };
 
 type DatasetStats = {
-	tokens: number;
-	rawTokens: number;
-	visibleRawTokens: number;
-	excludedTokens: number;
-	providerDeltaTokens: number;
-	estimatorOverageTokens: number;
-	reconciliationScale: number;
-	segmentCount: number;
-	messageCount: number;
-	categories: CategoryStat[];
-	topSegments: Segment[];
-	topTools: AggregateStat[];
-	topPaths: AggregateStat[];
-	topTurns: AggregateStat[];
+  tokens: number;
+  rawTokens: number;
+  visibleRawTokens: number;
+  excludedTokens: number;
+  providerDeltaTokens: number;
+  estimatorOverageTokens: number;
+  reconciliationScale: number;
+  segmentCount: number;
+  messageCount: number;
+  categories: CategoryStat[];
+  topSegments: Segment[];
+  topTools: AggregateStat[];
+  topPaths: AggregateStat[];
+  topTurns: AggregateStat[];
 };
 
 type Dataset = {
-	id: DatasetId;
-	label: string;
-	description: string;
-	segments: Segment[];
-	stats: DatasetStats;
+  id: DatasetId;
+  label: string;
+  description: string;
+  segments: Segment[];
+  stats: DatasetStats;
 };
 
 type RoutedModel = {
-	provider: string;
-	id: string;
+  provider: string;
+  id: string;
 };
 
 type ReportData = {
-	generatedAt: string;
-	cwd: string;
-	session: {
-		id?: string;
-		name?: string;
-		file?: string;
-	};
-	model: {
-		provider?: string;
-		id?: string;
-		contextWindow?: number;
-		thinkingLevel?: string;
-		virtual?: boolean;
-		routed?: RoutedModel;
-	};
-	contextUsage: {
-		tokens: number | null;
-		contextWindow: number | null;
-		percent: number | null;
-	};
-	options: {
-		redacted: boolean;
-		defaultDataset: DatasetId;
-	};
-	categoryMeta: typeof CATEGORY_META;
-	datasets: Record<DatasetId, Dataset>;
-	notes: string[];
+  generatedAt: string;
+  cwd: string;
+  session: {
+    id?: string;
+    name?: string;
+    file?: string;
+  };
+  model: {
+    provider?: string;
+    id?: string;
+    contextWindow?: number;
+    thinkingLevel?: string;
+    virtual?: boolean;
+    routed?: RoutedModel;
+  };
+  contextUsage: {
+    tokens: number | null;
+    contextWindow: number | null;
+    percent: number | null;
+  };
+  options: {
+    redacted: boolean;
+    defaultDataset: DatasetId;
+  };
+  categoryMeta: typeof CATEGORY_META;
+  datasets: Record<DatasetId, Dataset>;
+  notes: string[];
 };
 
 type AnalyzerState = {
-	segments: Segment[];
-	sequence: number;
-	turn: number;
-	redact: boolean;
+  segments: Segment[];
+  sequence: number;
+  turn: number;
+  redact: boolean;
 };
 
 function parseArgs(args: string): CommandOptions {
-	const options: CommandOptions = {
-		open: true,
-		keep: false,
-		redact: false,
-		defaultDataset: "current",
-		help: false,
-	};
+  const options: CommandOptions = {
+    open: true,
+    keep: false,
+    redact: false,
+    defaultDataset: "current",
+    help: false,
+  };
 
-	for (const token of args.split(/\s+/).map((part) => part.trim()).filter(Boolean)) {
-		switch (token) {
-			case "--no-open":
-			case "--no-browser":
-				options.open = false;
-				break;
-			case "--keep":
-				options.keep = true;
-				break;
-			case "--redact":
-				options.redact = true;
-				break;
-			case "--full":
-				options.defaultDataset = "full";
-				break;
-			case "--current":
-				options.defaultDataset = "current";
-				break;
-			case "--help":
-			case "-h":
-				helpOption(options);
-				break;
-		}
-	}
+  for (const token of args
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)) {
+    switch (token) {
+      case "--no-open":
+      case "--no-browser":
+        options.open = false;
+        break;
+      case "--keep":
+        options.keep = true;
+        break;
+      case "--redact":
+        options.redact = true;
+        break;
+      case "--full":
+        options.defaultDataset = "full";
+        break;
+      case "--current":
+        options.defaultDataset = "current";
+        break;
+      case "--help":
+      case "-h":
+        helpOption(options);
+        break;
+    }
+  }
 
-	return options;
+  return options;
 }
 
 function helpOption(options: CommandOptions): void {
-	options.help = true;
+  options.help = true;
 }
 
 function usageText(): string {
-	return [
-		"Usage: /context [--no-open] [--keep] [--redact] [--full]",
-		"",
-		"Opens a local HTML report showing where the current session context is going.",
-		"",
-		"Options:",
-		"  --no-open   Write the report but do not open a browser.",
-		"  --keep      Save under " + CONFIG_DIR_NAME + "/context-reports/ instead of the OS temp directory.",
-		"  --redact    Hide message/tool contents while keeping token attribution.",
-		"  --full      Open the report on the full active branch tab instead of current context.",
-	].join("\n");
+  return [
+    "Usage: /context [--no-open] [--keep] [--redact] [--full]",
+    "",
+    "Opens a local HTML report showing where the current session context is going.",
+    "",
+    "Options:",
+    "  --no-open   Write the report but do not open a browser.",
+    "  --keep      Save under " +
+      CONFIG_DIR_NAME +
+      "/context-reports/ instead of the OS temp directory.",
+    "  --redact    Hide message/tool contents while keeping token attribution.",
+    "  --full      Open the report on the full active branch tab instead of current context.",
+  ].join("\n");
 }
 
 function formatTokens(tokens: number | null | undefined): string {
-	if (tokens == null || !Number.isFinite(tokens)) return "?";
-	const rounded = Math.round(tokens);
-	if (Math.abs(rounded) < 1000) return rounded.toLocaleString();
-	if (Math.abs(rounded) < 10_000) return `${(rounded / 1000).toFixed(1)}k`;
-	if (Math.abs(rounded) < 1_000_000) return `${Math.round(rounded / 1000).toLocaleString()}k`;
-	return `${(rounded / 1_000_000).toFixed(1)}M`;
+  if (tokens == null || !Number.isFinite(tokens)) return "?";
+  const rounded = Math.round(tokens);
+  if (Math.abs(rounded) < 1000) return rounded.toLocaleString();
+  if (Math.abs(rounded) < 10_000) return `${(rounded / 1000).toFixed(1)}k`;
+  if (Math.abs(rounded) < 1_000_000) return `${Math.round(rounded / 1000).toLocaleString()}k`;
+  return `${(rounded / 1_000_000).toFixed(1)}M`;
 }
 
 function estimateTextTokens(text: string): number {
-	if (!text) return 0;
-	return Math.max(1, Math.ceil(text.length / 4));
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 function makeDetail(text: string, redact: boolean): string {
-	if (redact) return text ? `[redacted ${text.length.toLocaleString()} characters]` : "";
-	if (text.length <= DETAIL_TEXT_LIMIT) return text;
-	return `${text.slice(0, DETAIL_TEXT_LIMIT)}\n\n[… ${(
-		text.length - DETAIL_TEXT_LIMIT
-	).toLocaleString()} more characters omitted from the report]`;
+  if (redact) return text ? `[redacted ${text.length.toLocaleString()} characters]` : "";
+  if (text.length <= DETAIL_TEXT_LIMIT) return text;
+  return `${text.slice(0, DETAIL_TEXT_LIMIT)}\n\n[… ${(
+    text.length - DETAIL_TEXT_LIMIT
+  ).toLocaleString()} more characters omitted from the report]`;
 }
 
 function makePreview(text: string, redact: boolean): string {
-	if (redact) return text ? `[redacted ${text.length.toLocaleString()} chars]` : "";
-	const compact = text.replace(/\s+/g, " ").trim();
-	if (compact.length <= PREVIEW_TEXT_LIMIT) return compact;
-	return `${compact.slice(0, PREVIEW_TEXT_LIMIT)}…`;
+  if (redact) return text ? `[redacted ${text.length.toLocaleString()} chars]` : "";
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= PREVIEW_TEXT_LIMIT) return compact;
+  return `${compact.slice(0, PREVIEW_TEXT_LIMIT)}…`;
 }
 
 function safeJson(value: unknown): string {
-	try {
-		return JSON.stringify(value, null, 2) ?? "";
-	} catch {
-		return String(value);
-	}
+  try {
+    return JSON.stringify(value, null, 2) ?? "";
+  } catch {
+    return String(value);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null;
 }
 
 function isKnownPositiveNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function isKnownNonNegativeNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function isVirtualModel(model: unknown): boolean {
-	return isRecord(model) && model.api === "pi-virtual";
+  return isRecord(model) && model.api === "pi-virtual";
 }
 
 function getContentBlocks(content: unknown): MinimalContentBlock[] {
-	if (typeof content === "string") return [{ type: "text", text: content }];
-	if (!Array.isArray(content)) return [];
-	return content.filter(isRecord) as MinimalContentBlock[];
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (!Array.isArray(content)) return [];
+  return content.filter(isRecord) as MinimalContentBlock[];
 }
 
 function contentText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	const parts: string[] = [];
-	for (const block of content) {
-		if (!isRecord(block)) continue;
-		if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-	}
-	return parts.join("\n");
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!isRecord(block)) continue;
+    if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
+  }
+  return parts.join("\n");
 }
 
 function isoTimestamp(message: MinimalMessage, entry?: MinimalEntry): string | undefined {
-	if (typeof message.timestamp === "number" && Number.isFinite(message.timestamp)) {
-		return new Date(message.timestamp).toISOString();
-	}
-	return entry?.timestamp;
+  if (typeof message.timestamp === "number" && Number.isFinite(message.timestamp)) {
+    return new Date(message.timestamp).toISOString();
+  }
+  return entry?.timestamp;
 }
 
 function extractLikelyPath(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	for (const key of ["path", "file", "filePath", "target", "cwd", "glob"] as const) {
-		const value = args[key];
-		if (typeof value === "string" && value.trim()) return value;
-	}
-	return undefined;
+  if (!args) return undefined;
+  for (const key of ["path", "file", "filePath", "target", "cwd", "glob"] as const) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
 }
 
 function extractLikelyCommand(args: Record<string, unknown> | undefined): string | undefined {
-	const value = args?.command;
-	return typeof value === "string" && value.trim() ? value : undefined;
+  const value = args?.command;
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function addSegment(
-	state: AnalyzerState,
-	segment: Omit<Segment, "id" | "sequence" | "preview" | "detail"> & { text: string },
+  state: AnalyzerState,
+  segment: Omit<Segment, "id" | "sequence" | "preview" | "detail"> & { text: string },
 ): void {
-	const sequence = state.sequence++;
-	const detail = makeDetail(segment.text, state.redact);
-	const preview = makePreview(segment.text, state.redact);
-	const { text: _text, ...rest } = segment;
-	const safeRest = state.redact ? redactSegmentMetadata(rest) : rest;
-	state.segments.push({
-		...safeRest,
-		id: `seg-${sequence}`,
-		sequence,
-		preview,
-		detail,
-	});
+  const sequence = state.sequence++;
+  const detail = makeDetail(segment.text, state.redact);
+  const preview = makePreview(segment.text, state.redact);
+  const { text: _text, ...rest } = segment;
+  const safeRest = state.redact ? redactSegmentMetadata(rest) : rest;
+  state.segments.push({
+    ...safeRest,
+    id: `seg-${sequence}`,
+    sequence,
+    preview,
+    detail,
+  });
 }
 
-function redactSegmentMetadata<T extends Omit<Segment, "id" | "sequence" | "preview" | "detail">>(segment: T): T {
-	return {
-		...segment,
-		entryId: segment.entryId ? "[redacted entry]" : undefined,
-		timestamp: segment.timestamp ? "[redacted timestamp]" : undefined,
-		toolCallId: segment.toolCallId ? "[redacted tool call]" : undefined,
-		path: segment.path ? "[redacted path]" : undefined,
-		command: segment.command ? "[redacted command]" : undefined,
-		note: segment.note ? "[redacted note]" : undefined,
-	} as T;
+function redactSegmentMetadata<T extends Omit<Segment, "id" | "sequence" | "preview" | "detail">>(
+  segment: T,
+): T {
+  return {
+    ...segment,
+    entryId: segment.entryId ? "[redacted entry]" : undefined,
+    timestamp: segment.timestamp ? "[redacted timestamp]" : undefined,
+    toolCallId: segment.toolCallId ? "[redacted tool call]" : undefined,
+    path: segment.path ? "[redacted path]" : undefined,
+    command: segment.command ? "[redacted command]" : undefined,
+    note: segment.note ? "[redacted note]" : undefined,
+  } as T;
 }
 
 function addTextSegment(
-	state: AnalyzerState,
-	category: CategoryId,
-	label: string,
-	text: string,
-	base: {
-		source: string;
-		role: string;
-		entryId?: string;
-		timestamp?: string;
-		toolName?: string;
-		toolCallId?: string;
-		path?: string;
-		command?: string;
-		excluded?: boolean;
-		displayOnly?: boolean;
-		note?: string;
-		turn?: number;
-	},
+  state: AnalyzerState,
+  category: CategoryId,
+  label: string,
+  text: string,
+  base: {
+    source: string;
+    role: string;
+    entryId?: string;
+    timestamp?: string;
+    toolName?: string;
+    toolCallId?: string;
+    path?: string;
+    command?: string;
+    excluded?: boolean;
+    displayOnly?: boolean;
+    note?: string;
+    turn?: number;
+  },
 ): void {
-	const chars = text.length;
-	const tokens = estimateTextTokens(text);
-	if (tokens <= 0 && chars <= 0) return;
-	addSegment(state, {
-		category,
-		label,
-		source: base.source,
-		role: base.role,
-		tokens,
-		chars,
-		turn: base.turn ?? state.turn,
-		entryId: base.entryId,
-		timestamp: base.timestamp,
-		toolName: base.toolName,
-		toolCallId: base.toolCallId,
-		path: base.path,
-		command: base.command,
-		excluded: base.excluded,
-		displayOnly: base.displayOnly,
-		note: base.note,
-		text,
-	});
+  const chars = text.length;
+  const tokens = estimateTextTokens(text);
+  if (tokens <= 0 && chars <= 0) return;
+  addSegment(state, {
+    category,
+    label,
+    source: base.source,
+    role: base.role,
+    tokens,
+    chars,
+    turn: base.turn ?? state.turn,
+    entryId: base.entryId,
+    timestamp: base.timestamp,
+    toolName: base.toolName,
+    toolCallId: base.toolCallId,
+    path: base.path,
+    command: base.command,
+    excluded: base.excluded,
+    displayOnly: base.displayOnly,
+    note: base.note,
+    text,
+  });
 }
 
 function addImageSegment(
-	state: AnalyzerState,
-	label: string,
-	base: {
-		source: string;
-		role: string;
-		entryId?: string;
-		timestamp?: string;
-		toolName?: string;
-		toolCallId?: string;
-		excluded?: boolean;
-		turn?: number;
-		mimeType?: string;
-	},
+  state: AnalyzerState,
+  label: string,
+  base: {
+    source: string;
+    role: string;
+    entryId?: string;
+    timestamp?: string;
+    toolName?: string;
+    toolCallId?: string;
+    excluded?: boolean;
+    turn?: number;
+    mimeType?: string;
+  },
 ): void {
-	addSegment(state, {
-		category: "images",
-		label,
-		source: base.source,
-		role: base.role,
-		tokens: IMAGE_TOKEN_ESTIMATE,
-		chars: IMAGE_TOKEN_ESTIMATE * 4,
-		turn: base.turn ?? state.turn,
-		entryId: base.entryId,
-		timestamp: base.timestamp,
-		toolName: base.toolName,
-		toolCallId: base.toolCallId,
-		excluded: base.excluded,
-		note: base.mimeType ? `Image block (${base.mimeType}); token count is a conservative estimate.` : "Image block; token count is a conservative estimate.",
-		text: base.mimeType ? `[image: ${base.mimeType}]` : "[image]",
-	});
+  addSegment(state, {
+    category: "images",
+    label,
+    source: base.source,
+    role: base.role,
+    tokens: IMAGE_TOKEN_ESTIMATE,
+    chars: IMAGE_TOKEN_ESTIMATE * 4,
+    turn: base.turn ?? state.turn,
+    entryId: base.entryId,
+    timestamp: base.timestamp,
+    toolName: base.toolName,
+    toolCallId: base.toolCallId,
+    excluded: base.excluded,
+    note: base.mimeType
+      ? `Image block (${base.mimeType}); token count is a conservative estimate.`
+      : "Image block; token count is a conservative estimate.",
+    text: base.mimeType ? `[image: ${base.mimeType}]` : "[image]",
+  });
 }
 
-function analyzeUserContent(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	state.turn++;
-	const timestamp = isoTimestamp(message, entry);
-	const entryId = entry?.id;
-	const blocks = getContentBlocks(message.content);
-	for (const block of blocks) {
-		if (block.type === "text" && typeof block.text === "string") {
-			addTextSegment(state, "user", "User message", block.text, {
-				source: "message",
-				role: "user",
-				entryId,
-				timestamp,
-			});
-		} else if (block.type === "image") {
-			addImageSegment(state, "User image", {
-				source: "message",
-				role: "user",
-				entryId,
-				timestamp,
-				mimeType: block.mimeType ?? block.source?.mediaType,
-			});
-		}
-	}
+function analyzeUserContent(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  state.turn++;
+  const timestamp = isoTimestamp(message, entry);
+  const entryId = entry?.id;
+  const blocks = getContentBlocks(message.content);
+  for (const block of blocks) {
+    if (block.type === "text" && typeof block.text === "string") {
+      addTextSegment(state, "user", "User message", block.text, {
+        source: "message",
+        role: "user",
+        entryId,
+        timestamp,
+      });
+    } else if (block.type === "image") {
+      addImageSegment(state, "User image", {
+        source: "message",
+        role: "user",
+        entryId,
+        timestamp,
+        mimeType: block.mimeType ?? block.source?.mediaType,
+      });
+    }
+  }
 }
 
-function analyzeAssistantContent(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	const timestamp = isoTimestamp(message, entry);
-	const entryId = entry?.id;
-	const blocks = getContentBlocks(message.content);
-	for (const block of blocks) {
-		if (block.type === "text" && typeof block.text === "string") {
-			addTextSegment(state, "assistant", "Assistant response", block.text, {
-				source: "message",
-				role: "assistant",
-				entryId,
-				timestamp,
-			});
-		} else if (block.type === "thinking" && typeof block.thinking === "string") {
-			addTextSegment(state, "thinking", "Assistant thinking", block.thinking, {
-				source: "message",
-				role: "assistant",
-				entryId,
-				timestamp,
-			});
-		} else if (block.type === "toolCall" && typeof block.name === "string") {
-			const args = isRecord(block.arguments) ? block.arguments : {};
-			const toolCallText = `${block.name}(${safeJson(args)})`;
-			addTextSegment(state, "toolCalls", `Tool call: ${block.name}`, toolCallText, {
-				source: "tool-call",
-				role: "assistant",
-				entryId,
-				timestamp,
-				toolName: block.name,
-				toolCallId: block.id,
-				path: extractLikelyPath(args),
-				command: extractLikelyCommand(args),
-			});
-		}
-	}
+function analyzeAssistantContent(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  const timestamp = isoTimestamp(message, entry);
+  const entryId = entry?.id;
+  const blocks = getContentBlocks(message.content);
+  for (const block of blocks) {
+    if (block.type === "text" && typeof block.text === "string") {
+      addTextSegment(state, "assistant", "Assistant response", block.text, {
+        source: "message",
+        role: "assistant",
+        entryId,
+        timestamp,
+      });
+    } else if (block.type === "thinking" && typeof block.thinking === "string") {
+      addTextSegment(state, "thinking", "Assistant thinking", block.thinking, {
+        source: "message",
+        role: "assistant",
+        entryId,
+        timestamp,
+      });
+    } else if (block.type === "toolCall" && typeof block.name === "string") {
+      const args = isRecord(block.arguments) ? block.arguments : {};
+      const toolCallText = `${block.name}(${safeJson(args)})`;
+      addTextSegment(state, "toolCalls", `Tool call: ${block.name}`, toolCallText, {
+        source: "tool-call",
+        role: "assistant",
+        entryId,
+        timestamp,
+        toolName: block.name,
+        toolCallId: block.id,
+        path: extractLikelyPath(args),
+        command: extractLikelyCommand(args),
+      });
+    }
+  }
 }
 
 function nestedCallsNote(message: MinimalMessage): string | undefined {
-	const nested = message.nestedCalls;
-	if (!isRecord(nested) || !Array.isArray(nested.calls)) return undefined;
-	const count = nested.calls.length;
-	if (nested.complete === false) {
-		return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"} incompletely; nested results are not transcript context and are excluded from attribution.`;
-	}
-	return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"}; nested results are not transcript context and are excluded from attribution.`;
+  const nested = message.nestedCalls;
+  if (!isRecord(nested) || !Array.isArray(nested.calls)) return undefined;
+  const count = nested.calls.length;
+  if (nested.complete === false) {
+    return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"} incompletely; nested results are not transcript context and are excluded from attribution.`;
+  }
+  return `Pi recorded ${count} bounded nested tool call${count === 1 ? "" : "s"}; nested results are not transcript context and are excluded from attribution.`;
 }
 
-function analyzeToolResult(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	const timestamp = isoTimestamp(message, entry);
-	const entryId = entry?.id;
-	const toolName = message.toolName ?? "tool";
-	const blocks = getContentBlocks(message.content);
-	const nestedNote = nestedCallsNote(message);
-	for (const block of blocks) {
-		if (block.type === "text" && typeof block.text === "string") {
-			const noteParts: string[] = [];
-			if (message.details && isRecord(message.details)) {
-				if (isRecord(message.details.truncation) && message.details.truncation.truncated) noteParts.push("Result was truncated before entering context.");
-				if (typeof message.details.fullOutputPath === "string") noteParts.push(`Full output: ${message.details.fullOutputPath}`);
-			}
-			if (nestedNote) noteParts.push(nestedNote);
-			addTextSegment(state, "toolResults", `Tool result: ${toolName}`, block.text, {
-				source: "tool-result",
-				role: "toolResult",
-				entryId,
-				timestamp,
-				toolName,
-				toolCallId: message.toolCallId,
-				note: noteParts.join(" ") || undefined,
-			});
-		} else if (block.type === "image") {
-			addImageSegment(state, `Tool image: ${toolName}`, {
-				source: "tool-result",
-				role: "toolResult",
-				entryId,
-				timestamp,
-				toolName,
-				toolCallId: message.toolCallId,
-				mimeType: block.mimeType ?? block.source?.mediaType,
-			});
-		}
-	}
+function analyzeToolResult(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  const timestamp = isoTimestamp(message, entry);
+  const entryId = entry?.id;
+  const toolName = message.toolName ?? "tool";
+  const blocks = getContentBlocks(message.content);
+  const nestedNote = nestedCallsNote(message);
+  for (const block of blocks) {
+    if (block.type === "text" && typeof block.text === "string") {
+      const noteParts: string[] = [];
+      if (message.details && isRecord(message.details)) {
+        if (isRecord(message.details.truncation) && message.details.truncation.truncated)
+          noteParts.push("Result was truncated before entering context.");
+        if (typeof message.details.fullOutputPath === "string")
+          noteParts.push(`Full output: ${message.details.fullOutputPath}`);
+      }
+      if (nestedNote) noteParts.push(nestedNote);
+      addTextSegment(state, "toolResults", `Tool result: ${toolName}`, block.text, {
+        source: "tool-result",
+        role: "toolResult",
+        entryId,
+        timestamp,
+        toolName,
+        toolCallId: message.toolCallId,
+        note: noteParts.join(" ") || undefined,
+      });
+    } else if (block.type === "image") {
+      addImageSegment(state, `Tool image: ${toolName}`, {
+        source: "tool-result",
+        role: "toolResult",
+        entryId,
+        timestamp,
+        toolName,
+        toolCallId: message.toolCallId,
+        mimeType: block.mimeType ?? block.source?.mediaType,
+      });
+    }
+  }
 }
 
 function bashExecutionToModelText(message: MinimalMessage): string {
-	let text = `Ran \`${message.command ?? ""}\`\n`;
-	if (message.output) text += `\`\`\`\n${message.output}\n\`\`\``;
-	else text += "(no output)";
-	if (message.cancelled) text += "\n\n(command cancelled)";
-	else if (message.exitCode !== null && message.exitCode !== undefined && message.exitCode !== 0) {
-		text += `\n\nCommand exited with code ${message.exitCode}`;
-	}
-	if (message.truncated && message.fullOutputPath) {
-		text += `\n\n[Output truncated. Full output: ${message.fullOutputPath}]`;
-	}
-	return text;
+  let text = `Ran \`${message.command ?? ""}\`\n`;
+  if (message.output) text += `\`\`\`\n${message.output}\n\`\`\``;
+  else text += "(no output)";
+  if (message.cancelled) text += "\n\n(command cancelled)";
+  else if (message.exitCode !== null && message.exitCode !== undefined && message.exitCode !== 0) {
+    text += `\n\nCommand exited with code ${message.exitCode}`;
+  }
+  if (message.truncated && message.fullOutputPath) {
+    text += `\n\n[Output truncated. Full output: ${message.fullOutputPath}]`;
+  }
+  return text;
 }
 
-function analyzeBashExecution(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	state.turn++;
-	const timestamp = isoTimestamp(message, entry);
-	const text = bashExecutionToModelText(message);
-	const excluded = message.excludeFromContext === true;
-	addTextSegment(state, "bash", "User bash execution", text, {
-		source: "bash-execution",
-		role: "bashExecution",
-		entryId: entry?.id,
-		timestamp,
-		command: message.command,
-		excluded,
-		note: excluded
-			? "This was marked excludeFromContext by pi (!! command). It is shown as session-only context."
-			: undefined,
-	});
+function analyzeBashExecution(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  state.turn++;
+  const timestamp = isoTimestamp(message, entry);
+  const text = bashExecutionToModelText(message);
+  const excluded = message.excludeFromContext === true;
+  addTextSegment(state, "bash", "User bash execution", text, {
+    source: "bash-execution",
+    role: "bashExecution",
+    entryId: entry?.id,
+    timestamp,
+    command: message.command,
+    excluded,
+    note: excluded
+      ? "This was marked excludeFromContext by pi (!! command). It is shown as session-only context."
+      : undefined,
+  });
 }
 
-function analyzeCustomMessage(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	state.turn++;
-	const timestamp = isoTimestamp(message, entry);
-	const text = contentText(message.content);
-	addTextSegment(state, "custom", message.customType ? `Custom context: ${message.customType}` : "Custom context", text, {
-		source: "custom-message",
-		role: "custom",
-		entryId: entry?.id,
-		timestamp,
-		displayOnly: message.display === false,
-		note: message.display === false ? "Hidden in TUI, but sent to the model as custom context." : undefined,
-	});
-	for (const block of getContentBlocks(message.content)) {
-		if (block.type === "image") {
-			addImageSegment(state, message.customType ? `Custom image: ${message.customType}` : "Custom image", {
-				source: "custom-message",
-				role: "custom",
-				entryId: entry?.id,
-				timestamp,
-				mimeType: block.mimeType ?? block.source?.mediaType,
-			});
-		}
-	}
+function analyzeCustomMessage(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  state.turn++;
+  const timestamp = isoTimestamp(message, entry);
+  const text = contentText(message.content);
+  addTextSegment(
+    state,
+    "custom",
+    message.customType ? `Custom context: ${message.customType}` : "Custom context",
+    text,
+    {
+      source: "custom-message",
+      role: "custom",
+      entryId: entry?.id,
+      timestamp,
+      displayOnly: message.display === false,
+      note:
+        message.display === false
+          ? "Hidden in TUI, but sent to the model as custom context."
+          : undefined,
+    },
+  );
+  for (const block of getContentBlocks(message.content)) {
+    if (block.type === "image") {
+      addImageSegment(
+        state,
+        message.customType ? `Custom image: ${message.customType}` : "Custom image",
+        {
+          source: "custom-message",
+          role: "custom",
+          entryId: entry?.id,
+          timestamp,
+          mimeType: block.mimeType ?? block.source?.mediaType,
+        },
+      );
+    }
+  }
 }
 
-function analyzeSummaryMessage(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	const isCompaction = message.role === "compactionSummary" || entry?.type === "compaction";
-	const label = isCompaction ? "Compaction summary" : "Branch summary";
-	const summary = message.summary ?? entry?.summary ?? "";
-	const modelText = isCompaction
-		? `${COMPACTION_SUMMARY_PREFIX}${summary}${COMPACTION_SUMMARY_SUFFIX}`
-		: `${BRANCH_SUMMARY_PREFIX}${summary}${BRANCH_SUMMARY_SUFFIX}`;
-	addTextSegment(state, "summaries", label, modelText, {
-		source: isCompaction ? "compaction" : "branch-summary",
-		role: message.role ?? (isCompaction ? "compactionSummary" : "branchSummary"),
-		entryId: entry?.id,
-		timestamp: isoTimestamp(message, entry),
-		note: isCompaction && typeof message.tokensBefore === "number"
-			? `This summary replaced about ${formatTokens(message.tokensBefore)} earlier tokens before compaction.`
-			: undefined,
-	});
+function analyzeSummaryMessage(
+  state: AnalyzerState,
+  message: MinimalMessage,
+  entry?: MinimalEntry,
+): void {
+  const isCompaction = message.role === "compactionSummary" || entry?.type === "compaction";
+  const label = isCompaction ? "Compaction summary" : "Branch summary";
+  const summary = message.summary ?? entry?.summary ?? "";
+  const modelText = isCompaction
+    ? `${COMPACTION_SUMMARY_PREFIX}${summary}${COMPACTION_SUMMARY_SUFFIX}`
+    : `${BRANCH_SUMMARY_PREFIX}${summary}${BRANCH_SUMMARY_SUFFIX}`;
+  addTextSegment(state, "summaries", label, modelText, {
+    source: isCompaction ? "compaction" : "branch-summary",
+    role: message.role ?? (isCompaction ? "compactionSummary" : "branchSummary"),
+    entryId: entry?.id,
+    timestamp: isoTimestamp(message, entry),
+    note:
+      isCompaction && typeof message.tokensBefore === "number"
+        ? `This summary replaced about ${formatTokens(message.tokensBefore)} earlier tokens before compaction.`
+        : undefined,
+  });
 }
 
 function analyzeMessage(state: AnalyzerState, message: MinimalMessage, entry?: MinimalEntry): void {
-	switch (message.role) {
-		case "user":
-			analyzeUserContent(state, message, entry);
-			break;
-		case "assistant":
-			analyzeAssistantContent(state, message, entry);
-			break;
-		case "toolResult":
-			analyzeToolResult(state, message, entry);
-			break;
-		case "bashExecution":
-			analyzeBashExecution(state, message, entry);
-			break;
-		case "custom":
-			analyzeCustomMessage(state, message, entry);
-			break;
-		case "branchSummary":
-		case "compactionSummary":
-			analyzeSummaryMessage(state, message, entry);
-			break;
-	}
+  switch (message.role) {
+    case "user":
+      analyzeUserContent(state, message, entry);
+      break;
+    case "assistant":
+      analyzeAssistantContent(state, message, entry);
+      break;
+    case "toolResult":
+      analyzeToolResult(state, message, entry);
+      break;
+    case "bashExecution":
+      analyzeBashExecution(state, message, entry);
+      break;
+    case "custom":
+      analyzeCustomMessage(state, message, entry);
+      break;
+    case "branchSummary":
+    case "compactionSummary":
+      analyzeSummaryMessage(state, message, entry);
+      break;
+  }
 }
 
 function contextEntryToMessage(entry: MinimalEntry): MinimalMessage | undefined {
-	if (entry.type === "message") return entry.message;
-	if (entry.type === "custom_message") {
-		return {
-			role: "custom",
-			customType: entry.customType,
-			content: entry.content,
-			display: entry.display,
-			details: entry.details,
-			timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
-		};
-	}
-	if (entry.type === "branch_summary") {
-		return {
-			role: "branchSummary",
-			summary: entry.summary,
-			fromId: entry.fromId,
-			timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
-		};
-	}
-	if (entry.type === "compaction") {
-		return {
-			role: "compactionSummary",
-			summary: entry.summary,
-			tokensBefore: entry.tokensBefore,
-			timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
-		};
-	}
-	return undefined;
+  if (entry.type === "message") return entry.message;
+  if (entry.type === "custom_message") {
+    return {
+      role: "custom",
+      customType: entry.customType,
+      content: entry.content,
+      display: entry.display,
+      details: entry.details,
+      timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
+    };
+  }
+  if (entry.type === "branch_summary") {
+    return {
+      role: "branchSummary",
+      summary: entry.summary,
+      fromId: entry.fromId,
+      timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
+    };
+  }
+  if (entry.type === "compaction") {
+    return {
+      role: "compactionSummary",
+      summary: entry.summary,
+      tokensBefore: entry.tokensBefore,
+      timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : undefined,
+    };
+  }
+  return undefined;
 }
 
 function isContextEntry(entry: MinimalEntry): boolean {
-	return entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary";
+  return (
+    entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary"
+  );
 }
 
 function collectCurrentContextEntries(branchEntries: MinimalEntry[]): MinimalEntry[] {
-	let compactionIndex = -1;
-	for (let i = branchEntries.length - 1; i >= 0; i--) {
-		if (branchEntries[i]?.type === "compaction") {
-			compactionIndex = i;
-			break;
-		}
-	}
+  let compactionIndex = -1;
+  for (let i = branchEntries.length - 1; i >= 0; i--) {
+    if (branchEntries[i]?.type === "compaction") {
+      compactionIndex = i;
+      break;
+    }
+  }
 
-	if (compactionIndex === -1) return branchEntries.filter(isContextEntry);
+  if (compactionIndex === -1) return branchEntries.filter(isContextEntry);
 
-	const result: MinimalEntry[] = [branchEntries[compactionIndex]];
-	const compaction = branchEntries[compactionIndex];
-	let foundFirstKept = false;
-	for (let i = 0; i < compactionIndex; i++) {
-		const entry = branchEntries[i];
-		if (entry?.id === compaction?.firstKeptEntryId) foundFirstKept = true;
-		if (foundFirstKept && isContextEntry(entry)) result.push(entry);
-	}
-	for (let i = compactionIndex + 1; i < branchEntries.length; i++) {
-		const entry = branchEntries[i];
-		if (isContextEntry(entry)) result.push(entry);
-	}
-	return result;
+  const result: MinimalEntry[] = [branchEntries[compactionIndex]];
+  const compaction = branchEntries[compactionIndex];
+  let foundFirstKept = false;
+  for (let i = 0; i < compactionIndex; i++) {
+    const entry = branchEntries[i];
+    if (entry?.id === compaction?.firstKeptEntryId) foundFirstKept = true;
+    if (foundFirstKept && isContextEntry(entry)) result.push(entry);
+  }
+  for (let i = compactionIndex + 1; i < branchEntries.length; i++) {
+    const entry = branchEntries[i];
+    if (isContextEntry(entry)) result.push(entry);
+  }
+  return result;
 }
 
 function isProjectionSourceEntry(value: unknown): value is MinimalEntry {
-	return isRecord(value)
-		&& typeof value.type === "string"
-		&& value.type.length > 0
-		&& typeof value.id === "string"
-		&& value.id.length > 0;
+  return (
+    isRecord(value) &&
+    typeof value.type === "string" &&
+    value.type.length > 0 &&
+    typeof value.id === "string" &&
+    value.id.length > 0
+  );
 }
 
 function isProjectionMessage(value: unknown): value is MinimalMessage {
-	return isRecord(value) && typeof value.role === "string" && value.role.length > 0;
+  return isRecord(value) && typeof value.role === "string" && value.role.length > 0;
 }
 
-function resolveSessionProjection(ctx: ExtensionCommandContext): MinimalSessionProjection | undefined {
-	const sessionManager = ctx.sessionManager as unknown as { buildSessionProjection?: () => unknown };
-	const buildProjection = sessionManager.buildSessionProjection;
-	if (typeof buildProjection !== "function") return undefined;
+function resolveSessionProjection(
+  ctx: ExtensionCommandContext,
+): MinimalSessionProjection | undefined {
+  const sessionManager = ctx.sessionManager as unknown as {
+    buildSessionProjection?: () => unknown;
+  };
+  const buildProjection = sessionManager.buildSessionProjection;
+  if (typeof buildProjection !== "function") return undefined;
 
-	const projection = safeCall(() => buildProjection.call(sessionManager));
-	if (!isRecord(projection) || !Array.isArray(projection.entries)) return undefined;
+  const projection = safeCall(() => buildProjection.call(sessionManager));
+  if (!isRecord(projection) || !Array.isArray(projection.entries)) return undefined;
 
-	const entries: MinimalProjectionEntry[] = [];
-	for (const candidate of projection.entries) {
-		if (!isRecord(candidate) || !isProjectionSourceEntry(candidate.sourceEntry) || !Array.isArray(candidate.messages)) return undefined;
-		if (!candidate.messages.every(isProjectionMessage)) return undefined;
-		entries.push({
-			sourceEntry: candidate.sourceEntry,
-			messages: candidate.messages,
-		});
-	}
-	// `entries` is the provenance-bearing canonical projection. Keep validating
-	// the optional flattened field for compatibility, but derive the list used by
-	// the report from entries so a stale/invented flattened list cannot reintroduce
-	// omitted history or nested metadata as transcript messages.
-	if ("messages" in projection && (!Array.isArray(projection.messages) || !projection.messages.every(isProjectionMessage))) return undefined;
-	return {
-		entries,
-		messages: entries.flatMap((entry) => entry.messages),
-	};
+  const entries: MinimalProjectionEntry[] = [];
+  for (const candidate of projection.entries) {
+    if (
+      !isRecord(candidate) ||
+      !isProjectionSourceEntry(candidate.sourceEntry) ||
+      !Array.isArray(candidate.messages)
+    )
+      return undefined;
+    if (!candidate.messages.every(isProjectionMessage)) return undefined;
+    entries.push({
+      sourceEntry: candidate.sourceEntry,
+      messages: candidate.messages,
+    });
+  }
+  // `entries` is the provenance-bearing canonical projection. Keep validating
+  // the optional flattened field for compatibility, but derive the list used by
+  // the report from entries so a stale/invented flattened list cannot reintroduce
+  // omitted history or nested metadata as transcript messages.
+  if (
+    "messages" in projection &&
+    (!Array.isArray(projection.messages) || !projection.messages.every(isProjectionMessage))
+  )
+    return undefined;
+  return {
+    entries,
+    messages: entries.flatMap((entry) => entry.messages),
+  };
 }
 
-function resolveCurrentContextEntries(ctx: ExtensionCommandContext, branchEntries: MinimalEntry[]): MinimalEntry[] {
-	const sessionManager = ctx.sessionManager as unknown as { buildContextEntries?: () => unknown };
-	const buildEntries = sessionManager.buildContextEntries;
-	const currentEntries = typeof buildEntries === "function"
-		? safeCall(() => buildEntries.call(sessionManager))
-		: undefined;
-	if (Array.isArray(currentEntries)) return currentEntries as MinimalEntry[];
-	return collectCurrentContextEntries(branchEntries);
+function resolveCurrentContextEntries(
+  ctx: ExtensionCommandContext,
+  branchEntries: MinimalEntry[],
+): MinimalEntry[] {
+  const sessionManager = ctx.sessionManager as unknown as { buildContextEntries?: () => unknown };
+  const buildEntries = sessionManager.buildContextEntries;
+  const currentEntries =
+    typeof buildEntries === "function"
+      ? safeCall(() => buildEntries.call(sessionManager))
+      : undefined;
+  if (Array.isArray(currentEntries)) return currentEntries as MinimalEntry[];
+  return collectCurrentContextEntries(branchEntries);
 }
 
 function analyzeEntries(entries: MinimalEntry[], redact: boolean): AnalysisResult {
-	const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
-	let messageCount = 0;
-	for (const entry of entries) {
-		const message = contextEntryToMessage(entry);
-		if (!message) continue;
-		messageCount++;
-		analyzeMessage(state, message, entry);
-	}
-	return { segments: state.segments, messageCount };
+  const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
+  let messageCount = 0;
+  for (const entry of entries) {
+    const message = contextEntryToMessage(entry);
+    if (!message) continue;
+    messageCount++;
+    analyzeMessage(state, message, entry);
+  }
+  return { segments: state.segments, messageCount };
 }
 
 function analyzeProjection(projection: MinimalSessionProjection, redact: boolean): AnalysisResult {
-	const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
-	let messageCount = 0;
-	for (const projectedEntry of projection.entries) {
-		for (const message of projectedEntry.messages) {
-			// Pi's projection may carry the persisted system message on a compaction
-			// entry; the active system prompt is accounted for separately as overhead.
-			if (message.role === "system") continue;
-			messageCount++;
-			analyzeMessage(state, message, projectedEntry.sourceEntry);
-		}
-	}
-	return { segments: state.segments, messageCount };
+  const state: AnalyzerState = { segments: [], sequence: 0, turn: 0, redact };
+  let messageCount = 0;
+  for (const projectedEntry of projection.entries) {
+    for (const message of projectedEntry.messages) {
+      // Pi's projection may carry the persisted system message on a compaction
+      // entry; the active system prompt is accounted for separately as overhead.
+      if (message.role === "system") continue;
+      messageCount++;
+      analyzeMessage(state, message, projectedEntry.sourceEntry);
+    }
+  }
+  return { segments: state.segments, messageCount };
 }
 
 function collectToolSchemaText(pi: ExtensionAPI): string {
-	try {
-		const activeToolNames = new Set(pi.getActiveTools());
-		const tools = pi.getAllTools().filter((tool) => activeToolNames.has(tool.name));
-		return tools
-			.map((tool) => safeJson({
-				name: tool.name,
-				description: tool.description,
-				parameters: tool.parameters,
-				source: tool.sourceInfo,
-			}))
-			.join("\n\n");
-	} catch {
-		return "";
-	}
+  try {
+    const activeToolNames = new Set(pi.getActiveTools());
+    const tools = pi.getAllTools().filter((tool) => activeToolNames.has(tool.name));
+    return tools
+      .map((tool) =>
+        safeJson({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          source: tool.sourceInfo,
+        }),
+      )
+      .join("\n\n");
+  } catch {
+    return "";
+  }
 }
 
-function buildOverheadSegments(pi: ExtensionAPI, ctx: ExtensionCommandContext, redact: boolean): Segment[] {
-	const state: AnalyzerState = { segments: [], sequence: -2, turn: 0, redact };
-	const systemPrompt = safeCall(() => ctx.getSystemPrompt()) ?? "";
-	addTextSegment(state, "system", "Current system prompt", systemPrompt, {
-		source: "system-prompt",
-		role: "system",
-		turn: 0,
-	});
-	const toolSchemaText = collectToolSchemaText(pi);
-	addTextSegment(state, "toolSchemas", "Active tool schemas", toolSchemaText, {
-		source: "tool-schema",
-		role: "system",
-		turn: 0,
-	});
-	return state.segments.map((segment, index) => ({ ...segment, id: `overhead-${index}`, sequence: -2 + index }));
+function buildOverheadSegments(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  redact: boolean,
+): Segment[] {
+  const state: AnalyzerState = { segments: [], sequence: -2, turn: 0, redact };
+  const systemPrompt = safeCall(() => ctx.getSystemPrompt()) ?? "";
+  addTextSegment(state, "system", "Current system prompt", systemPrompt, {
+    source: "system-prompt",
+    role: "system",
+    turn: 0,
+  });
+  const toolSchemaText = collectToolSchemaText(pi);
+  addTextSegment(state, "toolSchemas", "Active tool schemas", toolSchemaText, {
+    source: "tool-schema",
+    role: "system",
+    turn: 0,
+  });
+  return state.segments.map((segment, index) => ({
+    ...segment,
+    id: `overhead-${index}`,
+    sequence: -2 + index,
+  }));
 }
 
 function safeCall<T>(fn: () => T): T | undefined {
-	try {
-		return fn();
-	} catch {
-		return undefined;
-	}
+  try {
+    return fn();
+  } catch {
+    return undefined;
+  }
 }
 
 function aggregateBy(
-	segments: Segment[],
-	keyFn: (segment: Segment) => string | undefined,
-	labelFn: (key: string) => string = (key) => key,
+  segments: Segment[],
+  keyFn: (segment: Segment) => string | undefined,
+  labelFn: (key: string) => string = (key) => key,
 ): AggregateStat[] {
-	const map = new Map<string, { tokens: number; segments: number }>();
-	for (const segment of segments) {
-		if (segment.excluded) continue;
-		const key = keyFn(segment);
-		if (!key) continue;
-		const current = map.get(key) ?? { tokens: 0, segments: 0 };
-		current.tokens += segment.tokens;
-		current.segments++;
-		map.set(key, current);
-	}
-	const total = Array.from(map.values()).reduce((sum, stat) => sum + stat.tokens, 0);
-	return Array.from(map.entries())
-		.map(([key, stat]) => ({
-			key,
-			label: labelFn(key),
-			tokens: Math.round(stat.tokens),
-			segments: stat.segments,
-			percent: total > 0 ? (stat.tokens / total) * 100 : 0,
-		}))
-		.sort((a, b) => b.tokens - a.tokens)
-		.slice(0, 12);
+  const map = new Map<string, { tokens: number; segments: number }>();
+  for (const segment of segments) {
+    if (segment.excluded) continue;
+    const key = keyFn(segment);
+    if (!key) continue;
+    const current = map.get(key) ?? { tokens: 0, segments: 0 };
+    current.tokens += segment.tokens;
+    current.segments++;
+    map.set(key, current);
+  }
+  const total = Array.from(map.values()).reduce((sum, stat) => sum + stat.tokens, 0);
+  return Array.from(map.entries())
+    .map(([key, stat]) => ({
+      key,
+      label: labelFn(key),
+      tokens: Math.round(stat.tokens),
+      segments: stat.segments,
+      percent: total > 0 ? (stat.tokens / total) * 100 : 0,
+    }))
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 12);
 }
 
 function finalizeDataset(
-	id: DatasetId,
-	label: string,
-	description: string,
-	segments: Segment[],
-	messageCount: number,
-	authoritativeTokens: number | null,
+  id: DatasetId,
+  label: string,
+  description: string,
+  segments: Segment[],
+  messageCount: number,
+  authoritativeTokens: number | null,
 ): Dataset {
-	const visibleSegments = segments.filter((segment) => !segment.excluded);
-	const visibleRawTokens = visibleSegments.reduce((sum, segment) => sum + segment.tokens, 0);
-	const excludedTokens = segments.filter((segment) => segment.excluded).reduce((sum, segment) => sum + segment.tokens, 0);
-	const providerDeltaTokens = authoritativeTokens != null ? Math.max(0, Math.round(authoritativeTokens - visibleRawTokens)) : 0;
-	const estimatorOverageTokens = authoritativeTokens != null ? Math.max(0, Math.round(visibleRawTokens - authoritativeTokens)) : 0;
-	const reconciliationScale = authoritativeTokens != null && visibleRawTokens > authoritativeTokens && visibleRawTokens > 0
-		? authoritativeTokens / visibleRawTokens
-		: 1;
-	const displayTotal = authoritativeTokens ?? visibleRawTokens;
+  const visibleSegments = segments.filter((segment) => !segment.excluded);
+  const visibleRawTokens = visibleSegments.reduce((sum, segment) => sum + segment.tokens, 0);
+  const excludedTokens = segments
+    .filter((segment) => segment.excluded)
+    .reduce((sum, segment) => sum + segment.tokens, 0);
+  const providerDeltaTokens =
+    authoritativeTokens != null
+      ? Math.max(0, Math.round(authoritativeTokens - visibleRawTokens))
+      : 0;
+  const estimatorOverageTokens =
+    authoritativeTokens != null
+      ? Math.max(0, Math.round(visibleRawTokens - authoritativeTokens))
+      : 0;
+  const reconciliationScale =
+    authoritativeTokens != null && visibleRawTokens > authoritativeTokens && visibleRawTokens > 0
+      ? authoritativeTokens / visibleRawTokens
+      : 1;
+  const displayTotal = authoritativeTokens ?? visibleRawTokens;
 
-	const byCategory = new Map<CategoryId, { tokens: number; segments: number }>();
-	for (const segment of visibleSegments) {
-		const current = byCategory.get(segment.category) ?? { tokens: 0, segments: 0 };
-		current.tokens += segment.tokens;
-		current.segments++;
-		byCategory.set(segment.category, current);
-	}
-	if (providerDeltaTokens > 0) {
-		byCategory.set("providerDelta", { tokens: providerDeltaTokens, segments: 1 });
-	}
+  const byCategory = new Map<CategoryId, { tokens: number; segments: number }>();
+  for (const segment of visibleSegments) {
+    const current = byCategory.get(segment.category) ?? { tokens: 0, segments: 0 };
+    current.tokens += segment.tokens;
+    current.segments++;
+    byCategory.set(segment.category, current);
+  }
+  if (providerDeltaTokens > 0) {
+    byCategory.set("providerDelta", { tokens: providerDeltaTokens, segments: 1 });
+  }
 
-	const categories = (Object.keys(CATEGORY_META) as CategoryId[])
-		.map((categoryId) => {
-			const current = byCategory.get(categoryId) ?? { tokens: 0, segments: 0 };
-			const rawTokens = current.tokens;
-			const displayTokens = categoryId === "providerDelta"
-				? rawTokens
-				: Math.round(rawTokens * reconciliationScale);
-			const meta = CATEGORY_META[categoryId];
-			return {
-				id: categoryId,
-				label: meta.label,
-				shortLabel: meta.shortLabel,
-				color: meta.color,
-				description: meta.description,
-				tokens: Math.round(rawTokens),
-				displayTokens,
-				percent: displayTotal > 0 ? (displayTokens / displayTotal) * 100 : 0,
-				segments: current.segments,
-			};
-		})
-		.filter((stat) => stat.tokens > 0 || stat.displayTokens > 0)
-		.sort((a, b) => b.displayTokens - a.displayTokens);
+  const categories = (Object.keys(CATEGORY_META) as CategoryId[])
+    .map((categoryId) => {
+      const current = byCategory.get(categoryId) ?? { tokens: 0, segments: 0 };
+      const rawTokens = current.tokens;
+      const displayTokens =
+        categoryId === "providerDelta" ? rawTokens : Math.round(rawTokens * reconciliationScale);
+      const meta = CATEGORY_META[categoryId];
+      return {
+        id: categoryId,
+        label: meta.label,
+        shortLabel: meta.shortLabel,
+        color: meta.color,
+        description: meta.description,
+        tokens: Math.round(rawTokens),
+        displayTokens,
+        percent: displayTotal > 0 ? (displayTokens / displayTotal) * 100 : 0,
+        segments: current.segments,
+      };
+    })
+    .filter((stat) => stat.tokens > 0 || stat.displayTokens > 0)
+    .sort((a, b) => b.displayTokens - a.displayTokens);
 
-	return {
-		id,
-		label,
-		description,
-		segments,
-		stats: {
-			tokens: Math.round(displayTotal),
-			rawTokens: Math.round(segments.reduce((sum, segment) => sum + segment.tokens, 0)),
-			visibleRawTokens: Math.round(visibleRawTokens),
-			excludedTokens: Math.round(excludedTokens),
-			providerDeltaTokens,
-			estimatorOverageTokens,
-			reconciliationScale,
-			segmentCount: segments.length,
-			messageCount,
-			categories,
-			topSegments: [...visibleSegments].sort((a, b) => b.tokens - a.tokens).slice(0, 24),
-			topTools: aggregateBy(visibleSegments, (segment) => segment.toolName),
-			topPaths: aggregateBy(visibleSegments, (segment) => segment.path),
-			topTurns: aggregateBy(visibleSegments, (segment) => segment.turn > 0 ? String(segment.turn) : undefined, (key) => `Turn ${key}`),
-		},
-	};
+  return {
+    id,
+    label,
+    description,
+    segments,
+    stats: {
+      tokens: Math.round(displayTotal),
+      rawTokens: Math.round(segments.reduce((sum, segment) => sum + segment.tokens, 0)),
+      visibleRawTokens: Math.round(visibleRawTokens),
+      excludedTokens: Math.round(excludedTokens),
+      providerDeltaTokens,
+      estimatorOverageTokens,
+      reconciliationScale,
+      segmentCount: segments.length,
+      messageCount,
+      categories,
+      topSegments: [...visibleSegments].sort((a, b) => b.tokens - a.tokens).slice(0, 24),
+      topTools: aggregateBy(visibleSegments, (segment) => segment.toolName),
+      topPaths: aggregateBy(visibleSegments, (segment) => segment.path),
+      topTurns: aggregateBy(
+        visibleSegments,
+        (segment) => (segment.turn > 0 ? String(segment.turn) : undefined),
+        (key) => `Turn ${key}`,
+      ),
+    },
+  };
 }
 
 function getSessionName(ctx: ExtensionCommandContext): string | undefined {
-	return safeCall(() => ctx.sessionManager.getSessionName());
+  return safeCall(() => ctx.sessionManager.getSessionName());
 }
 
 function latestRoutedModel(messages: MinimalMessage[]): RoutedModel | undefined {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message?.role !== "assistant") continue;
-		if (message.stopReason === "error" || message.stopReason === "aborted") continue;
-		if (message.api === "pi-virtual") continue;
-		if (typeof message.provider !== "string" || !message.provider || typeof message.model !== "string" || !message.model) continue;
-		return { provider: message.provider, id: message.model };
-	}
-	return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+    if (message.api === "pi-virtual") continue;
+    if (
+      typeof message.provider !== "string" ||
+      !message.provider ||
+      typeof message.model !== "string" ||
+      !message.model
+    )
+      continue;
+    return { provider: message.provider, id: message.model };
+  }
+  return undefined;
 }
 
-function buildReportData(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: CommandOptions): ReportData {
-	const branchEntries = ctx.sessionManager.getBranch() as MinimalEntry[];
-	const projection = resolveSessionProjection(ctx);
-	const overhead = buildOverheadSegments(pi, ctx, options.redact);
-	const currentAnalysis = projection
-		? analyzeProjection(projection, options.redact)
-		: analyzeEntries(resolveCurrentContextEntries(ctx, branchEntries), options.redact);
-	const fullAnalysis = analyzeEntries(branchEntries, options.redact);
-	const usage = ctx.getContextUsage();
-	const contextTokens = isKnownNonNegativeNumber(usage?.tokens) ? usage.tokens : null;
-	const reportedContextWindow = isKnownPositiveNumber(usage?.contextWindow) ? usage.contextWindow : undefined;
-	const selectedContextWindow = isKnownPositiveNumber(ctx.model?.contextWindow) ? ctx.model.contextWindow : undefined;
-	const virtualSelection = isVirtualModel(ctx.model);
-	const contextWindow = reportedContextWindow ?? (virtualSelection ? null : selectedContextWindow ?? null);
-	const reportedPercent = isKnownNonNegativeNumber(usage?.percent) ? usage.percent : undefined;
-	const contextPercent = reportedPercent ?? (contextTokens != null && contextWindow ? (contextTokens / contextWindow) * 100 : null);
-	const projectedMessages = projection
-		? projection.entries.flatMap((entry) => entry.messages)
-		: branchEntries.flatMap((entry) => {
-			const message = contextEntryToMessage(entry);
-			return message ? [message] : [];
-		});
-	const routed = virtualSelection ? latestRoutedModel(projectedMessages) : undefined;
+function buildReportData(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  options: CommandOptions,
+): ReportData {
+  const branchEntries = ctx.sessionManager.getBranch() as MinimalEntry[];
+  const projection = resolveSessionProjection(ctx);
+  const overhead = buildOverheadSegments(pi, ctx, options.redact);
+  const currentAnalysis = projection
+    ? analyzeProjection(projection, options.redact)
+    : analyzeEntries(resolveCurrentContextEntries(ctx, branchEntries), options.redact);
+  const fullAnalysis = analyzeEntries(branchEntries, options.redact);
+  const usage = ctx.getContextUsage();
+  const contextTokens = isKnownNonNegativeNumber(usage?.tokens) ? usage.tokens : null;
+  const reportedContextWindow = isKnownPositiveNumber(usage?.contextWindow)
+    ? usage.contextWindow
+    : undefined;
+  const selectedContextWindow = isKnownPositiveNumber(ctx.model?.contextWindow)
+    ? ctx.model.contextWindow
+    : undefined;
+  const virtualSelection = isVirtualModel(ctx.model);
+  const contextWindow =
+    reportedContextWindow ?? (virtualSelection ? null : (selectedContextWindow ?? null));
+  const reportedPercent = isKnownNonNegativeNumber(usage?.percent) ? usage.percent : undefined;
+  const contextPercent =
+    reportedPercent ??
+    (contextTokens != null && contextWindow ? (contextTokens / contextWindow) * 100 : null);
+  const projectedMessages = projection
+    ? projection.entries.flatMap((entry) => entry.messages)
+    : branchEntries.flatMap((entry) => {
+        const message = contextEntryToMessage(entry);
+        return message ? [message] : [];
+      });
+  const routed = virtualSelection ? latestRoutedModel(projectedMessages) : undefined;
 
-	const currentSegments = [...overhead, ...currentAnalysis.segments];
-	const fullSegments = [...overhead, ...fullAnalysis.segments];
-	const currentDataset = finalizeDataset(
-		"current",
-		"Current model context",
-		"What pi is expected to send to the model on the next turn: latest compaction summary plus unsummarized messages, system prompt, and active tool schemas.",
-		currentSegments,
-		currentAnalysis.messageCount,
-		contextTokens,
-	);
-	const fullDataset = finalizeDataset(
-		"full",
-		"Full active branch history",
-		"Every context-bearing entry on the active branch, including pre-compaction history that may no longer be sent verbatim.",
-		fullSegments,
-		fullAnalysis.messageCount,
-		null,
-	);
+  const currentSegments = [...overhead, ...currentAnalysis.segments];
+  const fullSegments = [...overhead, ...fullAnalysis.segments];
+  const currentDataset = finalizeDataset(
+    "current",
+    "Current model context",
+    "What pi is expected to send to the model on the next turn: latest compaction summary plus unsummarized messages, system prompt, and active tool schemas.",
+    currentSegments,
+    currentAnalysis.messageCount,
+    contextTokens,
+  );
+  const fullDataset = finalizeDataset(
+    "full",
+    "Full active branch history",
+    "Every context-bearing entry on the active branch, including pre-compaction history that may no longer be sent verbatim.",
+    fullSegments,
+    fullAnalysis.messageCount,
+    null,
+  );
 
-	const notes: string[] = [
-		"Per-component token counts are local estimates based mostly on characters/4. Providers expose aggregate usage, not exact per-message attribution.",
-		"The current-context chart reconciles to pi's footer-compatible context total when that total is known.",
-	];
-	if (options.redact) {
-		notes.push("Redaction is enabled: message contents, paths, commands, session identifiers, and timestamps are hidden in this report.");
-	}
-	if (contextTokens == null) {
-		notes.push("Current context usage is unknown, usually because compaction just ran and no model response has arrived yet.");
-	}
-	if (virtualSelection) {
-		const selected = [ctx.model?.provider, ctx.model?.id].filter(Boolean).join("/") || "virtual selection";
-		if (routed) {
-			notes.push(`Model selection ${selected} is virtual. Latest routed physical response: ${routed.provider}/${routed.id}. The context window shown below is provider-reported usage when available; it is not inferred from the virtual selection.`);
-		} else {
-			notes.push(`Model selection ${selected} is virtual. Pi has not exposed a routed physical response here, so no provider context window is inferred.`);
-		}
-	} else if (contextWindow == null) {
-		notes.push("The selected model's context window is unknown because pi did not provide a finite positive limit.");
-	}
-	if (currentDataset.stats.estimatorOverageTokens > 0) {
-		notes.push(`Local component estimates exceed pi's footer total by ${formatTokens(currentDataset.stats.estimatorOverageTokens)} tokens, so chart slices are scaled down proportionally.`);
-	}
-	if (currentDataset.stats.providerDeltaTokens > 0) {
-		notes.push(`${formatTokens(currentDataset.stats.providerDeltaTokens)} tokens are unattributed provider/serialization delta: system serialization, provider tokenization, cache accounting, or schema overhead not explained by local estimates.`);
-	}
+  const notes: string[] = [
+    "Per-component token counts are local estimates based mostly on characters/4. Providers expose aggregate usage, not exact per-message attribution.",
+    "The current-context chart reconciles to pi's footer-compatible context total when that total is known.",
+  ];
+  if (options.redact) {
+    notes.push(
+      "Redaction is enabled: message contents, paths, commands, session identifiers, and timestamps are hidden in this report.",
+    );
+  }
+  if (contextTokens == null) {
+    notes.push(
+      "Current context usage is unknown, usually because compaction just ran and no model response has arrived yet.",
+    );
+  }
+  if (virtualSelection) {
+    const selected =
+      [ctx.model?.provider, ctx.model?.id].filter(Boolean).join("/") || "virtual selection";
+    if (routed) {
+      notes.push(
+        `Model selection ${selected} is virtual. Latest routed physical response: ${routed.provider}/${routed.id}. The context window shown below is provider-reported usage when available; it is not inferred from the virtual selection.`,
+      );
+    } else {
+      notes.push(
+        `Model selection ${selected} is virtual. Pi has not exposed a routed physical response here, so no provider context window is inferred.`,
+      );
+    }
+  } else if (contextWindow == null) {
+    notes.push(
+      "The selected model's context window is unknown because pi did not provide a finite positive limit.",
+    );
+  }
+  if (currentDataset.stats.estimatorOverageTokens > 0) {
+    notes.push(
+      `Local component estimates exceed pi's footer total by ${formatTokens(currentDataset.stats.estimatorOverageTokens)} tokens, so chart slices are scaled down proportionally.`,
+    );
+  }
+  if (currentDataset.stats.providerDeltaTokens > 0) {
+    notes.push(
+      `${formatTokens(currentDataset.stats.providerDeltaTokens)} tokens are unattributed provider/serialization delta: system serialization, provider tokenization, cache accounting, or schema overhead not explained by local estimates.`,
+    );
+  }
 
-	return {
-		generatedAt: new Date().toISOString(),
-		cwd: options.redact ? "[redacted cwd]" : ctx.cwd,
-		session: {
-			id: options.redact ? "[redacted session]" : safeCall(() => ctx.sessionManager.getSessionId()),
-			name: options.redact ? "[redacted session name]" : getSessionName(ctx),
-			file: options.redact ? "[redacted session file]" : safeCall(() => ctx.sessionManager.getSessionFile()),
-		},
-		model: {
-			provider: ctx.model?.provider,
-			id: ctx.model?.id,
-			contextWindow: selectedContextWindow,
-			thinkingLevel: safeCall(() => pi.getThinkingLevel()),
-			virtual: virtualSelection,
-			routed,
-		},
-		contextUsage: {
-			tokens: contextTokens,
-			contextWindow,
-			percent: contextPercent,
-		},
-		options: {
-			redacted: options.redact,
-			defaultDataset: options.defaultDataset,
-		},
-		categoryMeta: CATEGORY_META,
-		datasets: {
-			current: currentDataset,
-			full: fullDataset,
-		},
-		notes,
-	};
+  return {
+    generatedAt: new Date().toISOString(),
+    cwd: options.redact ? "[redacted cwd]" : ctx.cwd,
+    session: {
+      id: options.redact ? "[redacted session]" : safeCall(() => ctx.sessionManager.getSessionId()),
+      name: options.redact ? "[redacted session name]" : getSessionName(ctx),
+      file: options.redact
+        ? "[redacted session file]"
+        : safeCall(() => ctx.sessionManager.getSessionFile()),
+    },
+    model: {
+      provider: ctx.model?.provider,
+      id: ctx.model?.id,
+      contextWindow: selectedContextWindow,
+      thinkingLevel: safeCall(() => pi.getThinkingLevel()),
+      virtual: virtualSelection,
+      routed,
+    },
+    contextUsage: {
+      tokens: contextTokens,
+      contextWindow,
+      percent: contextPercent,
+    },
+    options: {
+      redacted: options.redact,
+      defaultDataset: options.defaultDataset,
+    },
+    categoryMeta: CATEGORY_META,
+    datasets: {
+      current: currentDataset,
+      full: fullDataset,
+    },
+    notes,
+  };
 }
 
 function sanitizeFilePart(value: string): string {
-	return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "session";
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "session";
 }
 
 function reportPath(ctx: ExtensionCommandContext, options: CommandOptions): string {
-	const rawSessionId = options.redact ? "redacted" : (safeCall(() => ctx.sessionManager.getSessionId()) ?? "session");
-	const fileName = `pi-context-${sanitizeFilePart(rawSessionId)}-${Date.now()}.html`;
-	if (options.keep) {
-		const dir = join(ctx.cwd, CONFIG_DIR_NAME, "context-reports");
-		mkdirSync(dir, { recursive: true, mode: 0o700 });
-		try { chmodSync(dir, 0o700); } catch { /* best effort */ }
-		return join(dir, fileName);
-	}
-	const dir = mkdtempSync(join(tmpdir(), "pi-context-"));
-	try { chmodSync(dir, 0o700); } catch { /* best effort */ }
-	return join(dir, fileName);
+  const rawSessionId = options.redact
+    ? "redacted"
+    : (safeCall(() => ctx.sessionManager.getSessionId()) ?? "session");
+  const fileName = `pi-context-${sanitizeFilePart(rawSessionId)}-${Date.now()}.html`;
+  if (options.keep) {
+    const dir = join(ctx.cwd, CONFIG_DIR_NAME, "context-reports");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      /* best effort */
+    }
+    return join(dir, fileName);
+  }
+  const dir = mkdtempSync(join(tmpdir(), "pi-context-"));
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    /* best effort */
+  }
+  return join(dir, fileName);
 }
 
-async function openReport(pi: ExtensionAPI, filePath: string): Promise<{ ok: boolean; error?: string }> {
-	const url = pathToFileURL(filePath).href;
-	try {
-		let result: { code?: number | null; stderr?: string };
-		if (process.platform === "darwin") {
-			result = await pi.exec("open", [url], { timeout: 5000 });
-		} else if (process.platform === "win32") {
-			result = await pi.exec("cmd", ["/c", "start", "", url], { timeout: 5000 });
-		} else {
-			result = await pi.exec("xdg-open", [url], { timeout: 5000 });
-		}
-		if (result.code === 0) return { ok: true };
-		return { ok: false, error: result.stderr || `open command exited with code ${result.code}` };
-	} catch (error) {
-		return { ok: false, error: error instanceof Error ? error.message : String(error) };
-	}
+async function openReport(
+  pi: ExtensionAPI,
+  filePath: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const url = pathToFileURL(filePath).href;
+  try {
+    let result: { code?: number | null; stderr?: string };
+    if (process.platform === "darwin") {
+      result = await pi.exec("open", [url], { timeout: 5000 });
+    } else if (process.platform === "win32") {
+      result = await pi.exec("cmd", ["/c", "start", "", url], { timeout: 5000 });
+    } else {
+      result = await pi.exec("xdg-open", [url], { timeout: 5000 });
+    }
+    if (result.code === 0) return { ok: true };
+    return { ok: false, error: result.stderr || `open command exited with code ${result.code}` };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
-function notify(ctx: ExtensionCommandContext, message: string, type: "info" | "warning" | "error" = "info"): void {
-	if (ctx.hasUI) ctx.ui.notify(message, type);
-	else console.log(message);
+function notify(
+  ctx: ExtensionCommandContext,
+  message: string,
+  type: "info" | "warning" | "error" = "info",
+): void {
+  if (ctx.hasUI) ctx.ui.notify(message, type);
+  else console.log(message);
 }
 
 function writeReport(data: ReportData, filePath: string): void {
-	writeFileSync(filePath, buildHtml(data), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(filePath, buildHtml(data), { encoding: "utf8", mode: 0o600 });
 }
 
 function scriptJson(data: ReportData): string {
-	return JSON.stringify(data)
-		.replace(/</g, "\\u003c")
-		.replace(/>/g, "\\u003e")
-		.replace(/&/g, "\\u0026")
-		.replace(/\u2028/g, "\\u2028")
-		.replace(/\u2029/g, "\\u2029");
+  return JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 function buildHtml(data: ReportData): string {
-	return `<!doctype html>
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -1603,43 +1757,47 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #cbd5e1; 
 }
 
 export const __testing = {
-	analyzeEntries,
-	buildReportData,
+  analyzeEntries,
+  buildReportData,
 };
 
 export default function contextInspectorExtension(pi: ExtensionAPI) {
-	pi.registerCommand("context", {
-		description: "Open a local HTML breakdown of where this session's context is going",
-		getArgumentCompletions: (prefix) => {
-			const flags = ["--no-open", "--keep", "--redact", "--full", "--current", "--help"];
-			const trimmed = prefix.trimStart();
-			const last = trimmed.split(/\s+/).pop() ?? "";
-			const matches = flags.filter((flag) => flag.startsWith(last));
-			return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
-		},
-		handler: async (args, ctx) => {
-			const options = parseArgs(args);
-			if (options.help) {
-				notify(ctx, usageText(), "info");
-				return;
-			}
+  pi.registerCommand("context", {
+    description: "Open a local HTML breakdown of where this session's context is going",
+    getArgumentCompletions: (prefix) => {
+      const flags = ["--no-open", "--keep", "--redact", "--full", "--current", "--help"];
+      const trimmed = prefix.trimStart();
+      const last = trimmed.split(/\s+/).pop() ?? "";
+      const matches = flags.filter((flag) => flag.startsWith(last));
+      return matches.length > 0 ? matches.map((value) => ({ value, label: value })) : null;
+    },
+    handler: async (args, ctx) => {
+      const options = parseArgs(args);
+      if (options.help) {
+        notify(ctx, usageText(), "info");
+        return;
+      }
 
-			await ctx.waitForIdle();
-			const data = buildReportData(pi, ctx, options);
-			const filePath = reportPath(ctx, options);
-			writeReport(data, filePath);
+      await ctx.waitForIdle();
+      const data = buildReportData(pi, ctx, options);
+      const filePath = reportPath(ctx, options);
+      writeReport(data, filePath);
 
-			if (!options.open) {
-				notify(ctx, `Context report written: ${filePath}`, "info");
-				return;
-			}
+      if (!options.open) {
+        notify(ctx, `Context report written: ${filePath}`, "info");
+        return;
+      }
 
-			const result = await openReport(pi, filePath);
-			if (result.ok) {
-				notify(ctx, `Opened context report: ${filePath}`, "info");
-			} else {
-				notify(ctx, `Context report written, but browser open failed: ${filePath}\n${result.error ?? ""}`, "warning");
-			}
-		},
-	});
+      const result = await openReport(pi, filePath);
+      if (result.ok) {
+        notify(ctx, `Opened context report: ${filePath}`, "info");
+      } else {
+        notify(
+          ctx,
+          `Context report written, but browser open failed: ${filePath}\n${result.error ?? ""}`,
+          "warning",
+        );
+      }
+    },
+  });
 }

@@ -1,14 +1,14 @@
-import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import test, { after } from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, '..');
-const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'pi-quiet-glimpse-'));
+const repoRoot = path.resolve(testDir, "..");
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-quiet-glimpse-"));
 
 after(async () => {
   await rm(tempRoot, { recursive: true, force: true });
@@ -16,9 +16,9 @@ after(async () => {
 
 async function compileQuietGlimpse(sourceRelativePath, name, fakeHostPath) {
   const packageRoot = path.join(tempRoot, name);
-  const modulePath = path.join(packageRoot, 'quiet-glimpse.js');
+  const modulePath = path.join(packageRoot, "quiet-glimpse.js");
   const sourcePath = path.join(repoRoot, sourceRelativePath);
-  const source = await readFile(sourcePath, 'utf8');
+  const source = await readFile(sourcePath, "utf8");
   const result = ts.transpileModule(source, {
     fileName: sourcePath,
     compilerOptions: {
@@ -29,15 +29,15 @@ async function compileQuietGlimpse(sourceRelativePath, name, fakeHostPath) {
   });
 
   assert.deepEqual(result.diagnostics ?? [], []);
-  await mkdir(path.join(packageRoot, 'node_modules', 'glimpseui'), { recursive: true });
-  await writeFile(path.join(packageRoot, 'package.json'), '{"type":"module"}\n');
+  await mkdir(path.join(packageRoot, "node_modules", "glimpseui"), { recursive: true });
+  await writeFile(path.join(packageRoot, "package.json"), '{"type":"module"}\n');
   await writeFile(modulePath, result.outputText);
   await writeFile(
-    path.join(packageRoot, 'node_modules', 'glimpseui', 'package.json'),
+    path.join(packageRoot, "node_modules", "glimpseui", "package.json"),
     '{"name":"glimpseui","type":"module","exports":"./index.js"}\n',
   );
   await writeFile(
-    path.join(packageRoot, 'node_modules', 'glimpseui', 'index.js'),
+    path.join(packageRoot, "node_modules", "glimpseui", "index.js"),
     `export function getNativeHostInfo() {
       const override = process.env.PI_QUIET_GLIMPSE_TEST_HOST;
       return override ? { path: override } : { path: process.execPath, extraArgs: [${JSON.stringify(fakeHostPath)}] };
@@ -49,21 +49,24 @@ async function compileQuietGlimpse(sourceRelativePath, name, fakeHostPath) {
 async function waitFor(predicate, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error('Timed out waiting for fake Glimpse state.');
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for fake Glimpse state.");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
 for (const [name, source] of [
-  ['annotate-git-diff', 'extensions/annotate-git-diff/quiet-glimpse.ts'],
-  ['annotate-last-message', 'extensions/annotate-last-message/quiet-glimpse.ts'],
+  ["annotate-git-diff", "extensions/annotate-git-diff/quiet-glimpse.ts"],
+  ["annotate-last-message", "extensions/annotate-last-message/quiet-glimpse.ts"],
 ]) {
-  test(`${name} ignores non-object protocol lines and keeps native failures non-fatal`, { concurrency: false }, async () => {
-    const fakeHostPath = path.join(tempRoot, `${name}-fake-glimpse-host.mjs`);
-    const nonExecutableHostPath = path.join(tempRoot, `${name}-non-executable-host`);
-    await writeFile(
-      fakeHostPath,
-      `
+  test(
+    `${name} ignores non-object protocol lines and keeps native failures non-fatal`,
+    { concurrency: false },
+    async () => {
+      const fakeHostPath = path.join(tempRoot, `${name}-fake-glimpse-host.mjs`);
+      const nonExecutableHostPath = path.join(tempRoot, `${name}-non-executable-host`);
+      await writeFile(
+        fakeHostPath,
+        `
         import { createInterface } from 'node:readline';
         const protocolLines = [
           'null',
@@ -88,40 +91,45 @@ for (const [name, source] of [
           }
         });
       `,
-    );
-    await writeFile(nonExecutableHostPath, 'not executable\n');
+      );
+      await writeFile(nonExecutableHostPath, "not executable\n");
 
-    const { openQuietGlimpse } = await compileQuietGlimpse(source, name, fakeHostPath);
-    const window = await openQuietGlimpse('<html>fixture</html>');
-    let terminalMessage = null;
-    let observedErrors = 0;
-    const onError = () => {
-      observedErrors += 1;
-    };
+      const { openQuietGlimpse } = await compileQuietGlimpse(source, name, fakeHostPath);
+      const window = await openQuietGlimpse("<html>fixture</html>");
+      let terminalMessage = null;
+      let observedErrors = 0;
+      const onError = () => {
+        observedErrors += 1;
+      };
 
-    window.on('error', onError);
-    window.on('message', (message) => {
-      terminalMessage = message;
-      window.removeListener('error', onError);
-    });
+      window.on("error", onError);
+      window.on("message", (message) => {
+        terminalMessage = message;
+        window.removeListener("error", onError);
+      });
 
-    await waitFor(() => terminalMessage != null);
-    await waitFor(() => window.failure != null && window.closed);
+      await waitFor(() => terminalMessage != null);
+      await waitFor(() => window.failure != null && window.closed);
 
-    assert.deepEqual(terminalMessage, { type: 'fixture-terminal' });
-    assert.match(window.failure.message, /Malformed glimpse protocol line/);
-    assert.equal(observedErrors, 0, 'the caller listener was removed before the late protocol failure');
-    assert.equal(window.closed, true);
+      assert.deepEqual(terminalMessage, { type: "fixture-terminal" });
+      assert.match(window.failure.message, /Malformed glimpse protocol line/);
+      assert.equal(
+        observedErrors,
+        0,
+        "the caller listener was removed before the late protocol failure",
+      );
+      assert.equal(window.closed, true);
 
-    process.env.PI_QUIET_GLIMPSE_TEST_HOST = nonExecutableHostPath;
-    let spawnFailureWindow;
-    try {
-      spawnFailureWindow = await openQuietGlimpse('<html>spawn failure</html>');
-    } finally {
-      delete process.env.PI_QUIET_GLIMPSE_TEST_HOST;
-    }
-    await waitFor(() => spawnFailureWindow.failure != null && spawnFailureWindow.closed);
-    assert.match(spawnFailureWindow.failure.message, /EACCES|permission denied|spawn/i);
-    assert.equal(spawnFailureWindow.closed, true);
-  });
+      process.env.PI_QUIET_GLIMPSE_TEST_HOST = nonExecutableHostPath;
+      let spawnFailureWindow;
+      try {
+        spawnFailureWindow = await openQuietGlimpse("<html>spawn failure</html>");
+      } finally {
+        delete process.env.PI_QUIET_GLIMPSE_TEST_HOST;
+      }
+      await waitFor(() => spawnFailureWindow.failure != null && spawnFailureWindow.closed);
+      assert.match(spawnFailureWindow.failure.message, /EACCES|permission denied|spawn/i);
+      assert.equal(spawnFailureWindow.closed, true);
+    },
+  );
 }

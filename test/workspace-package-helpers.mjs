@@ -1,17 +1,17 @@
-import assert from 'node:assert/strict';
-import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import assert from "node:assert/strict";
+import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-export const repoRoot = path.resolve(testDir, '..');
+export const repoRoot = path.resolve(testDir, "..");
 
 function toPosix(filePath) {
-  return filePath.split(path.sep).join('/');
+  return filePath.split(path.sep).join("/");
 }
 
 function readJson(jsonPath) {
-  return JSON.parse(readFileSync(jsonPath, 'utf8'));
+  return JSON.parse(readFileSync(jsonPath, "utf8"));
 }
 
 function getWorkspacePatterns(rootManifest) {
@@ -42,19 +42,19 @@ function collectDescendantDirectories(directoryPath) {
 }
 
 function expandWorkspacePattern(pattern) {
-  const normalizedPattern = pattern.replaceAll('\\', '/').replace(/\/+$/, '');
+  const normalizedPattern = pattern.replaceAll("\\", "/").replace(/\/+$/, "");
   if (!normalizedPattern) return [];
 
-  const segments = normalizedPattern.split('/').filter(Boolean);
+  const segments = normalizedPattern.split("/").filter(Boolean);
   let candidates = [repoRoot];
 
   for (const segment of segments) {
-    if (segment === '**') {
+    if (segment === "**") {
       candidates = candidates.flatMap((candidate) => collectDescendantDirectories(candidate));
       continue;
     }
 
-    if (segment === '*') {
+    if (segment === "*") {
       candidates = candidates.flatMap((candidate) => listChildDirectories(candidate));
       continue;
     }
@@ -68,12 +68,12 @@ function expandWorkspacePattern(pattern) {
 }
 
 export function getWorkspacePackageManifestPaths() {
-  const rootManifest = readJson(path.join(repoRoot, 'package.json'));
+  const rootManifest = readJson(path.join(repoRoot, "package.json"));
   const manifestPaths = new Set();
 
   for (const pattern of getWorkspacePatterns(rootManifest)) {
     for (const workspaceDirectory of expandWorkspacePattern(pattern)) {
-      const manifestPath = path.join(workspaceDirectory, 'package.json');
+      const manifestPath = path.join(workspaceDirectory, "package.json");
       if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) continue;
       manifestPaths.add(toPosix(path.relative(repoRoot, manifestPath)));
     }
@@ -87,7 +87,7 @@ export function getWorkspacePackageDefs() {
     const packageRoot = path.join(repoRoot, path.dirname(manifestPath));
     const manifest = readJson(path.join(repoRoot, manifestPath));
 
-    assert.equal(typeof manifest.name, 'string', `${manifestPath} should declare a package name`);
+    assert.equal(typeof manifest.name, "string", `${manifestPath} should declare a package name`);
     assert.ok(manifest.name.length > 0, `${manifestPath} should not have an empty package name`);
 
     return {
@@ -98,6 +98,6 @@ export function getWorkspacePackageDefs() {
     };
   });
 
-  assert.ok(packageDefs.length > 0, 'expected at least one workspace package');
+  assert.ok(packageDefs.length > 0, "expected at least one workspace package");
   return packageDefs;
 }

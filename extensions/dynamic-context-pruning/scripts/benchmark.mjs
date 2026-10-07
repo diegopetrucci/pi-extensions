@@ -59,19 +59,19 @@ const extensionIndexPath = path.join(scriptDir, "..", "index.ts");
 
 const dcp = await import(pathToFileURL(extensionIndexPath).href);
 const {
-	normalizeConfig,
-	runDynamicContextPruningPipeline,
-	estimateDecisionSavings,
-	estimateTailTokens,
-	computeCacheCostModel,
-	resolveBreakEvenThreshold,
-	classifyAgentStateFromMessages,
-	sessionEntriesToMessages,
-	buildToolCallPairIndex,
-	computeRecencyBoundaryIndex,
-	isProtectedToolName,
-	isProtectedPath,
-	collectArgStringValues,
+  normalizeConfig,
+  runDynamicContextPruningPipeline,
+  estimateDecisionSavings,
+  estimateTailTokens,
+  computeCacheCostModel,
+  resolveBreakEvenThreshold,
+  classifyAgentStateFromMessages,
+  sessionEntriesToMessages,
+  buildToolCallPairIndex,
+  computeRecencyBoundaryIndex,
+  isProtectedToolName,
+  isProtectedPath,
+  collectArgStringValues,
 } = dcp;
 
 const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
@@ -97,149 +97,163 @@ const HARD_SWEEP_CEILING = 500;
 // ============================================================================
 
 function printUsage() {
-	console.log(
-		[
-			"Usage: node extensions/dynamic-context-pruning/scripts/benchmark.mjs [paths...] [options]",
-			"",
-			"Options:",
-			"  --limit N     Only process the first N session files found.",
-			"  --ratio R     Cached-price ratio(s) to model (repeatable/comma-separated). Default: 0.1.",
-			"  --sweep-max N Explicit ceiling for the auto-expanding threshold sweep (overrides the",
-			"                corpus-derived ceiling). Default: auto-expand from 30 as needed.",
-			"  --json        Emit a full machine-readable JSON dump instead of aligned text.",
-			"  --simulate-compression       Additionally simulate v2-style range compression (pe-ckbd);",
-			"                               see docs/v2-design.md §1/§4. SIMULATED results are reported",
-			"                               alongside (never mixed into) the deterministic results.",
-			"  --sim-summary-fraction F     Summary size as a fraction of range tokens (repeatable/",
-			"                               comma-separated, e.g. 0.1,0.15,0.3). Default: 0.15.",
-			"  --sim-summary-min-tokens N   Floor on summary tokens regardless of fraction. Default: 200.",
-			"  --sim-summarizer-cost-mult M Relative per-token price of the summarizer call vs the main",
-			"                               model (applies to rangeTokens input + summaryTokens output).",
-			"                               Default: 1.0 (same per-token price as the main model).",
-			"  --sim-min-range-tokens N     Minimum contiguous range size to be considered. Default: 2000.",
-			"  --help        Print this usage text.",
-			"",
-			"With no positional paths, defaults to *.jsonl files under ~/.pi/agent/sessions.",
-		].join("\n"),
-	);
+  console.log(
+    [
+      "Usage: node extensions/dynamic-context-pruning/scripts/benchmark.mjs [paths...] [options]",
+      "",
+      "Options:",
+      "  --limit N     Only process the first N session files found.",
+      "  --ratio R     Cached-price ratio(s) to model (repeatable/comma-separated). Default: 0.1.",
+      "  --sweep-max N Explicit ceiling for the auto-expanding threshold sweep (overrides the",
+      "                corpus-derived ceiling). Default: auto-expand from 30 as needed.",
+      "  --json        Emit a full machine-readable JSON dump instead of aligned text.",
+      "  --simulate-compression       Additionally simulate v2-style range compression (pe-ckbd);",
+      "                               see docs/v2-design.md §1/§4. SIMULATED results are reported",
+      "                               alongside (never mixed into) the deterministic results.",
+      "  --sim-summary-fraction F     Summary size as a fraction of range tokens (repeatable/",
+      "                               comma-separated, e.g. 0.1,0.15,0.3). Default: 0.15.",
+      "  --sim-summary-min-tokens N   Floor on summary tokens regardless of fraction. Default: 200.",
+      "  --sim-summarizer-cost-mult M Relative per-token price of the summarizer call vs the main",
+      "                               model (applies to rangeTokens input + summaryTokens output).",
+      "                               Default: 1.0 (same per-token price as the main model).",
+      "  --sim-min-range-tokens N     Minimum contiguous range size to be considered. Default: 2000.",
+      "  --help        Print this usage text.",
+      "",
+      "With no positional paths, defaults to *.jsonl files under ~/.pi/agent/sessions.",
+    ].join("\n"),
+  );
 }
 
 export function parseArgs(argv) {
-	const paths = [];
-	let limit;
-	const ratios = [];
-	let json = false;
-	let help = false;
-	let sweepMax;
-	let simulateCompression = false;
-	const simSummaryFractions = [];
-	let simSummaryMinTokens;
-	let simSummarizerCostMult;
-	let simMinRangeTokens;
+  const paths = [];
+  let limit;
+  const ratios = [];
+  let json = false;
+  let help = false;
+  let sweepMax;
+  let simulateCompression = false;
+  const simSummaryFractions = [];
+  let simSummaryMinTokens;
+  let simSummarizerCostMult;
+  let simMinRangeTokens;
 
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "--help" || arg === "-h") {
-			help = true;
-		} else if (arg === "--json") {
-			json = true;
-		} else if (arg === "--simulate-compression") {
-			simulateCompression = true;
-		} else if (arg === "--sim-summary-fraction") {
-			simSummaryFractions.push(...String(argv[++i]).split(","));
-		} else if (arg.startsWith("--sim-summary-fraction=")) {
-			simSummaryFractions.push(...arg.slice("--sim-summary-fraction=".length).split(","));
-		} else if (arg === "--sim-summary-min-tokens") {
-			const value = argv[++i];
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-summary-min-tokens expects a non-negative number, got: ${value}`);
-			simSummaryMinTokens = parsed;
-		} else if (arg.startsWith("--sim-summary-min-tokens=")) {
-			const value = arg.slice("--sim-summary-min-tokens=".length);
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-summary-min-tokens expects a non-negative number, got: ${value}`);
-			simSummaryMinTokens = parsed;
-		} else if (arg === "--sim-summarizer-cost-mult") {
-			const value = argv[++i];
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-summarizer-cost-mult expects a non-negative number, got: ${value}`);
-			simSummarizerCostMult = parsed;
-		} else if (arg.startsWith("--sim-summarizer-cost-mult=")) {
-			const value = arg.slice("--sim-summarizer-cost-mult=".length);
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-summarizer-cost-mult expects a non-negative number, got: ${value}`);
-			simSummarizerCostMult = parsed;
-		} else if (arg === "--sim-min-range-tokens") {
-			const value = argv[++i];
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-min-range-tokens expects a non-negative number, got: ${value}`);
-			simMinRangeTokens = parsed;
-		} else if (arg.startsWith("--sim-min-range-tokens=")) {
-			const value = arg.slice("--sim-min-range-tokens=".length);
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`--sim-min-range-tokens expects a non-negative number, got: ${value}`);
-			simMinRangeTokens = parsed;
-		} else if (arg === "--limit") {
-			const value = argv[++i];
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--limit expects a positive number, got: ${value}`);
-			limit = Math.floor(parsed);
-		} else if (arg.startsWith("--limit=")) {
-			const value = arg.slice("--limit=".length);
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--limit expects a positive number, got: ${value}`);
-			limit = Math.floor(parsed);
-		} else if (arg === "--sweep-max") {
-			const value = argv[++i];
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--sweep-max expects a positive number, got: ${value}`);
-			sweepMax = Math.floor(parsed);
-		} else if (arg.startsWith("--sweep-max=")) {
-			const value = arg.slice("--sweep-max=".length);
-			const parsed = Number(value);
-			if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--sweep-max expects a positive number, got: ${value}`);
-			sweepMax = Math.floor(parsed);
-		} else if (arg === "--ratio") {
-			ratios.push(...String(argv[++i]).split(","));
-		} else if (arg.startsWith("--ratio=")) {
-			ratios.push(...arg.slice("--ratio=".length).split(","));
-		} else if (arg.startsWith("--")) {
-			throw new Error(`Unknown option: ${arg}`);
-		} else {
-			paths.push(arg);
-		}
-	}
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      help = true;
+    } else if (arg === "--json") {
+      json = true;
+    } else if (arg === "--simulate-compression") {
+      simulateCompression = true;
+    } else if (arg === "--sim-summary-fraction") {
+      simSummaryFractions.push(...String(argv[++i]).split(","));
+    } else if (arg.startsWith("--sim-summary-fraction=")) {
+      simSummaryFractions.push(...arg.slice("--sim-summary-fraction=".length).split(","));
+    } else if (arg === "--sim-summary-min-tokens") {
+      const value = argv[++i];
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-summary-min-tokens expects a non-negative number, got: ${value}`);
+      simSummaryMinTokens = parsed;
+    } else if (arg.startsWith("--sim-summary-min-tokens=")) {
+      const value = arg.slice("--sim-summary-min-tokens=".length);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-summary-min-tokens expects a non-negative number, got: ${value}`);
+      simSummaryMinTokens = parsed;
+    } else if (arg === "--sim-summarizer-cost-mult") {
+      const value = argv[++i];
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-summarizer-cost-mult expects a non-negative number, got: ${value}`);
+      simSummarizerCostMult = parsed;
+    } else if (arg.startsWith("--sim-summarizer-cost-mult=")) {
+      const value = arg.slice("--sim-summarizer-cost-mult=".length);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-summarizer-cost-mult expects a non-negative number, got: ${value}`);
+      simSummarizerCostMult = parsed;
+    } else if (arg === "--sim-min-range-tokens") {
+      const value = argv[++i];
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-min-range-tokens expects a non-negative number, got: ${value}`);
+      simMinRangeTokens = parsed;
+    } else if (arg.startsWith("--sim-min-range-tokens=")) {
+      const value = arg.slice("--sim-min-range-tokens=".length);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0)
+        throw new Error(`--sim-min-range-tokens expects a non-negative number, got: ${value}`);
+      simMinRangeTokens = parsed;
+    } else if (arg === "--limit") {
+      const value = argv[++i];
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0)
+        throw new Error(`--limit expects a positive number, got: ${value}`);
+      limit = Math.floor(parsed);
+    } else if (arg.startsWith("--limit=")) {
+      const value = arg.slice("--limit=".length);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0)
+        throw new Error(`--limit expects a positive number, got: ${value}`);
+      limit = Math.floor(parsed);
+    } else if (arg === "--sweep-max") {
+      const value = argv[++i];
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0)
+        throw new Error(`--sweep-max expects a positive number, got: ${value}`);
+      sweepMax = Math.floor(parsed);
+    } else if (arg.startsWith("--sweep-max=")) {
+      const value = arg.slice("--sweep-max=".length);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0)
+        throw new Error(`--sweep-max expects a positive number, got: ${value}`);
+      sweepMax = Math.floor(parsed);
+    } else if (arg === "--ratio") {
+      ratios.push(...String(argv[++i]).split(","));
+    } else if (arg.startsWith("--ratio=")) {
+      ratios.push(...arg.slice("--ratio=".length).split(","));
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else {
+      paths.push(arg);
+    }
+  }
 
-	const parsedRatios = ratios
-		.map((value) => value.trim())
-		.filter((value) => value.length > 0)
-		.map((value) => Number(value));
-	for (const ratio of parsedRatios) {
-		if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) throw new Error(`--ratio expects a number in [0,1], got: ${ratio}`);
-	}
+  const parsedRatios = ratios
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => Number(value));
+  for (const ratio of parsedRatios) {
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1)
+      throw new Error(`--ratio expects a number in [0,1], got: ${ratio}`);
+  }
 
-	const parsedSimSummaryFractions = simSummaryFractions
-		.map((value) => value.trim())
-		.filter((value) => value.length > 0)
-		.map((value) => Number(value));
-	for (const fraction of parsedSimSummaryFractions) {
-		if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1)
-			throw new Error(`--sim-summary-fraction expects a number in (0,1], got: ${fraction}`);
-	}
+  const parsedSimSummaryFractions = simSummaryFractions
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => Number(value));
+  for (const fraction of parsedSimSummaryFractions) {
+    if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1)
+      throw new Error(`--sim-summary-fraction expects a number in (0,1], got: ${fraction}`);
+  }
 
-	return {
-		paths,
-		limit,
-		ratios: parsedRatios.length > 0 ? parsedRatios : [...DEFAULT_RATIOS],
-		json,
-		help,
-		sweepMax,
-		simulateCompression,
-		simSummaryFractions: parsedSimSummaryFractions.length > 0 ? parsedSimSummaryFractions : [...DEFAULT_SIM_SUMMARY_FRACTIONS],
-		simSummaryMinTokens,
-		simSummarizerCostMult,
-		simMinRangeTokens,
-	};
+  return {
+    paths,
+    limit,
+    ratios: parsedRatios.length > 0 ? parsedRatios : [...DEFAULT_RATIOS],
+    json,
+    help,
+    sweepMax,
+    simulateCompression,
+    simSummaryFractions:
+      parsedSimSummaryFractions.length > 0
+        ? parsedSimSummaryFractions
+        : [...DEFAULT_SIM_SUMMARY_FRACTIONS],
+    simSummaryMinTokens,
+    simSummarizerCostMult,
+    simMinRangeTokens,
+  };
 }
 
 // ============================================================================
@@ -247,46 +261,46 @@ export function parseArgs(argv) {
 // ============================================================================
 
 async function findJsonlFilesRecursive(rootPath) {
-	const results = [];
-	async function visit(currentPath) {
-		let entries;
-		try {
-			entries = await fs.readdir(currentPath, { withFileTypes: true });
-		} catch {
-			return;
-		}
-		for (const entry of entries) {
-			const entryPath = path.join(currentPath, entry.name);
-			if (entry.isDirectory()) {
-				await visit(entryPath);
-			} else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-				results.push(entryPath);
-			}
-		}
-	}
-	await visit(rootPath);
-	results.sort();
-	return results;
+  const results = [];
+  async function visit(currentPath) {
+    let entries;
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        results.push(entryPath);
+      }
+    }
+  }
+  await visit(rootPath);
+  results.sort();
+  return results;
 }
 
 export async function resolveSessionFiles(inputPaths) {
-	if (inputPaths.length === 0) {
-		return findJsonlFilesRecursive(DEFAULT_SESSIONS_DIR);
-	}
-	const files = [];
-	for (const inputPath of inputPaths) {
-		const stat = await fs.stat(inputPath).catch(() => undefined);
-		if (!stat) {
-			console.error(`warning: path does not exist, skipping: ${inputPath}`);
-			continue;
-		}
-		if (stat.isDirectory()) {
-			files.push(...(await findJsonlFilesRecursive(inputPath)));
-		} else {
-			files.push(inputPath);
-		}
-	}
-	return files;
+  if (inputPaths.length === 0) {
+    return findJsonlFilesRecursive(DEFAULT_SESSIONS_DIR);
+  }
+  const files = [];
+  for (const inputPath of inputPaths) {
+    const stat = await fs.stat(inputPath).catch(() => undefined);
+    if (!stat) {
+      console.error(`warning: path does not exist, skipping: ${inputPath}`);
+      continue;
+    }
+    if (stat.isDirectory()) {
+      files.push(...(await findJsonlFilesRecursive(inputPath)));
+    } else {
+      files.push(inputPath);
+    }
+  }
+  return files;
 }
 
 // ============================================================================
@@ -300,26 +314,30 @@ export async function resolveSessionFiles(inputPaths) {
  * an `id` are treated as already-linear (v1) and kept in file order.
  */
 export function parseSessionLines(sessionFile, rawText) {
-	const entries = [];
-	const lines = rawText.split("\n");
-	for (let lineNo = 0; lineNo < lines.length; lineNo++) {
-		const line = lines[lineNo].trim();
-		if (!line) continue;
-		let parsed;
-		try {
-			parsed = JSON.parse(line);
-		} catch (error) {
-			console.error(`warning: ${sessionFile}:${lineNo + 1}: unparseable JSON line, skipping (${error.message})`);
-			continue;
-		}
-		if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") {
-			console.error(`warning: ${sessionFile}:${lineNo + 1}: entry missing a string "type", skipping`);
-			continue;
-		}
-		if (parsed.type === "session") continue; // header line, not part of the entry tree
-		entries.push(parsed);
-	}
-	return entries;
+  const entries = [];
+  const lines = rawText.split("\n");
+  for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+    const line = lines[lineNo].trim();
+    if (!line) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch (error) {
+      console.error(
+        `warning: ${sessionFile}:${lineNo + 1}: unparseable JSON line, skipping (${error.message})`,
+      );
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") {
+      console.error(
+        `warning: ${sessionFile}:${lineNo + 1}: entry missing a string "type", skipping`,
+      );
+      continue;
+    }
+    if (parsed.type === "session") continue; // header line, not part of the entry tree
+    entries.push(parsed);
+  }
+  return entries;
 }
 
 /**
@@ -330,22 +348,22 @@ export function parseSessionLines(sessionFile, rawText) {
  * order, since there is no tree to walk.
  */
 export function resolveActiveBranch(entries) {
-	if (entries.length === 0) return [];
-	const hasTreeStructure = entries.every((entry) => typeof entry.id === "string");
-	if (!hasTreeStructure) return entries;
+  if (entries.length === 0) return [];
+  const hasTreeStructure = entries.every((entry) => typeof entry.id === "string");
+  if (!hasTreeStructure) return entries;
 
-	const byId = new Map(entries.map((entry) => [entry.id, entry]));
-	const path = [];
-	const seen = new Set();
-	let current = entries[entries.length - 1];
-	while (current) {
-		if (seen.has(current.id)) break; // guard against malformed cycles
-		seen.add(current.id);
-		path.push(current);
-		current = current.parentId ? byId.get(current.parentId) : undefined;
-	}
-	path.reverse();
-	return path;
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const path = [];
+  const seen = new Set();
+  let current = entries[entries.length - 1];
+  while (current) {
+    if (seen.has(current.id)) break; // guard against malformed cycles
+    seen.add(current.id);
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  path.reverse();
+  return path;
 }
 
 // ============================================================================
@@ -369,7 +387,7 @@ export function resolveActiveBranch(entries) {
  * definition below, which the live extension can actually compute.
  */
 export function classifyTurnState(messages, assistantIndex) {
-	return classifyAgentStateFromMessages(messages.slice(0, assistantIndex));
+  return classifyAgentStateFromMessages(messages.slice(0, assistantIndex));
 }
 
 // ============================================================================
@@ -377,9 +395,9 @@ export function classifyTurnState(messages, assistantIndex) {
 // ============================================================================
 
 function percentile(sortedValues, p) {
-	if (sortedValues.length === 0) return undefined;
-	const index = Math.min(sortedValues.length - 1, Math.floor((p / 100) * sortedValues.length));
-	return sortedValues[index];
+  if (sortedValues.length === 0) return undefined;
+  const index = Math.min(sortedValues.length - 1, Math.floor((p / 100) * sortedValues.length));
+  return sortedValues[index];
 }
 
 /**
@@ -398,85 +416,96 @@ function percentile(sortedValues, p) {
  * actually followed, and the realized net benefit that pruning would truly
  * have produced.
  */
-export function replaySession(sessionFile, messages, { ratios = DEFAULT_RATIOS, config: configOverride } = {}) {
-	// `configOverride` (pe-qdzb) lets callers (e.g. tests isolating a specific
-	// strategy/gate behavior on a small fixture) replay against a
-	// non-default config, most commonly to zero out `thresholds.minCharsSaved`
-	// so a tiny fixture's proposal isn't filtered by the real-world default
-	// floor before it can be observed. Real corpus benchmark runs (the CLI
-	// entrypoint below) intentionally omit this and use full defaults, so the
-	// minCharsSaved floor applies there exactly as it would in production.
-	const config = configOverride ?? normalizeConfig(undefined);
-	const offConfig = { ...config, gate: { ...config.gate, mode: "off" } };
+export function replaySession(
+  sessionFile,
+  messages,
+  { ratios = DEFAULT_RATIOS, config: configOverride } = {},
+) {
+  // `configOverride` (pe-qdzb) lets callers (e.g. tests isolating a specific
+  // strategy/gate behavior on a small fixture) replay against a
+  // non-default config, most commonly to zero out `thresholds.minCharsSaved`
+  // so a tiny fixture's proposal isn't filtered by the real-world default
+  // floor before it can be observed. Real corpus benchmark runs (the CLI
+  // entrypoint below) intentionally omit this and use full defaults, so the
+  // minCharsSaved floor applies there exactly as it would in production.
+  const config = configOverride ?? normalizeConfig(undefined);
+  const offConfig = { ...config, gate: { ...config.gate, mode: "off" } };
 
-	const assistantIndices = [];
-	messages.forEach((message, index) => {
-		if (message.role === "assistant") assistantIndices.push(index);
-	});
+  const assistantIndices = [];
+  messages.forEach((message, index) => {
+    if (message.role === "assistant") assistantIndices.push(index);
+  });
 
-	const persistedDecisions = [];
-	const knownIdempotencyKeys = new Set();
-	const candidates = [];
+  const persistedDecisions = [];
+  const knownIdempotencyKeys = new Set();
+  const candidates = [];
 
-	for (const assistantIndex of assistantIndices) {
-		const prefix = messages.slice(0, assistantIndex);
-		const turnState = classifyTurnState(messages, assistantIndex);
+  for (const assistantIndex of assistantIndices) {
+    const prefix = messages.slice(0, assistantIndex);
+    const turnState = classifyTurnState(messages, assistantIndex);
 
-		const result = runDynamicContextPruningPipeline({
-			messages: prefix,
-			config: offConfig,
-			persistedDecisions,
-			knownIdempotencyKeys,
-			agentState: turnState,
-		});
+    const result = runDynamicContextPruningPipeline({
+      messages: prefix,
+      config: offConfig,
+      persistedDecisions,
+      knownIdempotencyKeys,
+      agentState: turnState,
+    });
 
-		for (const decision of result.newlyAppliedDecisions) {
-			const estimate = estimateDecisionSavings(prefix, decision);
-			if (!estimate || estimate.tokensRemoved <= 0) continue;
+    for (const decision of result.newlyAppliedDecisions) {
+      const estimate = estimateDecisionSavings(prefix, decision);
+      if (!estimate || estimate.tokensRemoved <= 0) continue;
 
-			const tailTokensAfterEarliestChange = estimateTailTokens(prefix, estimate.position);
-			const actualRemainingCalls = assistantIndices.filter((index) => index >= assistantIndex).length;
+      const tailTokensAfterEarliestChange = estimateTailTokens(prefix, estimate.position);
+      const actualRemainingCalls = assistantIndices.filter(
+        (index) => index >= assistantIndex,
+      ).length;
 
-			const byRatio = {};
-			for (const ratio of ratios) {
-				const cost = computeCacheCostModel({
-					tailTokensAfterEarliestChange,
-					tokensRemoved: estimate.tokensRemoved,
-					cachedPriceRatio: ratio,
-				});
-				const realizedNetBenefit = actualRemainingCalls * cost.recurringSaving - cost.penalty;
-				const gateThreshold = resolveBreakEvenThreshold({ ...config.gate, cachedPriceRatio: ratio }, turnState);
-				byRatio[ratio] = {
-					ratio,
-					penalty: cost.penalty,
-					recurringSaving: cost.recurringSaving,
-					breakEvenCalls: cost.breakEvenCalls,
-					gateThreshold,
-					gatedAcceptedDefault: cost.breakEvenCalls <= gateThreshold,
-					realizedNetBenefit,
-				};
-			}
+      const byRatio = {};
+      for (const ratio of ratios) {
+        const cost = computeCacheCostModel({
+          tailTokensAfterEarliestChange,
+          tokensRemoved: estimate.tokensRemoved,
+          cachedPriceRatio: ratio,
+        });
+        const realizedNetBenefit = actualRemainingCalls * cost.recurringSaving - cost.penalty;
+        const gateThreshold = resolveBreakEvenThreshold(
+          { ...config.gate, cachedPriceRatio: ratio },
+          turnState,
+        );
+        byRatio[ratio] = {
+          ratio,
+          penalty: cost.penalty,
+          recurringSaving: cost.recurringSaving,
+          breakEvenCalls: cost.breakEvenCalls,
+          gateThreshold,
+          gatedAcceptedDefault: cost.breakEvenCalls <= gateThreshold,
+          realizedNetBenefit,
+        };
+      }
 
-			candidates.push({
-				sessionFile,
-				strategyId: decision.strategyId,
-				toolCallId: decision.correlation.type === "toolCallId" ? decision.correlation.toolCallId : undefined,
-				reason: decision.reason,
-				boundaryMessageIndex: assistantIndex,
-				turnState,
-				position: estimate.position,
-				tokensRemoved: estimate.tokensRemoved,
-				tailTokensAfterEarliestChange,
-				actualRemainingCalls,
-				byRatio,
-			});
-		}
+      candidates.push({
+        sessionFile,
+        strategyId: decision.strategyId,
+        toolCallId:
+          decision.correlation.type === "toolCallId" ? decision.correlation.toolCallId : undefined,
+        reason: decision.reason,
+        boundaryMessageIndex: assistantIndex,
+        turnState,
+        position: estimate.position,
+        tokensRemoved: estimate.tokensRemoved,
+        tailTokensAfterEarliestChange,
+        actualRemainingCalls,
+        byRatio,
+      });
+    }
 
-		persistedDecisions.push(...result.newlyAppliedDecisions);
-		for (const decision of result.newlyAppliedDecisions) knownIdempotencyKeys.add(decision.idempotencyKey);
-	}
+    persistedDecisions.push(...result.newlyAppliedDecisions);
+    for (const decision of result.newlyAppliedDecisions)
+      knownIdempotencyKeys.add(decision.idempotencyKey);
+  }
 
-	return { sessionFile, assistantCallCount: assistantIndices.length, candidates };
+  return { sessionFile, assistantCallCount: assistantIndices.length, candidates };
 }
 
 // ============================================================================
@@ -498,11 +527,14 @@ export function replaySession(sessionFile, messages, { ratios = DEFAULT_RATIOS, 
  * `resolveArgStringsForPair` using only exported building blocks.
  */
 function argStringsForPair(messages, pair) {
-	if (!pair || pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined) return [];
-	const assistantMessage = messages[pair.assistantIndex];
-	const block = Array.isArray(assistantMessage?.content) ? assistantMessage.content[pair.toolCallBlockIndex] : undefined;
-	if (!block || block.type !== "toolCall") return [];
-	return collectArgStringValues(block.arguments);
+  if (!pair || pair.assistantIndex === undefined || pair.toolCallBlockIndex === undefined)
+    return [];
+  const assistantMessage = messages[pair.assistantIndex];
+  const block = Array.isArray(assistantMessage?.content)
+    ? assistantMessage.content[pair.toolCallBlockIndex]
+    : undefined;
+  if (!block || block.type !== "toolCall") return [];
+  return collectArgStringValues(block.arguments);
 }
 
 /**
@@ -523,44 +555,49 @@ function argStringsForPair(messages, pair) {
  * dropping the whole pair from ever joining a range.
  */
 export function computeSimulatedRangeExclusions(messages, pairIndex, protections) {
-	const excluded = new Array(messages.length).fill(false);
+  const excluded = new Array(messages.length).fill(false);
 
-	messages.forEach((message, index) => {
-		if (message.role === "toolResult") {
-			if (isProtectedToolName(message.toolName, protections)) {
-				excluded[index] = true;
-				return;
-			}
-			const pair = pairIndex.get(message.toolCallId);
-			if (argStringsForPair(messages, pair).some((value) => isProtectedPath(value, protections))) excluded[index] = true;
-			return;
-		}
-		if (message.role === "assistant" && Array.isArray(message.content)) {
-			for (const block of message.content) {
-				if (block.type !== "toolCall") continue;
-				if (isProtectedToolName(block.name, protections)) {
-					excluded[index] = true;
-					break;
-				}
-				if (collectArgStringValues(block.arguments).some((value) => isProtectedPath(value, protections))) {
-					excluded[index] = true;
-					break;
-				}
-			}
-		}
-	});
+  messages.forEach((message, index) => {
+    if (message.role === "toolResult") {
+      if (isProtectedToolName(message.toolName, protections)) {
+        excluded[index] = true;
+        return;
+      }
+      const pair = pairIndex.get(message.toolCallId);
+      if (argStringsForPair(messages, pair).some((value) => isProtectedPath(value, protections)))
+        excluded[index] = true;
+      return;
+    }
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block.type !== "toolCall") continue;
+        if (isProtectedToolName(block.name, protections)) {
+          excluded[index] = true;
+          break;
+        }
+        if (
+          collectArgStringValues(block.arguments).some((value) =>
+            isProtectedPath(value, protections),
+          )
+        ) {
+          excluded[index] = true;
+          break;
+        }
+      }
+    }
+  });
 
-	// Pair-integrity fixup: never split a toolCall/toolResult pair across the
-	// exclusion boundary -- if either half is excluded, exclude both.
-	for (const pair of pairIndex.values()) {
-		if (pair.assistantIndex === undefined || pair.resultIndex === undefined) continue;
-		if (excluded[pair.assistantIndex] || excluded[pair.resultIndex]) {
-			excluded[pair.assistantIndex] = true;
-			excluded[pair.resultIndex] = true;
-		}
-	}
+  // Pair-integrity fixup: never split a toolCall/toolResult pair across the
+  // exclusion boundary -- if either half is excluded, exclude both.
+  for (const pair of pairIndex.values()) {
+    if (pair.assistantIndex === undefined || pair.resultIndex === undefined) continue;
+    if (excluded[pair.assistantIndex] || excluded[pair.resultIndex]) {
+      excluded[pair.assistantIndex] = true;
+      excluded[pair.resultIndex] = true;
+    }
+  }
 
-	return excluded;
+  return excluded;
 }
 
 /**
@@ -589,63 +626,73 @@ export function computeSimulatedRangeExclusions(messages, pairIndex, protections
  * possibly recorded -- once more messages age out of the recent window at a
  * later boundary.
  */
-export function identifySimulatedRanges(sessionFile, messages, { config, minRangeTokens = DEFAULT_SIM_MIN_RANGE_TOKENS } = {}) {
-	const protections = config.protections;
-	const pairIndex = buildToolCallPairIndex(messages);
-	const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
+export function identifySimulatedRanges(
+  sessionFile,
+  messages,
+  { config, minRangeTokens = DEFAULT_SIM_MIN_RANGE_TOKENS } = {},
+) {
+  const protections = config.protections;
+  const pairIndex = buildToolCallPairIndex(messages);
+  const excluded = computeSimulatedRangeExclusions(messages, pairIndex, protections);
 
-	const assistantIndices = [];
-	messages.forEach((message, index) => {
-		if (message.role === "assistant") assistantIndices.push(index);
-	});
+  const assistantIndices = [];
+  messages.forEach((message, index) => {
+    if (message.role === "assistant") assistantIndices.push(index);
+  });
 
-	const ranges = [];
-	const knownRangeKeys = new Set();
-	let consumedEnd = 0;
+  const ranges = [];
+  const knownRangeKeys = new Set();
+  let consumedEnd = 0;
 
-	for (const assistantIndex of assistantIndices) {
-		const prefix = messages.slice(0, assistantIndex);
-		const oldRegionEnd = Math.min(computeRecencyBoundaryIndex(prefix, protections.recentTurns), prefix.length);
+  for (const assistantIndex of assistantIndices) {
+    const prefix = messages.slice(0, assistantIndex);
+    const oldRegionEnd = Math.min(
+      computeRecencyBoundaryIndex(prefix, protections.recentTurns),
+      prefix.length,
+    );
 
-		let i = consumedEnd;
-		while (i < oldRegionEnd) {
-			if (excluded[i]) {
-				i++;
-				consumedEnd = i; // an excluded message can never join a range; skip past it permanently.
-				continue;
-			}
-			const runStart = i;
-			while (i < oldRegionEnd && !excluded[i]) i++;
-			const runEnd = i;
-			const isOpenEnded = runEnd === oldRegionEnd;
-			const rangeTokens = estimateTailTokens(messages, runStart) - estimateTailTokens(messages, runEnd);
+    let i = consumedEnd;
+    while (i < oldRegionEnd) {
+      if (excluded[i]) {
+        i++;
+        consumedEnd = i; // an excluded message can never join a range; skip past it permanently.
+        continue;
+      }
+      const runStart = i;
+      while (i < oldRegionEnd && !excluded[i]) i++;
+      const runEnd = i;
+      const isOpenEnded = runEnd === oldRegionEnd;
+      const rangeTokens =
+        estimateTailTokens(messages, runStart) - estimateTailTokens(messages, runEnd);
 
-			if (rangeTokens >= minRangeTokens) {
-				const key = `${runStart}:${runEnd}`;
-				if (!knownRangeKeys.has(key)) {
-					knownRangeKeys.add(key);
-					const tailTokensAfterEarliestChange = estimateTailTokens(prefix, runStart);
-					const actualRemainingCalls = assistantIndices.filter((idx) => idx >= assistantIndex).length;
-					ranges.push({
-						sessionFile,
-						rangeStart: runStart,
-						rangeEnd: runEnd,
-						rangeTokens,
-						boundaryMessageIndex: assistantIndex,
-						tailTokensAfterEarliestChange,
-						actualRemainingCalls,
-					});
-				}
-				consumedEnd = runEnd;
-				continue; // keep scanning: further runs may already be visible within this boundary's old region.
-			}
+      if (rangeTokens >= minRangeTokens) {
+        const key = `${runStart}:${runEnd}`;
+        if (!knownRangeKeys.has(key)) {
+          knownRangeKeys.add(key);
+          const tailTokensAfterEarliestChange = estimateTailTokens(prefix, runStart);
+          const actualRemainingCalls = assistantIndices.filter(
+            (idx) => idx >= assistantIndex,
+          ).length;
+          ranges.push({
+            sessionFile,
+            rangeStart: runStart,
+            rangeEnd: runEnd,
+            rangeTokens,
+            boundaryMessageIndex: assistantIndex,
+            tailTokensAfterEarliestChange,
+            actualRemainingCalls,
+          });
+        }
+        consumedEnd = runEnd;
+        continue; // keep scanning: further runs may already be visible within this boundary's old region.
+      }
 
-			if (isOpenEnded) break; // still growing; leave consumedEnd where it is, retry at a later boundary.
-			consumedEnd = runEnd; // bounded by an excluded message and below the floor -- will never grow; skip permanently.
-		}
-	}
+      if (isOpenEnded) break; // still growing; leave consumedEnd where it is, retry at a later boundary.
+      consumedEnd = runEnd; // bounded by an excluded message and below the floor -- will never grow; skip permanently.
+    }
+  }
 
-	return ranges;
+  return ranges;
 }
 
 /**
@@ -668,48 +715,49 @@ export function identifySimulatedRanges(sessionFile, messages, { config, minRang
  * and ignores summarizer latency/availability entirely.
  */
 export function buildSimulatedCandidate(
-	range,
-	{
-		fraction,
-		summaryMinTokens = DEFAULT_SIM_SUMMARY_MIN_TOKENS,
-		summarizerCostMult = DEFAULT_SIM_SUMMARIZER_COST_MULT,
-		ratios,
-	},
+  range,
+  {
+    fraction,
+    summaryMinTokens = DEFAULT_SIM_SUMMARY_MIN_TOKENS,
+    summarizerCostMult = DEFAULT_SIM_SUMMARIZER_COST_MULT,
+    ratios,
+  },
 ) {
-	const summaryTokens = Math.max(fraction * range.rangeTokens, summaryMinTokens);
-	const byRatio = {};
-	for (const ratio of ratios) {
-		const cost = computeCacheCostModel({
-			tailTokensAfterEarliestChange: range.tailTokensAfterEarliestChange,
-			tokensRemoved: range.rangeTokens - summaryTokens,
-			cachedPriceRatio: ratio,
-		});
-		const summarizerCost = summarizerCostMult * (range.rangeTokens + summaryTokens);
-		const oneTimeCost = cost.penalty + summarizerCost;
-		const recurringSaving = cost.recurringSaving;
-		const breakEvenCalls = recurringSaving > 0 ? oneTimeCost / recurringSaving : oneTimeCost > 0 ? Infinity : 0;
-		const realizedNetBenefit = range.actualRemainingCalls * recurringSaving - oneTimeCost;
-		byRatio[ratio] = {
-			ratio,
-			cacheBustPenalty: cost.penalty,
-			summarizerCost,
-			oneTimeCost,
-			recurringSaving,
-			breakEvenCalls,
-			realizedNetBenefit,
-		};
-	}
-	return {
-		sessionFile: range.sessionFile,
-		rangeStart: range.rangeStart,
-		rangeEnd: range.rangeEnd,
-		rangeTokens: range.rangeTokens,
-		summaryFraction: fraction,
-		summaryTokens,
-		boundaryMessageIndex: range.boundaryMessageIndex,
-		actualRemainingCalls: range.actualRemainingCalls,
-		byRatio,
-	};
+  const summaryTokens = Math.max(fraction * range.rangeTokens, summaryMinTokens);
+  const byRatio = {};
+  for (const ratio of ratios) {
+    const cost = computeCacheCostModel({
+      tailTokensAfterEarliestChange: range.tailTokensAfterEarliestChange,
+      tokensRemoved: range.rangeTokens - summaryTokens,
+      cachedPriceRatio: ratio,
+    });
+    const summarizerCost = summarizerCostMult * (range.rangeTokens + summaryTokens);
+    const oneTimeCost = cost.penalty + summarizerCost;
+    const recurringSaving = cost.recurringSaving;
+    const breakEvenCalls =
+      recurringSaving > 0 ? oneTimeCost / recurringSaving : oneTimeCost > 0 ? Infinity : 0;
+    const realizedNetBenefit = range.actualRemainingCalls * recurringSaving - oneTimeCost;
+    byRatio[ratio] = {
+      ratio,
+      cacheBustPenalty: cost.penalty,
+      summarizerCost,
+      oneTimeCost,
+      recurringSaving,
+      breakEvenCalls,
+      realizedNetBenefit,
+    };
+  }
+  return {
+    sessionFile: range.sessionFile,
+    rangeStart: range.rangeStart,
+    rangeEnd: range.rangeEnd,
+    rangeTokens: range.rangeTokens,
+    summaryFraction: fraction,
+    summaryTokens,
+    boundaryMessageIndex: range.boundaryMessageIndex,
+    actualRemainingCalls: range.actualRemainingCalls,
+    byRatio,
+  };
 }
 
 /**
@@ -724,38 +772,41 @@ export function buildSimulatedCandidate(
  * values; each produces its own independent population/sweep so the go/no-go
  * conclusion's dependence on assumed summary size is directly visible.
  */
-export function computeSimulatedAggregate(allRanges, { fractions, ratios, summaryMinTokens, summarizerCostMult, sweepMax } = {}) {
-	const rangeTokensSorted = allRanges.map((r) => r.rangeTokens).sort((a, b) => a - b);
-	const rangeSizeDistribution = {
-		count: rangeTokensSorted.length,
-		p50: percentile(rangeTokensSorted, 50),
-		p90: percentile(rangeTokensSorted, 90),
-	};
+export function computeSimulatedAggregate(
+  allRanges,
+  { fractions, ratios, summaryMinTokens, summarizerCostMult, sweepMax } = {},
+) {
+  const rangeTokensSorted = allRanges.map((r) => r.rangeTokens).sort((a, b) => a - b);
+  const rangeSizeDistribution = {
+    count: rangeTokensSorted.length,
+    p50: percentile(rangeTokensSorted, 50),
+    p90: percentile(rangeTokensSorted, 90),
+  };
 
-	const byFraction = {};
-	for (const fraction of fractions) {
-		const candidates = allRanges.map((range) =>
-			buildSimulatedCandidate(range, { fraction, summaryMinTokens, summarizerCostMult, ratios }),
-		);
-		const totalRangeTokens = candidates.reduce((sum, c) => sum + c.rangeTokens, 0);
-		const totalSummaryTokens = candidates.reduce((sum, c) => sum + c.summaryTokens, 0);
+  const byFraction = {};
+  for (const fraction of fractions) {
+    const candidates = allRanges.map((range) =>
+      buildSimulatedCandidate(range, { fraction, summaryMinTokens, summarizerCostMult, ratios }),
+    );
+    const totalRangeTokens = candidates.reduce((sum, c) => sum + c.rangeTokens, 0);
+    const totalSummaryTokens = candidates.reduce((sum, c) => sum + c.summaryTokens, 0);
 
-		const byRatio = {};
-		for (const ratio of ratios) {
-			const sweep = sweepThresholdWithAutoExpand(candidates, ratio, { sweepMax });
-			byRatio[ratio] = { ratio, sweep };
-		}
+    const byRatio = {};
+    for (const ratio of ratios) {
+      const sweep = sweepThresholdWithAutoExpand(candidates, ratio, { sweepMax });
+      byRatio[ratio] = { ratio, sweep };
+    }
 
-		byFraction[fraction] = {
-			summaryFraction: fraction,
-			candidateCount: candidates.length,
-			totalRangeTokens,
-			totalSummaryTokens,
-			byRatio,
-		};
-	}
+    byFraction[fraction] = {
+      summaryFraction: fraction,
+      candidateCount: candidates.length,
+      totalRangeTokens,
+      totalSummaryTokens,
+      byRatio,
+    };
+  }
 
-	return { rangeCount: allRanges.length, rangeSizeDistribution, byFraction };
+  return { rangeCount: allRanges.length, rangeSizeDistribution, byFraction };
 }
 
 // ============================================================================
@@ -763,41 +814,48 @@ export function computeSimulatedAggregate(allRanges, { fractions, ratios, summar
 // ============================================================================
 
 function emptyStrategyAgg() {
-	return { candidateCount: 0, totalTokensRemoved: 0, totalPenalty: 0, totalRealizedNetBenefit: 0, gatedAcceptedCount: 0 };
+  return {
+    candidateCount: 0,
+    totalTokensRemoved: 0,
+    totalPenalty: 0,
+    totalRealizedNetBenefit: 0,
+    gatedAcceptedCount: 0,
+  };
 }
 
 function foldCandidateIntoStrategyAgg(agg, candidate, ratio) {
-	const r = candidate.byRatio[ratio];
-	agg.candidateCount += 1;
-	agg.totalTokensRemoved += candidate.tokensRemoved;
-	agg.totalPenalty += r.penalty;
-	agg.totalRealizedNetBenefit += r.realizedNetBenefit;
-	if (r.gatedAcceptedDefault) agg.gatedAcceptedCount += 1;
+  const r = candidate.byRatio[ratio];
+  agg.candidateCount += 1;
+  agg.totalTokensRemoved += candidate.tokensRemoved;
+  agg.totalPenalty += r.penalty;
+  agg.totalRealizedNetBenefit += r.realizedNetBenefit;
+  if (r.gatedAcceptedDefault) agg.gatedAcceptedCount += 1;
 }
 
 export function aggregateBySessionAndStrategy(sessionResult, ratio) {
-	const byStrategy = {};
-	for (const candidate of sessionResult.candidates) {
-		const agg = (byStrategy[candidate.strategyId] ??= emptyStrategyAgg());
-		foldCandidateIntoStrategyAgg(agg, candidate, ratio);
-	}
-	return byStrategy;
+  const byStrategy = {};
+  for (const candidate of sessionResult.candidates) {
+    const agg = (byStrategy[candidate.strategyId] ??= emptyStrategyAgg());
+    foldCandidateIntoStrategyAgg(agg, candidate, ratio);
+  }
+  return byStrategy;
 }
 
 /** Sweep break-even threshold T over 1..max; returns the T maximizing total realized net benefit, plus the full curve. */
 export function sweepThreshold(candidates, ratio, max = THRESHOLD_SWEEP_MAX) {
-	const curve = [];
-	let best = { threshold: 1, total: Number.NEGATIVE_INFINITY };
-	for (let threshold = 1; threshold <= max; threshold++) {
-		let total = 0;
-		for (const candidate of candidates) {
-			const r = candidate.byRatio[ratio];
-			if (r && Number.isFinite(r.breakEvenCalls) && r.breakEvenCalls <= threshold) total += r.realizedNetBenefit;
-		}
-		curve.push({ threshold, total });
-		if (total > best.total) best = { threshold, total };
-	}
-	return { recommended: best.threshold, totalAtRecommended: best.total, curve };
+  const curve = [];
+  let best = { threshold: 1, total: Number.NEGATIVE_INFINITY };
+  for (let threshold = 1; threshold <= max; threshold++) {
+    let total = 0;
+    for (const candidate of candidates) {
+      const r = candidate.byRatio[ratio];
+      if (r && Number.isFinite(r.breakEvenCalls) && r.breakEvenCalls <= threshold)
+        total += r.realizedNetBenefit;
+    }
+    curve.push({ threshold, total });
+    if (total > best.total) best = { threshold, total };
+  }
+  return { recommended: best.threshold, totalAtRecommended: best.total, curve };
 }
 
 /**
@@ -815,13 +873,14 @@ export function sweepThreshold(candidates, ratio, max = THRESHOLD_SWEEP_MAX) {
  * sweep below the historical default.
  */
 export function deriveSweepCeiling(candidates, ratio) {
-	let maxBreakEven = 0;
-	for (const candidate of candidates) {
-		const r = candidate.byRatio?.[ratio];
-		if (r && Number.isFinite(r.breakEvenCalls) && r.breakEvenCalls > maxBreakEven) maxBreakEven = r.breakEvenCalls;
-	}
-	if (maxBreakEven <= THRESHOLD_SWEEP_MAX) return THRESHOLD_SWEEP_MAX;
-	return Math.min(HARD_SWEEP_CEILING, Math.ceil(maxBreakEven));
+  let maxBreakEven = 0;
+  for (const candidate of candidates) {
+    const r = candidate.byRatio?.[ratio];
+    if (r && Number.isFinite(r.breakEvenCalls) && r.breakEvenCalls > maxBreakEven)
+      maxBreakEven = r.breakEvenCalls;
+  }
+  if (maxBreakEven <= THRESHOLD_SWEEP_MAX) return THRESHOLD_SWEEP_MAX;
+  return Math.min(HARD_SWEEP_CEILING, Math.ceil(maxBreakEven));
 }
 
 /**
@@ -837,54 +896,60 @@ export function deriveSweepCeiling(candidates, ratio) {
  * On a corpus that never pins to the boundary, this returns byte-identical numbers to
  * the pre-pe-7oej sweepThreshold(candidates, ratio, 30) call (back-compat).
  */
-export function sweepThresholdWithAutoExpand(candidates, ratio, { initialMax = THRESHOLD_SWEEP_MAX, sweepMax } = {}) {
-	const ceiling = sweepMax !== undefined ? sweepMax : deriveSweepCeiling(candidates, ratio);
-	let maxTested = Math.max(1, Math.min(initialMax, ceiling));
-	let sweep = sweepThreshold(candidates, ratio, maxTested);
-	while (sweep.recommended >= maxTested && maxTested < ceiling) {
-		maxTested = Math.min(ceiling, maxTested * 2);
-		sweep = sweepThreshold(candidates, ratio, maxTested);
-	}
-	const boundaryPinned = sweep.recommended >= maxTested;
-	return { ...sweep, maxTested, boundaryPinned };
+export function sweepThresholdWithAutoExpand(
+  candidates,
+  ratio,
+  { initialMax = THRESHOLD_SWEEP_MAX, sweepMax } = {},
+) {
+  const ceiling = sweepMax !== undefined ? sweepMax : deriveSweepCeiling(candidates, ratio);
+  let maxTested = Math.max(1, Math.min(initialMax, ceiling));
+  let sweep = sweepThreshold(candidates, ratio, maxTested);
+  while (sweep.recommended >= maxTested && maxTested < ceiling) {
+    maxTested = Math.min(ceiling, maxTested * 2);
+    sweep = sweepThreshold(candidates, ratio, maxTested);
+  }
+  const boundaryPinned = sweep.recommended >= maxTested;
+  return { ...sweep, maxTested, boundaryPinned };
 }
 
 export function computeAggregate(sessionResults, ratios, { sweepMax } = {}) {
-	const allCandidates = sessionResults.flatMap((session) => session.candidates);
-	const primaryRatio = ratios[0];
+  const allCandidates = sessionResults.flatMap((session) => session.candidates);
+  const primaryRatio = ratios[0];
 
-	const byStrategy = {};
-	for (const candidate of allCandidates) {
-		const agg = (byStrategy[candidate.strategyId] ??= emptyStrategyAgg());
-		foldCandidateIntoStrategyAgg(agg, candidate, primaryRatio);
-	}
+  const byStrategy = {};
+  for (const candidate of allCandidates) {
+    const agg = (byStrategy[candidate.strategyId] ??= emptyStrategyAgg());
+    foldCandidateIntoStrategyAgg(agg, candidate, primaryRatio);
+  }
 
-	const remainingCallsSorted = allCandidates.map((c) => c.actualRemainingCalls).sort((a, b) => a - b);
-	const distribution = {
-		count: remainingCallsSorted.length,
-		p50: percentile(remainingCallsSorted, 50),
-		p90: percentile(remainingCallsSorted, 90),
-	};
+  const remainingCallsSorted = allCandidates
+    .map((c) => c.actualRemainingCalls)
+    .sort((a, b) => a - b);
+  const distribution = {
+    count: remainingCallsSorted.length,
+    p50: percentile(remainingCallsSorted, 50),
+    p90: percentile(remainingCallsSorted, 90),
+  };
 
-	const midLoopCandidates = allCandidates.filter((c) => c.turnState === "mid_loop");
-	const idleCandidates = allCandidates.filter((c) => c.turnState === "idle");
+  const midLoopCandidates = allCandidates.filter((c) => c.turnState === "mid_loop");
+  const idleCandidates = allCandidates.filter((c) => c.turnState === "idle");
 
-	const thresholdSweepByRatio = {};
-	for (const ratio of ratios) {
-		thresholdSweepByRatio[ratio] = {
-			overall: sweepThresholdWithAutoExpand(allCandidates, ratio, { sweepMax }),
-			mid_loop: sweepThresholdWithAutoExpand(midLoopCandidates, ratio, { sweepMax }),
-			idle: sweepThresholdWithAutoExpand(idleCandidates, ratio, { sweepMax }),
-		};
-	}
+  const thresholdSweepByRatio = {};
+  for (const ratio of ratios) {
+    thresholdSweepByRatio[ratio] = {
+      overall: sweepThresholdWithAutoExpand(allCandidates, ratio, { sweepMax }),
+      mid_loop: sweepThresholdWithAutoExpand(midLoopCandidates, ratio, { sweepMax }),
+      idle: sweepThresholdWithAutoExpand(idleCandidates, ratio, { sweepMax }),
+    };
+  }
 
-	return {
-		candidateCount: allCandidates.length,
-		byStrategy,
-		distribution,
-		thresholdSweepByRatio,
-		primaryRatio,
-	};
+  return {
+    candidateCount: allCandidates.length,
+    byStrategy,
+    distribution,
+    thresholdSweepByRatio,
+    primaryRatio,
+  };
 }
 
 // ============================================================================
@@ -892,87 +957,103 @@ export function computeAggregate(sessionResults, ratios, { sweepMax } = {}) {
 // ============================================================================
 
 function formatNumber(value, digits = 1) {
-	if (value === undefined || value === null || Number.isNaN(value)) return "-";
-	if (!Number.isFinite(value)) return "inf";
-	return value.toFixed(digits);
+  if (value === undefined || value === null || Number.isNaN(value)) return "-";
+  if (!Number.isFinite(value)) return "inf";
+  return value.toFixed(digits);
 }
 
 function padColumns(rows) {
-	if (rows.length === 0) return "";
-	const widths = [];
-	for (const row of rows) {
-		row.forEach((cell, i) => {
-			widths[i] = Math.max(widths[i] ?? 0, String(cell).length);
-		});
-	}
-	return rows.map((row) => row.map((cell, i) => String(cell).padEnd(widths[i])).join("  ")).join("\n");
+  if (rows.length === 0) return "";
+  const widths = [];
+  for (const row of rows) {
+    row.forEach((cell, i) => {
+      widths[i] = Math.max(widths[i] ?? 0, String(cell).length);
+    });
+  }
+  return rows
+    .map((row) => row.map((cell, i) => String(cell).padEnd(widths[i])).join("  "))
+    .join("\n");
 }
 
 function renderSessionTable(sessionResult, ratio) {
-	const byStrategy = aggregateBySessionAndStrategy(sessionResult, ratio);
-	const header = ["strategy", "candidates", "tokensRemoved", "predPenalty(sum)", "gatedAccepted", "realizedNetBenefit(sum)"];
-	const rows = [header];
-	const strategyIds = Object.keys(byStrategy).sort();
-	for (const strategyId of strategyIds) {
-		const agg = byStrategy[strategyId];
-		rows.push([
-			strategyId,
-			agg.candidateCount,
-			formatNumber(agg.totalTokensRemoved, 0),
-			formatNumber(agg.totalPenalty, 1),
-			`${agg.gatedAcceptedCount}/${agg.candidateCount}`,
-			formatNumber(agg.totalRealizedNetBenefit, 1),
-		]);
-	}
-	if (strategyIds.length === 0) rows.push(["(no candidates)", "", "", "", "", ""]);
-	return padColumns(rows);
+  const byStrategy = aggregateBySessionAndStrategy(sessionResult, ratio);
+  const header = [
+    "strategy",
+    "candidates",
+    "tokensRemoved",
+    "predPenalty(sum)",
+    "gatedAccepted",
+    "realizedNetBenefit(sum)",
+  ];
+  const rows = [header];
+  const strategyIds = Object.keys(byStrategy).sort();
+  for (const strategyId of strategyIds) {
+    const agg = byStrategy[strategyId];
+    rows.push([
+      strategyId,
+      agg.candidateCount,
+      formatNumber(agg.totalTokensRemoved, 0),
+      formatNumber(agg.totalPenalty, 1),
+      `${agg.gatedAcceptedCount}/${agg.candidateCount}`,
+      formatNumber(agg.totalRealizedNetBenefit, 1),
+    ]);
+  }
+  if (strategyIds.length === 0) rows.push(["(no candidates)", "", "", "", "", ""]);
+  return padColumns(rows);
 }
 
 function renderAggregateSummary(aggregate, ratios) {
-	const lines = [];
-	lines.push(`Sessions processed: candidates=${aggregate.candidateCount}`);
-	lines.push("");
-	lines.push(`PREDICTED vs REALIZED by strategy (ratio r=${aggregate.primaryRatio}):`);
-	const header = ["strategy", "candidates", "tokensRemoved", "predPenalty(sum)", "gatedAccepted", "realizedNetBenefit(sum)"];
-	const rows = [header];
-	for (const strategyId of Object.keys(aggregate.byStrategy).sort()) {
-		const agg = aggregate.byStrategy[strategyId];
-		rows.push([
-			strategyId,
-			agg.candidateCount,
-			formatNumber(agg.totalTokensRemoved, 0),
-			formatNumber(agg.totalPenalty, 1),
-			`${agg.gatedAcceptedCount}/${agg.candidateCount}`,
-			formatNumber(agg.totalRealizedNetBenefit, 1),
-		]);
-	}
-	lines.push(padColumns(rows));
-	lines.push("");
-	lines.push(
-		`REALIZED remaining-calls-after-position distribution: count=${aggregate.distribution.count} p50=${
-			aggregate.distribution.p50 ?? "-"
-		} p90=${aggregate.distribution.p90 ?? "-"}`,
-	);
-	lines.push("");
-	lines.push(
-		"RECOMMENDED break-even threshold (sweep auto-expands past T=30 until the argmax is interior or a ceiling is hit;",
-	);
-	lines.push("maximizes total REALIZED net benefit; ties -> smallest T):");
-	for (const ratio of ratios) {
-		const sweep = aggregate.thresholdSweepByRatio[ratio];
-		lines.push(`  ratio r=${ratio}:`);
-		for (const [label, entry] of [
-			["overall ", sweep.overall],
-			["mid_loop", sweep.mid_loop],
-			["idle    ", sweep.idle],
-		]) {
-			const marker = entry.boundaryPinned ? "  [boundary-pinned (optimum may be higher)]" : "";
-			lines.push(
-				`    ${label}: T=${entry.recommended}  totalRealizedNetBenefit=${formatNumber(entry.totalAtRecommended, 1)}  maxTested=${entry.maxTested}${marker}`,
-			);
-		}
-	}
-	return lines.join("\n");
+  const lines = [];
+  lines.push(`Sessions processed: candidates=${aggregate.candidateCount}`);
+  lines.push("");
+  lines.push(`PREDICTED vs REALIZED by strategy (ratio r=${aggregate.primaryRatio}):`);
+  const header = [
+    "strategy",
+    "candidates",
+    "tokensRemoved",
+    "predPenalty(sum)",
+    "gatedAccepted",
+    "realizedNetBenefit(sum)",
+  ];
+  const rows = [header];
+  for (const strategyId of Object.keys(aggregate.byStrategy).sort()) {
+    const agg = aggregate.byStrategy[strategyId];
+    rows.push([
+      strategyId,
+      agg.candidateCount,
+      formatNumber(agg.totalTokensRemoved, 0),
+      formatNumber(agg.totalPenalty, 1),
+      `${agg.gatedAcceptedCount}/${agg.candidateCount}`,
+      formatNumber(agg.totalRealizedNetBenefit, 1),
+    ]);
+  }
+  lines.push(padColumns(rows));
+  lines.push("");
+  lines.push(
+    `REALIZED remaining-calls-after-position distribution: count=${aggregate.distribution.count} p50=${
+      aggregate.distribution.p50 ?? "-"
+    } p90=${aggregate.distribution.p90 ?? "-"}`,
+  );
+  lines.push("");
+  lines.push(
+    "RECOMMENDED break-even threshold (sweep auto-expands past T=30 until the argmax is interior or a ceiling is hit;",
+  );
+  lines.push("maximizes total REALIZED net benefit; ties -> smallest T):");
+  for (const ratio of ratios) {
+    const sweep = aggregate.thresholdSweepByRatio[ratio];
+    lines.push(`  ratio r=${ratio}:`);
+    for (const [label, entry] of [
+      ["overall ", sweep.overall],
+      ["mid_loop", sweep.mid_loop],
+      ["idle    ", sweep.idle],
+    ]) {
+      const marker = entry.boundaryPinned ? "  [boundary-pinned (optimum may be higher)]" : "";
+      lines.push(
+        `    ${label}: T=${entry.recommended}  totalRealizedNetBenefit=${formatNumber(entry.totalAtRecommended, 1)}  maxTested=${entry.maxTested}${marker}`,
+      );
+    }
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -988,45 +1069,50 @@ function renderAggregateSummary(aggregate, ratios) {
  * (mostly) the same old-turn content, not a combined total.
  */
 function renderSimulatedSummary(aggregate, simulated, ratios) {
-	const lines = [];
-	lines.push(
-		`Ranges identified: ${simulated.rangeCount}  (rangeTokens p50=${simulated.rangeSizeDistribution.p50 ?? "-"} p90=${
-			simulated.rangeSizeDistribution.p90 ?? "-"
-		})`,
-	);
-	lines.push(`minRangeTokens=${simulated.minRangeTokens}  summaryMinTokens=${simulated.summaryMinTokens}  summarizerCostMult=${simulated.summarizerCostMult}`);
-	lines.push("");
-	lines.push(
-		"NOTE: deterministic and SIMULATED populations below are computed INDEPENDENTLY -- a simulated",
-	);
-	lines.push(
-		"range may fully contain deterministic candidates; no overlap/interaction is netted out or",
-	);
-	lines.push("modeled. Totals from the two rows are NOT additive.");
-	lines.push("");
+  const lines = [];
+  lines.push(
+    `Ranges identified: ${simulated.rangeCount}  (rangeTokens p50=${simulated.rangeSizeDistribution.p50 ?? "-"} p90=${
+      simulated.rangeSizeDistribution.p90 ?? "-"
+    })`,
+  );
+  lines.push(
+    `minRangeTokens=${simulated.minRangeTokens}  summaryMinTokens=${simulated.summaryMinTokens}  summarizerCostMult=${simulated.summarizerCostMult}`,
+  );
+  lines.push("");
+  lines.push(
+    "NOTE: deterministic and SIMULATED populations below are computed INDEPENDENTLY -- a simulated",
+  );
+  lines.push(
+    "range may fully contain deterministic candidates; no overlap/interaction is netted out or",
+  );
+  lines.push("modeled. Totals from the two rows are NOT additive.");
+  lines.push("");
 
-	const deterministicCandidateCount = aggregate.candidateCount;
-	const deterministicTokensRemoved = Object.values(aggregate.byStrategy).reduce((sum, agg) => sum + agg.totalTokensRemoved, 0);
+  const deterministicCandidateCount = aggregate.candidateCount;
+  const deterministicTokensRemoved = Object.values(aggregate.byStrategy).reduce(
+    (sum, agg) => sum + agg.totalTokensRemoved,
+    0,
+  );
 
-	for (const ratio of ratios) {
-		lines.push(`ratio r=${ratio}:`);
-		const detSweep = aggregate.thresholdSweepByRatio[ratio]?.overall;
-		lines.push(
-			`  deterministic: candidates=${deterministicCandidateCount}  tokensRemoved=${formatNumber(deterministicTokensRemoved, 0)}  realizedNetBenefit@T=${detSweep?.recommended ?? "-"}=${formatNumber(detSweep?.totalAtRecommended, 1)}`,
-		);
-		for (const fraction of Object.keys(simulated.byFraction)) {
-			const byFraction = simulated.byFraction[fraction];
-			const simSweepEntry = byFraction.byRatio[ratio];
-			const sweep = simSweepEntry?.sweep;
-			const marker = sweep?.boundaryPinned ? "  [boundary-pinned]" : "";
-			lines.push(
-				`  SIMULATED (summaryFraction=${fraction}): candidates=${byFraction.candidateCount}  rangeTokens=${formatNumber(byFraction.totalRangeTokens, 0)}  summaryTokens=${formatNumber(byFraction.totalSummaryTokens, 0)}  realizedNetBenefit@T=${sweep?.recommended ?? "-"}=${formatNumber(sweep?.totalAtRecommended, 1)}${marker}`,
-			);
-		}
-		lines.push("");
-	}
+  for (const ratio of ratios) {
+    lines.push(`ratio r=${ratio}:`);
+    const detSweep = aggregate.thresholdSweepByRatio[ratio]?.overall;
+    lines.push(
+      `  deterministic: candidates=${deterministicCandidateCount}  tokensRemoved=${formatNumber(deterministicTokensRemoved, 0)}  realizedNetBenefit@T=${detSweep?.recommended ?? "-"}=${formatNumber(detSweep?.totalAtRecommended, 1)}`,
+    );
+    for (const fraction of Object.keys(simulated.byFraction)) {
+      const byFraction = simulated.byFraction[fraction];
+      const simSweepEntry = byFraction.byRatio[ratio];
+      const sweep = simSweepEntry?.sweep;
+      const marker = sweep?.boundaryPinned ? "  [boundary-pinned]" : "";
+      lines.push(
+        `  SIMULATED (summaryFraction=${fraction}): candidates=${byFraction.candidateCount}  rangeTokens=${formatNumber(byFraction.totalRangeTokens, 0)}  summaryTokens=${formatNumber(byFraction.totalSummaryTokens, 0)}  realizedNetBenefit@T=${sweep?.recommended ?? "-"}=${formatNumber(sweep?.totalAtRecommended, 1)}${marker}`,
+      );
+    }
+    lines.push("");
+  }
 
-	return lines.join("\n").trimEnd();
+  return lines.join("\n").trimEnd();
 }
 
 // ============================================================================
@@ -1034,145 +1120,156 @@ function renderSimulatedSummary(aggregate, simulated, ratios) {
 // ============================================================================
 
 async function loadSessionMessages(sessionFile) {
-	const rawText = await fs.readFile(sessionFile, "utf8");
-	const entries = parseSessionLines(sessionFile, rawText);
-	const activeBranch = resolveActiveBranch(entries);
-	return sessionEntriesToMessages(activeBranch);
+  const rawText = await fs.readFile(sessionFile, "utf8");
+  const entries = parseSessionLines(sessionFile, rawText);
+  const activeBranch = resolveActiveBranch(entries);
+  return sessionEntriesToMessages(activeBranch);
 }
 
 export async function runBenchmark({
-	paths,
-	limit,
-	ratios,
-	sweepMax,
-	simulateCompression = false,
-	simSummaryFractions,
-	simSummaryMinTokens,
-	simSummarizerCostMult,
-	simMinRangeTokens,
+  paths,
+  limit,
+  ratios,
+  sweepMax,
+  simulateCompression = false,
+  simSummaryFractions,
+  simSummaryMinTokens,
+  simSummarizerCostMult,
+  simMinRangeTokens,
 }) {
-	let sessionFiles = await resolveSessionFiles(paths);
-	if (limit !== undefined) sessionFiles = sessionFiles.slice(0, limit);
+  let sessionFiles = await resolveSessionFiles(paths);
+  if (limit !== undefined) sessionFiles = sessionFiles.slice(0, limit);
 
-	// Simulation always uses the DEFAULT config's protections/recentTurns (no config
-	// override support here): a real go/no-go run should reflect real-world defaults,
-	// same rationale as the deterministic replay path's corpus-benchmark entrypoint.
-	const simConfig = normalizeConfig(undefined);
-	const resolvedMinRangeTokens = simMinRangeTokens ?? DEFAULT_SIM_MIN_RANGE_TOKENS;
-	const resolvedSummaryMinTokens = simSummaryMinTokens ?? DEFAULT_SIM_SUMMARY_MIN_TOKENS;
-	const resolvedSummarizerCostMult = simSummarizerCostMult ?? DEFAULT_SIM_SUMMARIZER_COST_MULT;
-	const resolvedFractions = simSummaryFractions && simSummaryFractions.length > 0 ? simSummaryFractions : [...DEFAULT_SIM_SUMMARY_FRACTIONS];
+  // Simulation always uses the DEFAULT config's protections/recentTurns (no config
+  // override support here): a real go/no-go run should reflect real-world defaults,
+  // same rationale as the deterministic replay path's corpus-benchmark entrypoint.
+  const simConfig = normalizeConfig(undefined);
+  const resolvedMinRangeTokens = simMinRangeTokens ?? DEFAULT_SIM_MIN_RANGE_TOKENS;
+  const resolvedSummaryMinTokens = simSummaryMinTokens ?? DEFAULT_SIM_SUMMARY_MIN_TOKENS;
+  const resolvedSummarizerCostMult = simSummarizerCostMult ?? DEFAULT_SIM_SUMMARIZER_COST_MULT;
+  const resolvedFractions =
+    simSummaryFractions && simSummaryFractions.length > 0
+      ? simSummaryFractions
+      : [...DEFAULT_SIM_SUMMARY_FRACTIONS];
 
-	const sessionResults = [];
-	const allSimulatedRanges = [];
-	for (const sessionFile of sessionFiles) {
-		let messages;
-		try {
-			messages = await loadSessionMessages(sessionFile);
-		} catch (error) {
-			console.error(`warning: ${sessionFile}: failed to read/parse, skipping (${error.message})`);
-			continue;
-		}
-		if (messages.length === 0) {
-			console.error(`warning: ${sessionFile}: no messages found on active branch, skipping`);
-			continue;
-		}
-		const sessionResult = replaySession(sessionFile, messages, { ratios });
-		if (simulateCompression) {
-			const ranges = identifySimulatedRanges(sessionFile, messages, { config: simConfig, minRangeTokens: resolvedMinRangeTokens });
-			sessionResult.simulatedRanges = ranges;
-			allSimulatedRanges.push(...ranges);
-		}
-		sessionResults.push(sessionResult);
-	}
+  const sessionResults = [];
+  const allSimulatedRanges = [];
+  for (const sessionFile of sessionFiles) {
+    let messages;
+    try {
+      messages = await loadSessionMessages(sessionFile);
+    } catch (error) {
+      console.error(`warning: ${sessionFile}: failed to read/parse, skipping (${error.message})`);
+      continue;
+    }
+    if (messages.length === 0) {
+      console.error(`warning: ${sessionFile}: no messages found on active branch, skipping`);
+      continue;
+    }
+    const sessionResult = replaySession(sessionFile, messages, { ratios });
+    if (simulateCompression) {
+      const ranges = identifySimulatedRanges(sessionFile, messages, {
+        config: simConfig,
+        minRangeTokens: resolvedMinRangeTokens,
+      });
+      sessionResult.simulatedRanges = ranges;
+      allSimulatedRanges.push(...ranges);
+    }
+    sessionResults.push(sessionResult);
+  }
 
-	const aggregate = computeAggregate(sessionResults, ratios, { sweepMax });
-	const result = { sessionFiles, sessionResults, aggregate, ratios };
+  const aggregate = computeAggregate(sessionResults, ratios, { sweepMax });
+  const result = { sessionFiles, sessionResults, aggregate, ratios };
 
-	if (simulateCompression) {
-		result.simulated = {
-			minRangeTokens: resolvedMinRangeTokens,
-			summaryMinTokens: resolvedSummaryMinTokens,
-			summarizerCostMult: resolvedSummarizerCostMult,
-			...computeSimulatedAggregate(allSimulatedRanges, {
-				fractions: resolvedFractions,
-				ratios,
-				summaryMinTokens: resolvedSummaryMinTokens,
-				summarizerCostMult: resolvedSummarizerCostMult,
-				sweepMax,
-			}),
-		};
-	}
+  if (simulateCompression) {
+    result.simulated = {
+      minRangeTokens: resolvedMinRangeTokens,
+      summaryMinTokens: resolvedSummaryMinTokens,
+      summarizerCostMult: resolvedSummarizerCostMult,
+      ...computeSimulatedAggregate(allSimulatedRanges, {
+        fractions: resolvedFractions,
+        ratios,
+        summaryMinTokens: resolvedSummaryMinTokens,
+        summarizerCostMult: resolvedSummarizerCostMult,
+        sweepMax,
+      }),
+    };
+  }
 
-	return result;
+  return result;
 }
 
 async function main() {
-	let args;
-	try {
-		args = parseArgs(process.argv.slice(2));
-	} catch (error) {
-		console.error(error.message);
-		printUsage();
-		process.exitCode = 1;
-		return;
-	}
+  let args;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    printUsage();
+    process.exitCode = 1;
+    return;
+  }
 
-	if (args.help) {
-		printUsage();
-		return;
-	}
+  if (args.help) {
+    printUsage();
+    return;
+  }
 
-	const { sessionFiles, sessionResults, aggregate, ratios, simulated } = await runBenchmark(args);
+  const { sessionFiles, sessionResults, aggregate, ratios, simulated } = await runBenchmark(args);
 
-	if (sessionFiles.length === 0) {
-		console.error("No session files found to benchmark.");
-		process.exitCode = 1;
-		return;
-	}
+  if (sessionFiles.length === 0) {
+    console.error("No session files found to benchmark.");
+    process.exitCode = 1;
+    return;
+  }
 
-	if (args.json) {
-		const payload = {
-			generatedAt: new Date().toISOString(),
-			ratios,
-			sessionFiles,
-			sessions: sessionResults,
-			aggregate,
-		};
-		if (simulated) payload.simulated = simulated;
-		console.log(JSON.stringify(payload, null, 2));
-		return;
-	}
+  if (args.json) {
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      ratios,
+      sessionFiles,
+      sessions: sessionResults,
+      aggregate,
+    };
+    if (simulated) payload.simulated = simulated;
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
 
-	console.log(`dynamic-context-pruning offline benchmark — ${sessionResults.length}/${sessionFiles.length} session(s) replayed`);
-	console.log("All numbers are PREDICTED (cost-model) unless labeled REALIZED (uses replay's knowledge of the actual future).");
-	console.log("");
+  console.log(
+    `dynamic-context-pruning offline benchmark — ${sessionResults.length}/${sessionFiles.length} session(s) replayed`,
+  );
+  console.log(
+    "All numbers are PREDICTED (cost-model) unless labeled REALIZED (uses replay's knowledge of the actual future).",
+  );
+  console.log("");
 
-	for (const sessionResult of sessionResults) {
-		console.log(`Session: ${sessionResult.sessionFile}`);
-		console.log(`  assistant calls: ${sessionResult.assistantCallCount}`);
-		console.log(renderSessionTable(sessionResult, ratios[0]));
-		console.log("");
-	}
+  for (const sessionResult of sessionResults) {
+    console.log(`Session: ${sessionResult.sessionFile}`);
+    console.log(`  assistant calls: ${sessionResult.assistantCallCount}`);
+    console.log(renderSessionTable(sessionResult, ratios[0]));
+    console.log("");
+  }
 
-	console.log("=".repeat(72));
-	console.log("AGGREGATE SUMMARY");
-	console.log("=".repeat(72));
-	console.log(renderAggregateSummary(aggregate, ratios));
+  console.log("=".repeat(72));
+  console.log("AGGREGATE SUMMARY");
+  console.log("=".repeat(72));
+  console.log(renderAggregateSummary(aggregate, ratios));
 
-	if (simulated) {
-		console.log("");
-		console.log("=".repeat(72));
-		console.log("SIMULATED compression (v2 go/no-go evidence; range-mode approximation)");
-		console.log("=".repeat(72));
-		console.log(renderSimulatedSummary(aggregate, simulated, ratios));
-	}
+  if (simulated) {
+    console.log("");
+    console.log("=".repeat(72));
+    console.log("SIMULATED compression (v2 go/no-go evidence; range-mode approximation)");
+    console.log("=".repeat(72));
+    console.log(renderSimulatedSummary(aggregate, simulated, ratios));
+  }
 }
 
-const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isMainModule =
+  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isMainModule) {
-	main().catch((error) => {
-		console.error(error?.stack ?? String(error));
-		process.exitCode = 1;
-	});
+  main().catch((error) => {
+    console.error(error?.stack ?? String(error));
+    process.exitCode = 1;
+  });
 }

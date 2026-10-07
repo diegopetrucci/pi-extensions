@@ -1,15 +1,17 @@
-import assert from 'node:assert/strict';
-import path from 'node:path';
-import test from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initTheme } from '@earendil-works/pi-coding-agent';
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testDir, '..');
-const auditModule = await import(pathToFileURL(path.join(repoRoot, 'extensions/agent-workflow-audit/index.ts')).href);
+const repoRoot = path.resolve(testDir, "..");
+const auditModule = await import(
+  pathToFileURL(path.join(repoRoot, "extensions/agent-workflow-audit/index.ts")).href
+);
 const agentWorkflowAuditExtension = auditModule.default;
 
-initTheme('dark');
+initTheme("dark");
 
 function createAuditHarness({ execImpl } = {}) {
   const commands = new Map();
@@ -30,11 +32,11 @@ function createAuditHarness({ execImpl } = {}) {
         sentMessages.push(message);
       },
       getThinkingLevel() {
-        return 'low';
+        return "low";
       },
       async exec(...args) {
         execCalls.push(args);
-        if (!execImpl) throw new Error('pi.exec should not have been called');
+        if (!execImpl) throw new Error("pi.exec should not have been called");
         return execImpl(...args);
       },
     },
@@ -94,7 +96,7 @@ function getCommand(harness, name) {
 
 function getRenderer(harness, type) {
   const renderer = harness.messageRenderers.get(type);
-  assert.equal(typeof renderer, 'function', `expected ${type} message renderer to be registered`);
+  assert.equal(typeof renderer, "function", `expected ${type} message renderer to be registered`);
   return renderer;
 }
 
@@ -111,29 +113,39 @@ const theme = {
   },
 };
 
-test('agent-workflow-audit command provides flag completions and handles help/error/no-model cases without starting an audit', async () => {
+test("agent-workflow-audit command provides flag completions and handles help/error/no-model cases without starting an audit", async () => {
   const harness = createAuditHarness();
   agentWorkflowAuditExtension(harness.pi);
 
-  const command = getCommand(harness, 'agent-workflow-audit');
+  const command = getCommand(harness, "agent-workflow-audit");
 
-  assert.deepEqual(completionValues(command.getArgumentCompletions('')), ['--yes', '--plan-only', '--help']);
-  assert.deepEqual(completionValues(command.getArgumentCompletions('--p')), ['--plan-only']);
-  assert.equal(command.getArgumentCompletions('focus notes'), null);
+  assert.deepEqual(completionValues(command.getArgumentCompletions("")), [
+    "--yes",
+    "--plan-only",
+    "--help",
+  ]);
+  assert.deepEqual(completionValues(command.getArgumentCompletions("--p")), ["--plan-only"]);
+  assert.equal(command.getArgumentCompletions("focus notes"), null);
 
   const helpContext = createCommandContext({ model: undefined });
-  await command.handler('--help', helpContext.ctx);
-  assert.equal(helpContext.notifications.at(-1).level, 'info');
-  assert.match(helpContext.notifications.at(-1).message, /^Usage: \/agent-workflow-audit \[--yes\] \[--plan-only\] \[focus notes\]/);
+  await command.handler("--help", helpContext.ctx);
+  assert.equal(helpContext.notifications.at(-1).level, "info");
+  assert.match(
+    helpContext.notifications.at(-1).message,
+    /^Usage: \/agent-workflow-audit \[--yes\] \[--plan-only\] \[focus notes\]/,
+  );
 
   const errorContext = createCommandContext({ model: undefined });
-  await command.handler('--bogus', errorContext.ctx);
-  assert.equal(errorContext.notifications.at(-1).level, 'error');
-  assert.match(errorContext.notifications.at(-1).message, /Unknown \/agent-workflow-audit option: --bogus/);
+  await command.handler("--bogus", errorContext.ctx);
+  assert.equal(errorContext.notifications.at(-1).level, "error");
+  assert.match(
+    errorContext.notifications.at(-1).message,
+    /Unknown \/agent-workflow-audit option: --bogus/,
+  );
 
   const noModelContext = createCommandContext({ model: undefined });
-  await command.handler('', noModelContext.ctx);
-  assert.equal(noModelContext.notifications.at(-1).level, 'error');
+  await command.handler("", noModelContext.ctx);
+  assert.equal(noModelContext.notifications.at(-1).level, "error");
   assert.match(noModelContext.notifications.at(-1).message, /needs an active model/);
   assert.equal(noModelContext.confirmCalls, 0);
   assert.equal(noModelContext.waitForIdleCalls, 0);
@@ -145,10 +157,13 @@ test('agent-workflow-audit command provides flag completions and handles help/er
   };
   try {
     const noUiContext = createCommandContext({ model: {}, hasUI: false });
-    await command.handler('focus notes', noUiContext.ctx);
+    await command.handler("focus notes", noUiContext.ctx);
     assert.equal(noUiContext.confirmCalls, 0);
     assert.equal(noUiContext.waitForIdleCalls, 0);
-    assert.match(nonInteractiveWarnings.at(-1), /Non-interactive execution mode requires --yes or --plan-only/);
+    assert.match(
+      nonInteractiveWarnings.at(-1),
+      /Non-interactive execution mode requires --yes or --plan-only/,
+    );
   } finally {
     console.log = originalConsoleLog;
   }
@@ -157,20 +172,20 @@ test('agent-workflow-audit command provides flag completions and handles help/er
   assert.deepEqual(harness.sentMessages, []);
 });
 
-test('agent-workflow-audit message renderer collapses long reports and preserves status metadata', () => {
+test("agent-workflow-audit message renderer collapses long reports and preserves status metadata", () => {
   const harness = createAuditHarness();
   agentWorkflowAuditExtension(harness.pi);
 
-  const renderer = getRenderer(harness, 'agent-workflow-audit');
-  const report = Array.from({ length: 26 }, (_value, index) => `line ${index + 1}`).join('\n');
+  const renderer = getRenderer(harness, "agent-workflow-audit");
+  const report = Array.from({ length: 26 }, (_value, index) => `line ${index + 1}`).join("\n");
   const rendered = renderer(
     {
       content: report,
       details: {
-        status: 'done',
-        mode: 'execute',
-        cwd: '/tmp/repo',
-        focus: 'docs',
+        status: "done",
+        mode: "execute",
+        cwd: "/tmp/repo",
+        focus: "docs",
         turns: 2,
         toolCalls: [],
         toolCallCount: 9,
@@ -183,24 +198,24 @@ test('agent-workflow-audit message renderer collapses long reports and preserves
   ).render(200);
 
   assert.match(rendered[0], /^ <success>✓<\/success>/);
-  assert.match(rendered.join('\n'), /execute · 2 turns · 9 tools · 2\.5s/);
-  assert.match(rendered.join('\n'), /\n <toolOutput>line 1/);
-  assert.match(rendered.join('\n'), /… \(2 more lines; expand to view\)/);
+  assert.match(rendered.join("\n"), /execute · 2 turns · 9 tools · 2\.5s/);
+  assert.match(rendered.join("\n"), /\n <toolOutput>line 1/);
+  assert.match(rendered.join("\n"), /… \(2 more lines; expand to view\)/);
 });
 
-test('agent-workflow-audit message renderer expands details and covers status fallbacks', () => {
+test("agent-workflow-audit message renderer expands details and covers status fallbacks", () => {
   const harness = createAuditHarness();
   agentWorkflowAuditExtension(harness.pi);
 
-  const renderer = getRenderer(harness, 'agent-workflow-audit');
+  const renderer = getRenderer(harness, "agent-workflow-audit");
   const expanded = renderer(
     {
-      content: '## Summary\nAudit complete.',
+      content: "## Summary\nAudit complete.",
       details: {
-        status: 'error',
-        mode: 'plan-only',
-        cwd: '/tmp/repo',
-        focus: 'release docs',
+        status: "error",
+        mode: "plan-only",
+        cwd: "/tmp/repo",
+        focus: "release docs",
         turns: 1,
         toolCalls: [],
         startedAt: 5,
@@ -212,22 +227,24 @@ test('agent-workflow-audit message renderer expands details and covers status fa
   ).render(200);
 
   assert.match(expanded[0], /^ <error>✗<\/error>/);
-  assert.match(expanded.join('\n'), /plan-only · 1 turns · 0 tools · 300ms/);
-  assert.match(expanded.join('\n'), /\n <dim>cwd: \/tmp\/repo<\/dim>/);
-  assert.match(expanded.join('\n'), /\n <dim>focus: release docs<\/dim>/);
-  assert.match(expanded.join('\n'), /\n Audit complete\./);
+  assert.match(expanded.join("\n"), /plan-only · 1 turns · 0 tools · 300ms/);
+  assert.match(expanded.join("\n"), /\n <dim>cwd: \/tmp\/repo<\/dim>/);
+  assert.match(expanded.join("\n"), /\n <dim>focus: release docs<\/dim>/);
+  assert.match(expanded.join("\n"), /\n Audit complete\./);
 
-  const fallback = renderer({ content: [], details: undefined }, { expanded: false }, theme).render(200).join('\n');
+  const fallback = renderer({ content: [], details: undefined }, { expanded: false }, theme)
+    .render(200)
+    .join("\n");
   assert.match(fallback, /final report/);
   assert.match(fallback, /\(no report\)/);
 
   const aborted = renderer(
     {
-      content: 'stopped',
+      content: "stopped",
       details: {
-        status: 'aborted',
-        mode: 'execute',
-        cwd: '/tmp/repo',
+        status: "aborted",
+        mode: "execute",
+        cwd: "/tmp/repo",
         turns: 0,
         toolCalls: [],
         startedAt: 10,
@@ -236,16 +253,18 @@ test('agent-workflow-audit message renderer expands details and covers status fa
     },
     { expanded: false },
     theme,
-  ).render(200).join('\n');
+  )
+    .render(200)
+    .join("\n");
   assert.match(aborted, /<warning>◼<\/warning>/);
 
   const running = renderer(
     {
-      content: 'working',
+      content: "working",
       details: {
-        status: 'running',
-        mode: 'execute',
-        cwd: '/tmp/repo',
+        status: "running",
+        mode: "execute",
+        cwd: "/tmp/repo",
         turns: 0,
         toolCalls: [],
         startedAt: 10,
@@ -253,6 +272,8 @@ test('agent-workflow-audit message renderer expands details and covers status fa
     },
     { expanded: false },
     theme,
-  ).render(200).join('\n');
+  )
+    .render(200)
+    .join("\n");
   assert.match(running, /<warning>⏳<\/warning>/);
 });

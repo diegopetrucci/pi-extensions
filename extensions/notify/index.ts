@@ -25,289 +25,300 @@ type DesktopBackend = "auto" | "macos" | "linux" | "windows-toast" | "none";
 type SoundBackend = "auto" | "macos" | "linux" | "windows-beep" | "command" | "none";
 
 type ProjectConfigContext = {
-	cwd: string;
-	isProjectTrusted?: () => boolean;
+  cwd: string;
+  isProjectTrusted?: () => boolean;
 };
 
 interface NotifyConfig {
-	enabled: boolean;
-	onlyWhenInteractive: boolean;
-	title: string;
-	body: string;
-	channels: {
-		terminal: boolean;
-		desktop: boolean;
-		bell: boolean;
-		sound: boolean;
-	};
-	terminal: {
-		backend: TerminalBackend;
-		tmuxPassthrough: TmuxPassthrough;
-	};
-	desktop: {
-		backend: DesktopBackend;
-	};
-	sound: {
-		backend: SoundBackend;
-		name: string;
-		linuxSoundId: string;
-		frequencyHz: number;
-		durationMs: number;
-		command: string;
-	};
+  enabled: boolean;
+  onlyWhenInteractive: boolean;
+  title: string;
+  body: string;
+  channels: {
+    terminal: boolean;
+    desktop: boolean;
+    bell: boolean;
+    sound: boolean;
+  };
+  terminal: {
+    backend: TerminalBackend;
+    tmuxPassthrough: TmuxPassthrough;
+  };
+  desktop: {
+    backend: DesktopBackend;
+  };
+  sound: {
+    backend: SoundBackend;
+    name: string;
+    linuxSoundId: string;
+    frequencyHz: number;
+    durationMs: number;
+    command: string;
+  };
 }
 
 const DEFAULT_CONFIG: NotifyConfig = {
-	enabled: true,
-	onlyWhenInteractive: true,
-	title: "Pi",
-	body: "Ready for input",
-	channels: {
-		terminal: true,
-		desktop: true,
-		bell: true,
-		sound: false,
-	},
-	terminal: {
-		backend: "auto",
-		tmuxPassthrough: "auto",
-	},
-	desktop: {
-		backend: "auto",
-	},
-	sound: {
-		backend: "auto",
-		name: "Glass",
-		linuxSoundId: "complete",
-		frequencyHz: 1000,
-		durationMs: 250,
-		command: "",
-	},
+  enabled: true,
+  onlyWhenInteractive: true,
+  title: "Pi",
+  body: "Ready for input",
+  channels: {
+    terminal: true,
+    desktop: true,
+    bell: true,
+    sound: false,
+  },
+  terminal: {
+    backend: "auto",
+    tmuxPassthrough: "auto",
+  },
+  desktop: {
+    backend: "auto",
+  },
+  sound: {
+    backend: "auto",
+    name: "Glass",
+    linuxSoundId: "complete",
+    frequencyHz: 1000,
+    durationMs: 250,
+    command: "",
+  },
 };
 
 function readConfigFile(path: string): Partial<NotifyConfig> {
-	if (!existsSync(path)) return {};
+  if (!existsSync(path)) return {};
 
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as Partial<NotifyConfig>;
-	} catch (error) {
-		console.error(`Warning: Could not parse ${path}: ${error}`);
-		return {};
-	}
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as Partial<NotifyConfig>;
+  } catch (error) {
+    console.error(`Warning: Could not parse ${path}: ${error}`);
+    return {};
+  }
 }
 
 function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): NotifyConfig {
-	return {
-		...base,
-		...overrides,
-		channels: {
-			...base.channels,
-			...overrides.channels,
-		},
-		terminal: {
-			...base.terminal,
-			...overrides.terminal,
-		},
-		desktop: {
-			...base.desktop,
-			...overrides.desktop,
-		},
-		sound: {
-			...base.sound,
-			...overrides.sound,
-		},
-	};
+  return {
+    ...base,
+    ...overrides,
+    channels: {
+      ...base.channels,
+      ...overrides.channels,
+    },
+    terminal: {
+      ...base.terminal,
+      ...overrides.terminal,
+    },
+    desktop: {
+      ...base.desktop,
+      ...overrides.desktop,
+    },
+    sound: {
+      ...base.sound,
+      ...overrides.sound,
+    },
+  };
 }
 
 function canReadProjectConfig(ctx: ProjectConfigContext): boolean {
-	return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+  return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
 }
 
 function loadConfig(ctx: ProjectConfigContext): NotifyConfig {
-	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "notify.json"));
-	const projectConfig = canReadProjectConfig(ctx)
-		? readConfigFile(join(ctx.cwd, CONFIG_DIR_NAME, "notify.json"))
-		: {};
-	return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
+  const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "notify.json"));
+  const projectConfig = canReadProjectConfig(ctx)
+    ? readConfigFile(join(ctx.cwd, CONFIG_DIR_NAME, "notify.json"))
+    : {};
+  return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
 function powershellString(value: string): string {
-	return `'${value.replace(/'/g, "''")}'`;
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function windowsToastScript(title: string, body: string): string {
-	const type = "Windows.UI.Notifications";
-	const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
-	const template = `[${type}.ToastTemplateType]::ToastText01`;
-	const toast = `[${type}.ToastNotification]::new($xml)`;
-	return [
-		`${mgr} > $null`,
-		`$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
-		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode(${powershellString(body)})) > $null`,
-		`[${type}.ToastNotificationManager]::CreateToastNotifier(${powershellString(title)}).Show(${toast})`,
-	].join("; ");
+  const type = "Windows.UI.Notifications";
+  const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
+  const template = `[${type}.ToastTemplateType]::ToastText01`;
+  const toast = `[${type}.ToastNotification]::new($xml)`;
+  return [
+    `${mgr} > $null`,
+    `$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
+    `$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode(${powershellString(body)})) > $null`,
+    `[${type}.ToastNotificationManager]::CreateToastNotifier(${powershellString(title)}).Show(${toast})`,
+  ].join("; ");
 }
 
 /** tmux drops unrecognized OSC, so wrap in DCS passthrough with doubled ESC. */
 function wrapForTmux(sequence: string): string {
-	return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+  return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
 }
 
 function shouldWrapForTmux(config: NotifyConfig): boolean {
-	if (config.terminal.tmuxPassthrough === "never") return false;
-	if (config.terminal.tmuxPassthrough === "always") return true;
-	return Boolean(process.env.TMUX);
+  if (config.terminal.tmuxPassthrough === "never") return false;
+  if (config.terminal.tmuxPassthrough === "always") return true;
+  return Boolean(process.env.TMUX);
 }
 
 function writeTerminalSequence(sequence: string, wrap: boolean): void {
-	process.stdout.write(wrap ? wrapForTmux(sequence) : sequence);
+  process.stdout.write(wrap ? wrapForTmux(sequence) : sequence);
 }
 
 function notifyOSC777(title: string, body: string, wrap: boolean): void {
-	writeTerminalSequence(`\x1b]777;notify;${title};${body}\x07`, wrap);
+  writeTerminalSequence(`\x1b]777;notify;${title};${body}\x07`, wrap);
 }
 
 function notifyOSC99(title: string, body: string, wrap: boolean): void {
-	writeTerminalSequence(`\x1b]99;i=1:d=0;${title}\x1b\\`, wrap);
-	writeTerminalSequence(`\x1b]99;i=1:p=body;${body}\x1b\\`, wrap);
+  writeTerminalSequence(`\x1b]99;i=1:d=0;${title}\x1b\\`, wrap);
+  writeTerminalSequence(`\x1b]99;i=1:p=body;${body}\x1b\\`, wrap);
 }
 
 function ringBell(): void {
-	process.stdout.write("\x07");
+  process.stdout.write("\x07");
 }
 
 function runCommand(command: string, args: string[]): Promise<boolean> {
-	return new Promise((resolve) => {
-		execFile(command, args, (error) => resolve(!error));
-	});
+  return new Promise((resolve) => {
+    execFile(command, args, (error) => resolve(!error));
+  });
 }
 
 function runShellCommand(command: string): Promise<boolean> {
-	if (process.platform === "win32") {
-		return runCommand("cmd.exe", ["/d", "/s", "/c", command]);
-	}
+  if (process.platform === "win32") {
+    return runCommand("cmd.exe", ["/d", "/s", "/c", command]);
+  }
 
-	return runCommand(process.env.SHELL || "/bin/sh", ["-lc", command]);
+  return runCommand(process.env.SHELL || "/bin/sh", ["-lc", command]);
 }
 
 function detectTerminalBackend(config: NotifyConfig): Exclude<TerminalBackend, "auto"> {
-	if (config.terminal.backend !== "auto") return config.terminal.backend;
-	if (process.env.KITTY_WINDOW_ID) return "osc99";
-	return "osc777";
+  if (config.terminal.backend !== "auto") return config.terminal.backend;
+  if (process.env.KITTY_WINDOW_ID) return "osc99";
+  return "osc777";
 }
 
 function detectDesktopBackend(config: NotifyConfig): Exclude<DesktopBackend, "auto"> {
-	if (config.desktop.backend !== "auto") return config.desktop.backend;
-	if (process.env.WT_SESSION || process.env.WSL_DISTRO_NAME) return "windows-toast";
-	if (process.platform === "darwin") return "macos";
-	if (process.platform === "linux") return "linux";
-	if (process.platform === "win32") return "windows-toast";
-	return "none";
+  if (config.desktop.backend !== "auto") return config.desktop.backend;
+  if (process.env.WT_SESSION || process.env.WSL_DISTRO_NAME) return "windows-toast";
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "linux") return "linux";
+  if (process.platform === "win32") return "windows-toast";
+  return "none";
 }
 
 function detectSoundBackend(config: NotifyConfig): Exclude<SoundBackend, "auto"> {
-	if (config.sound.backend !== "auto") return config.sound.backend;
-	if (process.env.WT_SESSION || process.platform === "win32" || process.env.WSL_DISTRO_NAME) return "windows-beep";
-	if (process.platform === "darwin") return "macos";
-	if (process.platform === "linux") return "linux";
-	return "none";
+  if (config.sound.backend !== "auto") return config.sound.backend;
+  if (process.env.WT_SESSION || process.platform === "win32" || process.env.WSL_DISTRO_NAME)
+    return "windows-beep";
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "linux") return "linux";
+  return "none";
 }
 
 function sendTerminalNotification(
-	title: string,
-	body: string,
-	backend: Exclude<TerminalBackend, "auto">,
-	wrap: boolean,
+  title: string,
+  body: string,
+  backend: Exclude<TerminalBackend, "auto">,
+  wrap: boolean,
 ): void {
-	if (backend === "osc99") {
-		notifyOSC99(title, body, wrap);
-		return;
-	}
-	if (backend === "osc777") {
-		notifyOSC777(title, body, wrap);
-	}
+  if (backend === "osc99") {
+    notifyOSC99(title, body, wrap);
+    return;
+  }
+  if (backend === "osc777") {
+    notifyOSC777(title, body, wrap);
+  }
 }
 
 function appleScriptString(value: string): string {
-	return JSON.stringify(value);
+  return JSON.stringify(value);
 }
 
 function sendDesktopNotification(
-	title: string,
-	body: string,
-	backend: Exclude<DesktopBackend, "auto">,
+  title: string,
+  body: string,
+  backend: Exclude<DesktopBackend, "auto">,
 ): Promise<boolean> {
-	if (backend === "windows-toast") {
-		return runCommand("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)]);
-	}
-	if (backend === "macos") {
-		return runCommand("osascript", ["-e", `display notification ${appleScriptString(body)} with title ${appleScriptString(title)}`]);
-	}
-	if (backend === "linux") {
-		return runCommand("notify-send", [title, body]);
-	}
-	return Promise.resolve(false);
+  if (backend === "windows-toast") {
+    return runCommand("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      windowsToastScript(title, body),
+    ]);
+  }
+  if (backend === "macos") {
+    return runCommand("osascript", [
+      "-e",
+      `display notification ${appleScriptString(body)} with title ${appleScriptString(title)}`,
+    ]);
+  }
+  if (backend === "linux") {
+    return runCommand("notify-send", [title, body]);
+  }
+  return Promise.resolve(false);
 }
 
-async function playSound(config: NotifyConfig, backend: Exclude<SoundBackend, "auto">): Promise<boolean> {
-	if (backend === "command") {
-		if (!config.sound.command.trim()) return false;
-		return runShellCommand(config.sound.command);
-	}
+async function playSound(
+  config: NotifyConfig,
+  backend: Exclude<SoundBackend, "auto">,
+): Promise<boolean> {
+  if (backend === "command") {
+    if (!config.sound.command.trim()) return false;
+    return runShellCommand(config.sound.command);
+  }
 
-	if (backend === "windows-beep") {
-		return runCommand("powershell.exe", [
-			"-NoProfile",
-			"-Command",
-			`[console]::beep(${config.sound.frequencyHz}, ${config.sound.durationMs})`,
-		]);
-	}
+  if (backend === "windows-beep") {
+    return runCommand("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `[console]::beep(${config.sound.frequencyHz}, ${config.sound.durationMs})`,
+    ]);
+  }
 
-	if (backend === "macos") {
-		return runCommand("afplay", [`/System/Library/Sounds/${config.sound.name}.aiff`]);
-	}
+  if (backend === "macos") {
+    return runCommand("afplay", [`/System/Library/Sounds/${config.sound.name}.aiff`]);
+  }
 
-	if (backend === "linux") {
-		const soundId = config.sound.linuxSoundId;
-		const viaCanberra = await runCommand("canberra-gtk-play", ["-i", soundId]);
-		if (viaCanberra) return true;
-		return runCommand("paplay", [`/usr/share/sounds/freedesktop/stereo/${soundId}.oga`]);
-	}
+  if (backend === "linux") {
+    const soundId = config.sound.linuxSoundId;
+    const viaCanberra = await runCommand("canberra-gtk-play", ["-i", soundId]);
+    if (viaCanberra) return true;
+    return runCommand("paplay", [`/usr/share/sounds/freedesktop/stereo/${soundId}.oga`]);
+  }
 
-	return false;
+  return false;
 }
 
 export default function notifyExtension(pi: ExtensionAPI) {
-	pi.on("agent_settled", async (_event, ctx) => {
-		const config = loadConfig(ctx);
-		if (!config.enabled) return;
-		if (config.onlyWhenInteractive && !ctx.hasUI) return;
+  pi.on("agent_settled", async (_event, ctx) => {
+    const config = loadConfig(ctx);
+    if (!config.enabled) return;
+    if (config.onlyWhenInteractive && !ctx.hasUI) return;
 
-		const tasks: Array<Promise<unknown>> = [];
+    const tasks: Array<Promise<unknown>> = [];
 
-		if (config.channels.terminal) {
-			sendTerminalNotification(
-				config.title,
-				config.body,
-				detectTerminalBackend(config),
-				shouldWrapForTmux(config),
-			);
-		}
+    if (config.channels.terminal) {
+      sendTerminalNotification(
+        config.title,
+        config.body,
+        detectTerminalBackend(config),
+        shouldWrapForTmux(config),
+      );
+    }
 
-		if (config.channels.desktop) {
-			tasks.push(sendDesktopNotification(config.title, config.body, detectDesktopBackend(config)));
-		}
+    if (config.channels.desktop) {
+      tasks.push(sendDesktopNotification(config.title, config.body, detectDesktopBackend(config)));
+    }
 
-		if (config.channels.bell) {
-			ringBell();
-		}
+    if (config.channels.bell) {
+      ringBell();
+    }
 
-		if (config.channels.sound) {
-			tasks.push(playSound(config, detectSoundBackend(config)));
-		}
+    if (config.channels.sound) {
+      tasks.push(playSound(config, detectSoundBackend(config)));
+    }
 
-		if (tasks.length > 0) {
-			await Promise.allSettled(tasks);
-		}
-	});
+    if (tasks.length > 0) {
+      await Promise.allSettled(tasks);
+    }
+  });
 }

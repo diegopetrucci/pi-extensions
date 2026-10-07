@@ -27,7 +27,7 @@ export default function (pi: ExtensionAPI): void {
       if (ctx.hasUI) {
         ctx.ui.notify(
           "project-mcp-json: Pi >=1.0 is required to register MCP servers. Please upgrade Pi.",
-          "info"
+          "info",
         );
       }
     });
@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI): void {
           if (ctx.hasUI) {
             ctx.ui.notify(
               "project-mcp-json: Found .mcp.json — run /trust to enable its MCP servers.",
-              "info"
+              "info",
             );
           }
           return;
@@ -110,7 +110,7 @@ export default function (pi: ExtensionAPI): void {
           ctx.ui.notify(
             `project-mcp-json: could not register server "${sanitizeStringForWarning(server.name)}" — ` +
               `name may already be in use by another extension or configuration.`,
-            "warning"
+            "warning",
           );
         }
       }

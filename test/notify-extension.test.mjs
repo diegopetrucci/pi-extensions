@@ -1,30 +1,30 @@
-import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import test from 'node:test';
-import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
-import { createExtensionHarness } from './extension-test-helpers.mjs';
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { createExtensionHarness } from "./extension-test-helpers.mjs";
 
 const require = createRequire(import.meta.url);
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let importCounter = 0;
 
 async function loadFreshExtension(relativePath) {
   const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath));
-  moduleUrl.searchParams.set('test', `${Date.now()}-${importCounter++}`);
+  moduleUrl.searchParams.set("test", `${Date.now()}-${importCounter++}`);
   const extensionModule = await import(moduleUrl.href);
   return extensionModule.default;
 }
 
 function setupTempDirs(t) {
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'notify-extension-test-'));
-  const agentDir = path.join(rootDir, 'agent');
-  const projectDir = path.join(rootDir, 'project');
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "notify-extension-test-"));
+  const agentDir = path.join(rootDir, "agent");
+  const projectDir = path.join(rootDir, "project");
 
-  mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
+  mkdirSync(path.join(agentDir, "extensions"), { recursive: true });
   mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
 
@@ -48,7 +48,7 @@ function writeNotifyConfig(filePath, config) {
 }
 
 function patchExecFile(t, implementation) {
-  const childProcess = require('node:child_process');
+  const childProcess = require("node:child_process");
   const original = childProcess.execFile;
   const calls = [];
 
@@ -57,11 +57,11 @@ function patchExecFile(t, implementation) {
     let actualOptions = options;
     let actualCallback = callback;
 
-    if (typeof actualArgs === 'function') {
+    if (typeof actualArgs === "function") {
       actualCallback = actualArgs;
       actualArgs = [];
       actualOptions = undefined;
-    } else if (typeof actualOptions === 'function') {
+    } else if (typeof actualOptions === "function") {
       actualCallback = actualOptions;
       actualOptions = undefined;
     }
@@ -72,7 +72,12 @@ function patchExecFile(t, implementation) {
       options: actualOptions,
     });
 
-    implementation({ command, args: Array.isArray(actualArgs) ? [...actualArgs] : [], options: actualOptions, callback: actualCallback });
+    implementation({
+      command,
+      args: Array.isArray(actualArgs) ? [...actualArgs] : [],
+      options: actualOptions,
+      callback: actualCallback,
+    });
     return { pid: 1, kill() {} };
   };
 
@@ -91,8 +96,8 @@ function captureStdout(t) {
 
   process.stdout.write = (chunk, encoding, callback) => {
     writes.push(String(chunk));
-    if (typeof encoding === 'function') encoding();
-    if (typeof callback === 'function') callback();
+    if (typeof encoding === "function") encoding();
+    if (typeof callback === "function") callback();
     return true;
   };
 
@@ -108,7 +113,7 @@ function captureConsoleErrors(t) {
   const original = console.error;
 
   console.error = (...args) => {
-    errors.push(args.map((value) => String(value)).join(' '));
+    errors.push(args.map((value) => String(value)).join(" "));
   };
 
   t.after(() => {
@@ -137,8 +142,8 @@ function setEnvVar(t, name, value) {
 }
 
 function setProcessPlatform(t, value) {
-  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
-  Object.defineProperty(process, 'platform', {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", {
     configurable: true,
     enumerable: descriptor?.enumerable ?? true,
     value,
@@ -146,31 +151,31 @@ function setProcessPlatform(t, value) {
 
   t.after(() => {
     if (descriptor) {
-      Object.defineProperty(process, 'platform', descriptor);
+      Object.defineProperty(process, "platform", descriptor);
     }
   });
 }
 
-test('notify subscribes to settled runs instead of agent_end', async () => {
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+test("notify subscribes to settled runs instead of agent_end", async () => {
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
 
   notifyExtension(pi);
 
-  assert.equal(typeof handlers.get('agent_settled'), 'function');
-  assert.equal(handlers.has('agent_end'), false);
+  assert.equal(typeof handlers.get("agent_settled"), "function");
+  assert.equal(handlers.has("agent_end"), false);
 });
 
-test('notify uses trusted project config over global config and ignores untrusted project config', async (t) => {
+test("notify uses trusted project config over global config and ignores untrusted project config", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'TMUX', undefined);
+  setEnvVar(t, "TMUX", undefined);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Global Title',
-    body: 'Global Body',
+    title: "Global Title",
+    body: "Global Body",
     channels: {
       terminal: true,
       desktop: true,
@@ -178,73 +183,76 @@ test('notify uses trusted project config over global config and ignores untruste
       sound: false,
     },
     terminal: {
-      backend: 'osc99',
+      backend: "osc99",
     },
     desktop: {
-      backend: 'none',
+      backend: "none",
     },
   });
 
-  writeNotifyConfig(path.join(projectDir, CONFIG_DIR_NAME, 'notify.json'), {
-    title: 'Project Title',
-    body: 'Project Body',
+  writeNotifyConfig(path.join(projectDir, CONFIG_DIR_NAME, "notify.json"), {
+    title: "Project Title",
+    body: "Project Body",
     channels: {
       bell: true,
     },
     terminal: {
-      backend: 'osc777',
+      backend: "osc777",
     },
   });
 
-  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
-  assert.deepEqual(writes, [
-    '\x1b]777;notify;Project Title;Project Body\x07',
-    '\x07',
-  ]);
+  assert.deepEqual(writes, ["\x1b]777;notify;Project Title;Project Body\x07", "\x07"]);
   assert.equal(execCalls.length, 0);
 
   writes.length = 0;
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => false,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => false,
+    },
+  );
 
   assert.deepEqual(writes, [
-    '\x1b]99;i=1:d=0;Global Title\x1b\\',
-    '\x1b]99;i=1:p=body;Global Body\x1b\\',
+    "\x1b]99;i=1:d=0;Global Title\x1b\\",
+    "\x1b]99;i=1:p=body;Global Body\x1b\\",
   ]);
   assert.equal(execCalls.length, 0);
 });
 
-test('notify respects enabled and onlyWhenInteractive gating', async (t) => {
+test("notify respects enabled and onlyWhenInteractive gating", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  const configPath = path.join(agentDir, 'extensions', 'notify.json');
-  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  const configPath = path.join(agentDir, "extensions", "notify.json");
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
   writeNotifyConfig(configPath, {
     enabled: false,
@@ -256,18 +264,21 @@ test('notify respects enabled and onlyWhenInteractive gating', async (t) => {
       sound: false,
     },
     terminal: {
-      backend: 'osc777',
+      backend: "osc777",
     },
     desktop: {
-      backend: 'linux',
+      backend: "linux",
     },
   });
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, []);
   assert.equal(execCalls.length, 0);
@@ -282,32 +293,35 @@ test('notify respects enabled and onlyWhenInteractive gating', async (t) => {
       sound: false,
     },
     terminal: {
-      backend: 'osc777',
+      backend: "osc777",
     },
     desktop: {
-      backend: 'linux',
+      backend: "linux",
     },
   });
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: false,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: false,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, []);
   assert.equal(execCalls.length, 0);
 });
 
-test('notify skips none backends and swallows desktop and sound delivery failures', async (t) => {
+test("notify skips none backends and swallows desktop and sound delivery failures", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Ready',
-    body: 'Waiting',
+    title: "Ready",
+    body: "Waiting",
     channels: {
       terminal: false,
       desktop: true,
@@ -315,18 +329,20 @@ test('notify skips none backends and swallows desktop and sound delivery failure
       sound: true,
     },
     desktop: {
-      backend: 'linux',
+      backend: "linux",
     },
     sound: {
-      backend: 'command',
-      command: 'printf fail',
+      backend: "command",
+      command: "printf fail",
     },
   });
 
-  const execCalls = patchExecFile(t, ({ command, callback }) => callback(new Error(`failed: ${command}`)));
+  const execCalls = patchExecFile(t, ({ command, callback }) =>
+    callback(new Error(`failed: ${command}`)),
+  );
   const writes = captureStdout(t);
   const originalShell = process.env.SHELL;
-  process.env.SHELL = '/bin/test-shell';
+  process.env.SHELL = "/bin/test-shell";
   t.after(() => {
     if (originalShell === undefined) {
       delete process.env.SHELL;
@@ -335,38 +351,44 @@ test('notify skips none backends and swallows desktop and sound delivery failure
     process.env.SHELL = originalShell;
   });
 
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
   await assert.doesNotReject(() =>
-    handler({}, {
-      cwd: projectDir,
-      hasUI: true,
-      isProjectTrusted: () => true,
-    }),
+    handler(
+      {},
+      {
+        cwd: projectDir,
+        hasUI: true,
+        isProjectTrusted: () => true,
+      },
+    ),
   );
 
   assert.deepEqual(writes, []);
-  assert.deepEqual(execCalls.map(({ command, args }) => ({ command, args })), [
-    { command: 'notify-send', args: ['Ready', 'Waiting'] },
-    { command: '/bin/test-shell', args: ['-lc', 'printf fail'] },
-  ]);
+  assert.deepEqual(
+    execCalls.map(({ command, args }) => ({ command, args })),
+    [
+      { command: "notify-send", args: ["Ready", "Waiting"] },
+      { command: "/bin/test-shell", args: ["-lc", "printf fail"] },
+    ],
+  );
 });
 
-test('notify auto-selects terminal backends and preserves OSC formatting', async (t) => {
+test("notify auto-selects terminal backends and preserves OSC formatting", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'TMUX', undefined);
+  setEnvVar(t, "TMUX", undefined);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Edge Title',
-    body: 'Edge Body',
+    title: "Edge Title",
+    body: "Edge Body",
     channels: {
       terminal: true,
       desktop: false,
@@ -374,55 +396,59 @@ test('notify auto-selects terminal backends and preserves OSC formatting', async
       sound: false,
     },
     terminal: {
-      backend: 'auto',
+      backend: "auto",
     },
   });
 
-  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  setEnvVar(t, 'KITTY_WINDOW_ID', 'window-1');
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  setEnvVar(t, "KITTY_WINDOW_ID", "window-1");
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, [
-    '\x1b]99;i=1:d=0;Edge Title\x1b\\',
-    '\x1b]99;i=1:p=body;Edge Body\x1b\\',
+    "\x1b]99;i=1:d=0;Edge Title\x1b\\",
+    "\x1b]99;i=1:p=body;Edge Body\x1b\\",
   ]);
 
   writes.length = 0;
   delete process.env.KITTY_WINDOW_ID;
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
-  assert.deepEqual(writes, [
-    '\x1b]777;notify;Edge Title;Edge Body\x07',
-  ]);
+  assert.deepEqual(writes, ["\x1b]777;notify;Edge Title;Edge Body\x07"]);
 });
 
-test('notify wraps terminal notifications in tmux passthrough and leaves the bell bare', async (t) => {
+test("notify wraps terminal notifications in tmux passthrough and leaves the bell bare", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+  setEnvVar(t, "TMUX", "/private/tmp/tmux-501/default,60431,9");
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Tmux Title',
-    body: 'Tmux Body',
+    title: "Tmux Title",
+    body: "Tmux Body",
     channels: {
       terminal: true,
       desktop: false,
@@ -430,41 +456,44 @@ test('notify wraps terminal notifications in tmux passthrough and leaves the bel
       sound: false,
     },
     terminal: {
-      backend: 'osc777',
+      backend: "osc777",
     },
   });
 
-  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, [
-    '\x1bPtmux;\x1b\x1b]777;notify;Tmux Title;Tmux Body\x07\x1b\\',
-    '\x07',
+    "\x1bPtmux;\x1b\x1b]777;notify;Tmux Title;Tmux Body\x07\x1b\\",
+    "\x07",
   ]);
 });
 
-test('notify wraps both OSC 99 writes and doubles their ESC terminators inside tmux', async (t) => {
+test("notify wraps both OSC 99 writes and doubles their ESC terminators inside tmux", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+  setEnvVar(t, "TMUX", "/private/tmp/tmux-501/default,60431,9");
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Kitty Title',
-    body: 'Kitty Body',
+    title: "Kitty Title",
+    body: "Kitty Body",
     channels: {
       terminal: true,
       desktop: false,
@@ -472,41 +501,44 @@ test('notify wraps both OSC 99 writes and doubles their ESC terminators inside t
       sound: false,
     },
     terminal: {
-      backend: 'osc99',
+      backend: "osc99",
     },
   });
 
-  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, [
-    '\x1bPtmux;\x1b\x1b]99;i=1:d=0;Kitty Title\x1b\x1b\\\x1b\\',
-    '\x1bPtmux;\x1b\x1b]99;i=1:p=body;Kitty Body\x1b\x1b\\\x1b\\',
+    "\x1bPtmux;\x1b\x1b]99;i=1:d=0;Kitty Title\x1b\x1b\\\x1b\\",
+    "\x1bPtmux;\x1b\x1b]99;i=1:p=body;Kitty Body\x1b\x1b\\\x1b\\",
   ]);
 });
 
-test('notify honours tmuxPassthrough overrides in both directions', async (t) => {
+test("notify honours tmuxPassthrough overrides in both directions", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  const configPath = path.join(agentDir, 'extensions', 'notify.json');
+  const configPath = path.join(agentDir, "extensions", "notify.json");
   const baseConfig = {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Override Title',
-    body: 'Override Body',
+    title: "Override Title",
+    body: "Override Body",
     channels: {
       terminal: true,
       desktop: false,
@@ -515,58 +547,64 @@ test('notify honours tmuxPassthrough overrides in both directions', async (t) =>
     },
   };
 
-  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
   // never: stay bare even though tmux would swallow it, for setups that
   // handle forwarding themselves.
-  setEnvVar(t, 'TMUX', '/private/tmp/tmux-501/default,60431,9');
+  setEnvVar(t, "TMUX", "/private/tmp/tmux-501/default,60431,9");
   writeNotifyConfig(configPath, {
     ...baseConfig,
-    terminal: { backend: 'osc777', tmuxPassthrough: 'never' },
+    terminal: { backend: "osc777", tmuxPassthrough: "never" },
   });
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
-  assert.deepEqual(writes, ['\x1b]777;notify;Override Title;Override Body\x07']);
+  assert.deepEqual(writes, ["\x1b]777;notify;Override Title;Override Body\x07"]);
 
   // always: wrap even without $TMUX, for multiplexers started outside the
   // inherited environment.
   writes.length = 0;
-  setEnvVar(t, 'TMUX', undefined);
+  setEnvVar(t, "TMUX", undefined);
   writeNotifyConfig(configPath, {
     ...baseConfig,
-    terminal: { backend: 'osc777', tmuxPassthrough: 'always' },
+    terminal: { backend: "osc777", tmuxPassthrough: "always" },
   });
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(writes, [
-    '\x1bPtmux;\x1b\x1b]777;notify;Override Title;Override Body\x07\x1b\\',
+    "\x1bPtmux;\x1b\x1b]777;notify;Override Title;Override Body\x07\x1b\\",
   ]);
 });
 
-test('notify selects the expected desktop backend commands for auto detection', async (t) => {
+test("notify selects the expected desktop backend commands for auto detection", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'WT_SESSION', undefined);
-  setEnvVar(t, 'WSL_DISTRO_NAME', undefined);
+  setEnvVar(t, "WT_SESSION", undefined);
+  setEnvVar(t, "WSL_DISTRO_NAME", undefined);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
     title: "Pi's App",
@@ -578,70 +616,79 @@ test('notify selects the expected desktop backend commands for auto detection', 
       sound: false,
     },
     desktop: {
-      backend: 'auto',
+      backend: "auto",
     },
   });
 
-  const execCalls = patchExecFile(t, ({ callback }) => callback(null, '', ''));
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const execCalls = patchExecFile(t, ({ callback }) => callback(null, "", ""));
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  setProcessPlatform(t, 'linux');
-  setEnvVar(t, 'WT_SESSION', 'wt-session');
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  setProcessPlatform(t, "linux");
+  setEnvVar(t, "WT_SESSION", "wt-session");
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   const windowsCall = execCalls.shift();
-  assert.equal(windowsCall?.command, 'powershell.exe');
-  assert.deepEqual(windowsCall?.args.slice(0, 2), ['-NoProfile', '-Command']);
-  assert.match(windowsCall?.args[2] ?? '', /ToastNotificationManager/);
-  assert.match(windowsCall?.args[2] ?? '', /CreateTextNode\('Ready''s body'\)/);
-  assert.match(windowsCall?.args[2] ?? '', /CreateToastNotifier\('Pi''s App'\)/);
+  assert.equal(windowsCall?.command, "powershell.exe");
+  assert.deepEqual(windowsCall?.args.slice(0, 2), ["-NoProfile", "-Command"]);
+  assert.match(windowsCall?.args[2] ?? "", /ToastNotificationManager/);
+  assert.match(windowsCall?.args[2] ?? "", /CreateTextNode\('Ready''s body'\)/);
+  assert.match(windowsCall?.args[2] ?? "", /CreateToastNotifier\('Pi''s App'\)/);
   assert.equal(windowsCall?.options, undefined);
 
   delete process.env.WT_SESSION;
-  setProcessPlatform(t, 'darwin');
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  setProcessPlatform(t, "darwin");
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(execCalls.shift(), {
-    command: 'osascript',
-    args: ['-e', 'display notification "Ready\'s body" with title "Pi\'s App"'],
+    command: "osascript",
+    args: ["-e", 'display notification "Ready\'s body" with title "Pi\'s App"'],
     options: undefined,
   });
 
-  setProcessPlatform(t, 'linux');
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  setProcessPlatform(t, "linux");
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(execCalls.shift(), {
-    command: 'notify-send',
+    command: "notify-send",
     args: ["Pi's App", "Ready's body"],
     options: undefined,
   });
   assert.equal(execCalls.length, 0);
 });
 
-test('notify selects sound commands and falls back from canberra to paplay on linux', async (t) => {
+test("notify selects sound commands and falls back from canberra to paplay on linux", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'WT_SESSION', undefined);
-  setEnvVar(t, 'WSL_DISTRO_NAME', undefined);
+  setEnvVar(t, "WT_SESSION", undefined);
+  setEnvVar(t, "WSL_DISTRO_NAME", undefined);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
     channels: {
@@ -651,72 +698,78 @@ test('notify selects sound commands and falls back from canberra to paplay on li
       sound: true,
     },
     sound: {
-      backend: 'auto',
+      backend: "auto",
       frequencyHz: 880,
       durationMs: 120,
-      linuxSoundId: 'complete',
+      linuxSoundId: "complete",
     },
   });
 
   const execCalls = patchExecFile(t, ({ command, callback }) => {
-    if (command === 'canberra-gtk-play') {
-      callback(new Error('missing canberra'));
+    if (command === "canberra-gtk-play") {
+      callback(new Error("missing canberra"));
       return;
     }
-    callback(null, '', '');
+    callback(null, "", "");
   });
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  setProcessPlatform(t, 'linux');
-  setEnvVar(t, 'WT_SESSION', 'wt-session');
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  setProcessPlatform(t, "linux");
+  setEnvVar(t, "WT_SESSION", "wt-session");
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(execCalls.shift(), {
-    command: 'powershell.exe',
-    args: ['-NoProfile', '-Command', '[console]::beep(880, 120)'],
+    command: "powershell.exe",
+    args: ["-NoProfile", "-Command", "[console]::beep(880, 120)"],
     options: undefined,
   });
 
   delete process.env.WT_SESSION;
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
   assert.deepEqual(execCalls.splice(0), [
     {
-      command: 'canberra-gtk-play',
-      args: ['-i', 'complete'],
+      command: "canberra-gtk-play",
+      args: ["-i", "complete"],
       options: undefined,
     },
     {
-      command: 'paplay',
-      args: ['/usr/share/sounds/freedesktop/stereo/complete.oga'],
+      command: "paplay",
+      args: ["/usr/share/sounds/freedesktop/stereo/complete.oga"],
       options: undefined,
     },
   ]);
 });
 
-test('notify falls back to valid config and warns when project config JSON is invalid', async (t) => {
+test("notify falls back to valid config and warns when project config JSON is invalid", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
-  setEnvVar(t, 'TMUX', undefined);
+  setEnvVar(t, "TMUX", undefined);
 
-  writeNotifyConfig(path.join(agentDir, 'extensions', 'notify.json'), {
+  writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
     enabled: true,
     onlyWhenInteractive: false,
-    title: 'Global Title',
-    body: 'Global Body',
+    title: "Global Title",
+    body: "Global Body",
     channels: {
       terminal: true,
       desktop: false,
@@ -724,30 +777,38 @@ test('notify falls back to valid config and warns when project config JSON is in
       sound: false,
     },
     terminal: {
-      backend: 'osc777',
+      backend: "osc777",
     },
   });
 
-  const invalidProjectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, 'notify.json');
-  writeFileSync(invalidProjectConfigPath, '{ invalid json\n');
+  const invalidProjectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, "notify.json");
+  writeFileSync(invalidProjectConfigPath, "{ invalid json\n");
 
-  patchExecFile(t, ({ callback }) => callback(null, '', ''));
+  patchExecFile(t, ({ callback }) => callback(null, "", ""));
   const writes = captureStdout(t);
   const consoleErrors = captureConsoleErrors(t);
-  const notifyExtension = await loadFreshExtension('extensions/notify/index.ts');
+  const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
   notifyExtension(pi);
 
-  const handler = handlers.get('agent_settled');
-  assert.equal(typeof handler, 'function');
+  const handler = handlers.get("agent_settled");
+  assert.equal(typeof handler, "function");
 
-  await handler({}, {
-    cwd: projectDir,
-    hasUI: true,
-    isProjectTrusted: () => true,
-  });
+  await handler(
+    {},
+    {
+      cwd: projectDir,
+      hasUI: true,
+      isProjectTrusted: () => true,
+    },
+  );
 
-  assert.deepEqual(writes, ['\x1b]777;notify;Global Title;Global Body\x07']);
+  assert.deepEqual(writes, ["\x1b]777;notify;Global Title;Global Body\x07"]);
   assert.equal(consoleErrors.length, 1);
-  assert.match(consoleErrors[0], new RegExp(`Warning: Could not parse ${invalidProjectConfigPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`));
+  assert.match(
+    consoleErrors[0],
+    new RegExp(
+      `Warning: Could not parse ${invalidProjectConfigPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`,
+    ),
+  );
 });

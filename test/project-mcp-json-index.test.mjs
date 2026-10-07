@@ -16,27 +16,21 @@
  *  - registerMcpServer error is not forwarded verbatim
  */
 
-import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import test from 'node:test';
-import extension from '../extensions/project-mcp-json/index.ts';
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import extension from "../extensions/project-mcp-json/index.ts";
 
 // ---------------------------------------------------------------------------
 // Temp directory + environment helpers
 // ---------------------------------------------------------------------------
 
 function setupTempDirs(t) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'pmj-test-'));
-  const agentDir = path.join(root, 'agent');
-  const projectDir = path.join(root, 'project');
+  const root = mkdtempSync(path.join(os.tmpdir(), "pmj-test-"));
+  const agentDir = path.join(root, "agent");
+  const projectDir = path.join(root, "project");
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(projectDir, { recursive: true });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -60,9 +54,9 @@ function setAgentDirEnv(t, agentDir) {
  */
 function writeGlobalSettings(agentDir, defaultProjectTrust) {
   writeFileSync(
-    path.join(agentDir, 'settings.json'),
+    path.join(agentDir, "settings.json"),
     JSON.stringify({ defaultProjectTrust }),
-    'utf-8'
+    "utf-8",
   );
 }
 
@@ -81,9 +75,9 @@ function writeTrustStore(agentDir, entries) {
     }
   }
   writeFileSync(
-    path.join(agentDir, 'trust.json'),
-    JSON.stringify(canonical, null, 2) + '\n',
-    'utf-8'
+    path.join(agentDir, "trust.json"),
+    JSON.stringify(canonical, null, 2) + "\n",
+    "utf-8",
   );
 }
 
@@ -92,9 +86,9 @@ function writeTrustStore(agentDir, entries) {
  * hasTrustRequiringProjectResources(projectDir) returns true.
  */
 function createPiResources(projectDir) {
-  const piDir = path.join(projectDir, '.pi');
+  const piDir = path.join(projectDir, ".pi");
   mkdirSync(piDir, { recursive: true });
-  writeFileSync(path.join(piDir, 'mcp.json'), JSON.stringify({ mcpServers: {} }));
+  writeFileSync(path.join(piDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
 }
 
 // ---------------------------------------------------------------------------
@@ -116,11 +110,7 @@ function makePi() {
   return { pi, handlers, registered };
 }
 
-function makeCtx({
-  cwd,
-  hasUI = true,
-  isProjectTrusted = () => true,
-} = {}) {
+function makeCtx({ cwd, hasUI = true, isProjectTrusted = () => true } = {}) {
   const notifications = [];
 
   const ctx = {
@@ -139,9 +129,9 @@ function makeCtx({
 
 /** Fire session_start on the handlers map. */
 async function fireSessionStart(handlers, ctx) {
-  const handler = handlers.get('session_start');
-  assert.ok(handler, 'session_start handler should be registered');
-  await handler({ type: 'session_start', reason: 'startup' }, ctx);
+  const handler = handlers.get("session_start");
+  assert.ok(handler, "session_start handler should be registered");
+  await handler({ type: "session_start", reason: "startup" }, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,9 +141,9 @@ async function fireSessionStart(handlers, ctx) {
 const STDIO_MCP_JSON = JSON.stringify({
   mcpServers: {
     myserver: {
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', 'some-mcp-server'],
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "some-mcp-server"],
     },
   },
 });
@@ -162,11 +152,11 @@ const STDIO_MCP_JSON = JSON.stringify({
 // Tests: basic trust gate
 // ---------------------------------------------------------------------------
 
-test('untrusted project: does not read or register any server', async (t) => {
+test("untrusted project: does not read or register any server", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
 
   const { pi, handlers, registered } = makePi();
   extension(pi);
@@ -174,10 +164,10 @@ test('untrusted project: does not read or register any server', async (t) => {
   const { ctx } = makeCtx({ cwd: projectDir, isProjectTrusted: () => false });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register any server for untrusted project');
+  assert.equal(registered.length, 0, "should not register any server for untrusted project");
 });
 
-test('trusted project + no .mcp.json: does nothing', async (t) => {
+test("trusted project + no .mcp.json: does nothing", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
   // Trust resources present so extension proceeds past trust check
@@ -197,13 +187,13 @@ test('trusted project + no .mcp.json: does nothing', async (t) => {
 // Tests: Pi resource branch (step 2a)
 // ---------------------------------------------------------------------------
 
-test('hasTrustRequiringProjectResources=true: loads .mcp.json without checking trust store', async (t) => {
+test("hasTrustRequiringProjectResources=true: loads .mcp.json without checking trust store", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
   // Create Pi resource so hasTrustRequiringProjectResources returns true
   createPiResources(projectDir);
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   // No trust.json, no settings.json — should still load
 
   const { pi, handlers, registered } = makePi();
@@ -212,19 +202,19 @@ test('hasTrustRequiringProjectResources=true: loads .mcp.json without checking t
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 1, 'should register server when Pi resources exist');
-  assert.equal(registered[0].name, 'myserver');
+  assert.equal(registered.length, 1, "should register server when Pi resources exist");
+  assert.equal(registered[0].name, "myserver");
 });
 
 // ---------------------------------------------------------------------------
 // Tests: saved trust store branch (step 2b)
 // ---------------------------------------------------------------------------
 
-test('savedTrust=true (exact path): loads .mcp.json', async (t) => {
+test("savedTrust=true (exact path): loads .mcp.json", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   // Write trust.json with exact projectDir → true
   writeTrustStore(agentDir, { [projectDir]: true });
 
@@ -234,18 +224,18 @@ test('savedTrust=true (exact path): loads .mcp.json', async (t) => {
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 1, 'should register when saved trust is true');
-  assert.equal(registered[0].name, 'myserver');
+  assert.equal(registered.length, 1, "should register when saved trust is true");
+  assert.equal(registered[0].name, "myserver");
 });
 
-test('savedTrust=true (ancestor path): loads .mcp.json', async (t) => {
+test("savedTrust=true (ancestor path): loads .mcp.json", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
   // Create a subdirectory as the real cwd; trust stored for the parent
-  const subDir = path.join(projectDir, 'subproject');
+  const subDir = path.join(projectDir, "subproject");
   mkdirSync(subDir, { recursive: true });
-  writeFileSync(path.join(subDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(subDir, ".mcp.json"), STDIO_MCP_JSON);
   // Trust the parent directory, not the exact subdir
   writeTrustStore(agentDir, { [projectDir]: true });
 
@@ -255,15 +245,15 @@ test('savedTrust=true (ancestor path): loads .mcp.json', async (t) => {
   const { ctx } = makeCtx({ cwd: subDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 1, 'should register when nearest-ancestor trust is true');
-  assert.equal(registered[0].name, 'myserver');
+  assert.equal(registered.length, 1, "should register when nearest-ancestor trust is true");
+  assert.equal(registered[0].name, "myserver");
 });
 
-test('savedTrust=false: skips .mcp.json without notification', async (t) => {
+test("savedTrust=false: skips .mcp.json without notification", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   // Explicitly saved as untrusted
   writeTrustStore(agentDir, { [projectDir]: false });
 
@@ -273,20 +263,20 @@ test('savedTrust=false: skips .mcp.json without notification', async (t) => {
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register when saved trust is false');
-  assert.equal(notifications.length, 0, 'should not notify when explicitly untrusted');
+  assert.equal(registered.length, 0, "should not register when saved trust is false");
+  assert.equal(notifications.length, 0, "should not notify when explicitly untrusted");
 });
 
 // ---------------------------------------------------------------------------
 // Tests: defaultProjectTrust branch (step 2c)
 // ---------------------------------------------------------------------------
 
-test('defaultProjectTrust=always: loads .mcp.json when no resources, no saved trust', async (t) => {
+test("defaultProjectTrust=always: loads .mcp.json when no resources, no saved trust", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
-  writeGlobalSettings(agentDir, 'always');
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
+  writeGlobalSettings(agentDir, "always");
   // No .pi resources, no trust.json
 
   const { pi, handlers, registered } = makePi();
@@ -295,16 +285,16 @@ test('defaultProjectTrust=always: loads .mcp.json when no resources, no saved tr
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 1, 'should register when defaultProjectTrust=always');
-  assert.equal(registered[0].name, 'myserver');
+  assert.equal(registered.length, 1, "should register when defaultProjectTrust=always");
+  assert.equal(registered[0].name, "myserver");
 });
 
-test('defaultProjectTrust=never: skips .mcp.json without notification', async (t) => {
+test("defaultProjectTrust=never: skips .mcp.json without notification", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
-  writeGlobalSettings(agentDir, 'never');
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
+  writeGlobalSettings(agentDir, "never");
 
   const { pi, handlers, registered } = makePi();
   extension(pi);
@@ -312,16 +302,16 @@ test('defaultProjectTrust=never: skips .mcp.json without notification', async (t
   const { ctx, notifications } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register when defaultProjectTrust=never');
-  assert.equal(notifications.length, 0, 'should not notify when defaultProjectTrust=never');
+  assert.equal(registered.length, 0, "should not register when defaultProjectTrust=never");
+  assert.equal(notifications.length, 0, "should not notify when defaultProjectTrust=never");
 });
 
-test('defaultProjectTrust=ask + UI: skips and emits /trust hint notification', async (t) => {
+test("defaultProjectTrust=ask + UI: skips and emits /trust hint notification", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
-  writeGlobalSettings(agentDir, 'ask');
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
+  writeGlobalSettings(agentDir, "ask");
 
   const { pi, handlers, registered } = makePi();
   extension(pi);
@@ -329,24 +319,24 @@ test('defaultProjectTrust=ask + UI: skips and emits /trust hint notification', a
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register when defaultProjectTrust=ask');
-  assert.equal(notifications.length, 1, 'should emit exactly one notification');
+  assert.equal(registered.length, 0, "should not register when defaultProjectTrust=ask");
+  assert.equal(notifications.length, 1, "should emit exactly one notification");
   assert.ok(
-    notifications[0].message.includes('/trust'),
-    'notification should mention /trust command'
+    notifications[0].message.includes("/trust"),
+    "notification should mention /trust command",
   );
   assert.ok(
-    notifications[0].message.toLowerCase().includes('.mcp.json'),
-    'notification should mention .mcp.json'
+    notifications[0].message.toLowerCase().includes(".mcp.json"),
+    "notification should mention .mcp.json",
   );
 });
 
-test('defaultProjectTrust=ask + no UI: skips silently (no notification)', async (t) => {
+test("defaultProjectTrust=ask + no UI: skips silently (no notification)", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
-  writeGlobalSettings(agentDir, 'ask');
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
+  writeGlobalSettings(agentDir, "ask");
 
   const { pi, handlers, registered } = makePi();
   extension(pi);
@@ -354,15 +344,15 @@ test('defaultProjectTrust=ask + no UI: skips silently (no notification)', async 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register without UI when ask');
-  assert.equal(notifications.length, 0, 'should not emit notifications without UI');
+  assert.equal(registered.length, 0, "should not register without UI when ask");
+  assert.equal(notifications.length, 0, "should not emit notifications without UI");
 });
 
-test('no settings.json: defaults to ask behaviour (skips with UI notify)', async (t) => {
+test("no settings.json: defaults to ask behaviour (skips with UI notify)", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   // No settings.json written — should default to "ask"
 
   const { pi, handlers, registered } = makePi();
@@ -371,10 +361,10 @@ test('no settings.json: defaults to ask behaviour (skips with UI notify)', async
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 0, 'should not register when no settings and ask is default');
+  assert.equal(registered.length, 0, "should not register when no settings and ask is default");
   assert.ok(
-    notifications.some((n) => n.message.includes('/trust')),
-    'should emit /trust notification when no settings (defaulting to ask)'
+    notifications.some((n) => n.message.includes("/trust")),
+    "should emit /trust notification when no settings (defaulting to ask)",
   );
 });
 
@@ -382,7 +372,7 @@ test('no settings.json: defaults to ask behaviour (skips with UI notify)', async
 // Tests: no read when skipped
 // ---------------------------------------------------------------------------
 
-test('savedTrust=false: does not attempt to read .mcp.json (no error on absent file)', async (t) => {
+test("savedTrust=false: does not attempt to read .mcp.json (no error on absent file)", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
@@ -399,12 +389,12 @@ test('savedTrust=false: does not attempt to read .mcp.json (no error on absent f
   assert.equal(notifications.length, 0);
 });
 
-test('defaultProjectTrust=never: does not attempt to read .mcp.json', async (t) => {
+test("defaultProjectTrust=never: does not attempt to read .mcp.json", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
   // No .mcp.json — if we tried to read it, it would throw; no error expected
-  writeGlobalSettings(agentDir, 'never');
+  writeGlobalSettings(agentDir, "never");
 
   const { pi, handlers, registered } = makePi();
   extension(pi);
@@ -418,18 +408,18 @@ test('defaultProjectTrust=never: does not attempt to read .mcp.json', async (t) 
 // Tests: name collision + error handling
 // ---------------------------------------------------------------------------
 
-test('name collision: registerMcpServer throws => caught and warned, other servers still register', async (t) => {
+test("name collision: registerMcpServer throws => caught and warned, other servers still register", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
   writeFileSync(
-    path.join(projectDir, '.mcp.json'),
+    path.join(projectDir, ".mcp.json"),
     JSON.stringify({
       mcpServers: {
-        colliding: { type: 'stdio', command: 'npx', args: [] },
-        fine: { type: 'stdio', command: 'node', args: [] },
+        colliding: { type: "stdio", command: "npx", args: [] },
+        fine: { type: "stdio", command: "node", args: [] },
       },
-    })
+    }),
   );
   createPiResources(projectDir);
 
@@ -437,7 +427,7 @@ test('name collision: registerMcpServer throws => caught and warned, other serve
   const { pi, handlers } = makePi();
   // Override to throw on 'colliding'
   pi.registerMcpServer = (name, config) => {
-    if (name === 'colliding') throw new Error('name already taken by another extension');
+    if (name === "colliding") throw new Error("name already taken by another extension");
     registered.push({ name, config });
   };
   extension(pi);
@@ -446,26 +436,29 @@ test('name collision: registerMcpServer throws => caught and warned, other serve
   await fireSessionStart(handlers, ctx);
 
   // 'fine' should still be registered
-  assert.ok(registered.some((r) => r.name === 'fine'), 'non-colliding server should register');
+  assert.ok(
+    registered.some((r) => r.name === "fine"),
+    "non-colliding server should register",
+  );
   // A warning should mention 'colliding'
   assert.ok(
-    notifications.some((n) => n.message.includes('colliding')),
-    'should warn about the colliding server'
+    notifications.some((n) => n.message.includes("colliding")),
+    "should warn about the colliding server",
   );
   assert.ok(
-    notifications.some((n) => n.type === 'warning'),
-    'collision warning should use warning level'
+    notifications.some((n) => n.type === "warning"),
+    "collision warning should use warning level",
   );
 });
 
-test('registerMcpServer error is not forwarded verbatim in warning', async (t) => {
+test("registerMcpServer error is not forwarded verbatim in warning", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
-  const INTERNAL_ERROR_DETAIL = 'internal-pi-error-detail-xyz';
+  const INTERNAL_ERROR_DETAIL = "internal-pi-error-detail-xyz";
 
   const { pi, handlers } = makePi();
   pi.registerMcpServer = (_name, _config) => {
@@ -478,23 +471,23 @@ test('registerMcpServer error is not forwarded verbatim in warning', async (t) =
 
   // A warning should be emitted (the server name should appear)
   assert.ok(
-    notifications.some((n) => n.message.includes('myserver') && n.type === 'warning'),
-    'should warn about the failed server'
+    notifications.some((n) => n.message.includes("myserver") && n.type === "warning"),
+    "should warn about the failed server",
   );
   // The raw internal error detail must NOT be forwarded
   for (const n of notifications) {
     assert.ok(
       !n.message.includes(INTERNAL_ERROR_DETAIL),
-      `notification must not contain raw error detail: ${n.message}`
+      `notification must not contain raw error detail: ${n.message}`,
     );
   }
 });
 
-test('parse warning + no UI: does not notify', async (t) => {
+test("parse warning + no UI: does not notify", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), '{');
+  writeFileSync(path.join(projectDir, ".mcp.json"), "{");
   createPiResources(projectDir);
 
   const { pi, handlers, registered } = makePi();
@@ -504,19 +497,19 @@ test('parse warning + no UI: does not notify', async (t) => {
   await fireSessionStart(handlers, ctx);
 
   assert.equal(registered.length, 0);
-  assert.equal(notifications.length, 0, 'parse warnings must not notify without UI');
+  assert.equal(notifications.length, 0, "parse warnings must not notify without UI");
 });
 
-test('registration failure + no UI: does not notify', async (t) => {
+test("registration failure + no UI: does not notify", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
   const { pi, handlers, registered } = makePi();
   pi.registerMcpServer = () => {
-    throw new Error('internal-pi-error-detail-xyz');
+    throw new Error("internal-pi-error-detail-xyz");
   };
   extension(pi);
 
@@ -524,26 +517,26 @@ test('registration failure + no UI: does not notify', async (t) => {
   await fireSessionStart(handlers, ctx);
 
   assert.equal(registered.length, 0);
-  assert.equal(notifications.length, 0, 'registration failures must not notify without UI');
+  assert.equal(notifications.length, 0, "registration failures must not notify without UI");
 });
 
-test('registration-failure warning: very long server name is truncated, not emitted verbatim', async (t) => {
+test("registration-failure warning: very long server name is truncated, not emitted verbatim", async (t) => {
   // Server names are validated by SERVER_NAME_RE (alphanumeric/_/-) but there
   // is no length limit in the schema.  A >80-char name must be truncated in
   // the registration-failure warning.
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  const longName = 'a'.repeat(100); // 100 valid chars — passes SERVER_NAME_RE
+  const longName = "a".repeat(100); // 100 valid chars — passes SERVER_NAME_RE
   writeFileSync(
-    path.join(projectDir, '.mcp.json'),
-    JSON.stringify({ mcpServers: { [longName]: { type: 'stdio', command: 'node', args: [] } } })
+    path.join(projectDir, ".mcp.json"),
+    JSON.stringify({ mcpServers: { [longName]: { type: "stdio", command: "node", args: [] } } }),
   );
   createPiResources(projectDir);
 
   const { pi, handlers } = makePi();
   pi.registerMcpServer = (_name, _config) => {
-    throw new Error('collision');
+    throw new Error("collision");
   };
   extension(pi);
 
@@ -551,24 +544,21 @@ test('registration-failure warning: very long server name is truncated, not emit
   await fireSessionStart(handlers, ctx);
 
   assert.ok(
-    notifications.some((n) => n.type === 'warning'),
-    'should emit a warning on registration failure'
+    notifications.some((n) => n.type === "warning"),
+    "should emit a warning on registration failure",
   );
   for (const n of notifications) {
-    if (n.type === 'warning') {
+    if (n.type === "warning") {
       assert.ok(
         !n.message.includes(longName),
-        'full 100-char name must not appear verbatim in warning'
+        "full 100-char name must not appear verbatim in warning",
       );
       // The truncated prefix (80 chars + \u2026) must appear
       assert.ok(
-        n.message.includes('a'.repeat(80)),
-        'truncated 80-char prefix should appear in warning'
+        n.message.includes("a".repeat(80)),
+        "truncated 80-char prefix should appear in warning",
       );
-      assert.ok(
-        n.message.includes('\u2026'),
-        'ellipsis must follow the truncated name'
-      );
+      assert.ok(n.message.includes("\u2026"), "ellipsis must follow the truncated name");
     }
   }
 });
@@ -577,14 +567,14 @@ test('registration-failure warning: very long server name is truncated, not emit
 // Tests: .mcp.json existence check before trust branch
 // ---------------------------------------------------------------------------
 
-test('absent .mcp.json with defaultProjectTrust=ask + UI: no notice emitted (no-op)', async (t) => {
+test("absent .mcp.json with defaultProjectTrust=ask + UI: no notice emitted (no-op)", async (t) => {
   // The /trust notice must NOT be shown when there is no .mcp.json at all,
   // regardless of trust settings.  The existence check fires before any trust
   // branch evaluation.
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeGlobalSettings(agentDir, 'ask');
+  writeGlobalSettings(agentDir, "ask");
   // Do NOT create .mcp.json
 
   const { pi, handlers, registered } = makePi();
@@ -594,10 +584,10 @@ test('absent .mcp.json with defaultProjectTrust=ask + UI: no notice emitted (no-
   await fireSessionStart(handlers, ctx);
 
   assert.equal(registered.length, 0);
-  assert.equal(notifications.length, 0, 'no notice should fire when .mcp.json is absent');
+  assert.equal(notifications.length, 0, "no notice should fire when .mcp.json is absent");
 });
 
-test('absent .mcp.json with hasTrustRequiringProjectResources: complete no-op, no warning', async (t) => {
+test("absent .mcp.json with hasTrustRequiringProjectResources: complete no-op, no warning", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
@@ -619,20 +609,20 @@ test('absent .mcp.json with hasTrustRequiringProjectResources: complete no-op, n
 // Tests: SettingsManager BOM handling
 // ---------------------------------------------------------------------------
 
-test('settings.json with BOM prefix: defaultProjectTrust=always still loads servers', async (t) => {
+test("settings.json with BOM prefix: defaultProjectTrust=always still loads servers", async (t) => {
   // SettingsManager strips BOM via stripBom; verify the extension uses it
   // correctly and that a BOM-prefixed settings file is handled.
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
 
   // Write settings.json with a UTF-8 BOM (\uFEFF) prefix
-  const BOM = '\uFEFF';
+  const BOM = "\uFEFF";
   writeFileSync(
-    path.join(agentDir, 'settings.json'),
-    BOM + JSON.stringify({ defaultProjectTrust: 'always' }),
-    'utf-8'
+    path.join(agentDir, "settings.json"),
+    BOM + JSON.stringify({ defaultProjectTrust: "always" }),
+    "utf-8",
   );
 
   const { pi, handlers, registered } = makePi();
@@ -641,19 +631,19 @@ test('settings.json with BOM prefix: defaultProjectTrust=always still loads serv
   const { ctx } = makeCtx({ cwd: projectDir });
   await fireSessionStart(handlers, ctx);
 
-  assert.equal(registered.length, 1, 'server should load with BOM-prefixed settings.json');
-  assert.equal(registered[0].name, 'myserver');
+  assert.equal(registered.length, 1, "server should load with BOM-prefixed settings.json");
+  assert.equal(registered[0].name, "myserver");
 });
 
 // ---------------------------------------------------------------------------
 // Tests: missing pi.registerMcpServer API (Pi < 1.0)
 // ---------------------------------------------------------------------------
 
-test('pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, registers nothing', async (t) => {
+test("pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, registers nothing", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
   // Build a pi object without registerMcpServer (simulates Pi < 1.0)
@@ -668,25 +658,25 @@ test('pi.registerMcpServer absent + UI: emits one Pi >=1.0 required notice, regi
   extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: true });
-  const handler = handlers.get('session_start');
-  assert.ok(handler, 'session_start handler should be registered');
-  await handler({ type: 'session_start', reason: 'startup' }, ctx);
+  const handler = handlers.get("session_start");
+  assert.ok(handler, "session_start handler should be registered");
+  await handler({ type: "session_start", reason: "startup" }, ctx);
 
-  assert.equal(notifications.length, 1, 'should emit exactly one notice');
+  assert.equal(notifications.length, 1, "should emit exactly one notice");
   assert.ok(
-    notifications[0].message.toLowerCase().includes('pi >=1.0') ||
-    notifications[0].message.toLowerCase().includes('pi >= 1.0') ||
-    notifications[0].message.toLowerCase().includes('1.0'),
-    'notice should mention Pi 1.0 requirement'
+    notifications[0].message.toLowerCase().includes("pi >=1.0") ||
+      notifications[0].message.toLowerCase().includes("pi >= 1.0") ||
+      notifications[0].message.toLowerCase().includes("1.0"),
+    "notice should mention Pi 1.0 requirement",
   );
-  assert.equal(notifications[0].type, 'info', 'notice should use info level');
+  assert.equal(notifications[0].type, "info", "notice should use info level");
 });
 
-test('pi.registerMcpServer absent + no UI: registers nothing, no notice emitted', async (t) => {
+test("pi.registerMcpServer absent + no UI: registers nothing, no notice emitted", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
 
-  writeFileSync(path.join(projectDir, '.mcp.json'), STDIO_MCP_JSON);
+  writeFileSync(path.join(projectDir, ".mcp.json"), STDIO_MCP_JSON);
   createPiResources(projectDir);
 
   const handlers = new Map();
@@ -700,9 +690,9 @@ test('pi.registerMcpServer absent + no UI: registers nothing, no notice emitted'
   extension(pi);
 
   const { ctx, notifications } = makeCtx({ cwd: projectDir, hasUI: false });
-  const handler = handlers.get('session_start');
-  assert.ok(handler, 'session_start handler should be registered');
-  await handler({ type: 'session_start', reason: 'startup' }, ctx);
+  const handler = handlers.get("session_start");
+  assert.ok(handler, "session_start handler should be registered");
+  await handler({ type: "session_start", reason: "startup" }, ctx);
 
-  assert.equal(notifications.length, 0, 'should emit no notice without UI');
+  assert.equal(notifications.length, 0, "should emit no notice without UI");
 });

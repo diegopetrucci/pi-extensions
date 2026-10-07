@@ -337,7 +337,9 @@ function createSectionCard(section) {
 function renderMessageLines() {
   elements.messageLines.replaceChildren();
   for (let i = 0; i < messageData.lines.length; i++) {
-    elements.messageLines.append(createLineRow(messageData.lines[i], fullMessageFenceState[i].lineType));
+    elements.messageLines.append(
+      createLineRow(messageData.lines[i], fullMessageFenceState[i].lineType),
+    );
   }
 }
 

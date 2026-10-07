@@ -5,70 +5,74 @@
  * Demonstrates how to cancel session events using the before_* events.
  */
 
-import type { ExtensionAPI, SessionBeforeSwitchEvent, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  SessionBeforeSwitchEvent,
+  SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 
 function hasUnsavedUserWork(entries: SessionEntry[]): boolean {
-	let sawAssistant = false;
+  let sawAssistant = false;
 
-	for (let index = entries.length - 1; index >= 0; index -= 1) {
-		const entry = entries[index];
-		if (entry.type !== "message") continue;
-		if (entry.message.role === "assistant") {
-			sawAssistant = true;
-			break;
-		}
-		if (entry.message.role === "user") return true;
-	}
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.type !== "message") continue;
+    if (entry.message.role === "assistant") {
+      sawAssistant = true;
+      break;
+    }
+    if (entry.message.role === "user") return true;
+  }
 
-	if (sawAssistant) return false;
-	return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
+  if (sawAssistant) return false;
+  return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx) => {
-		if (!ctx.hasUI) return;
+  pi.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx) => {
+    if (!ctx.hasUI) return;
 
-		if (event.reason === "new") {
-			const confirmed = await ctx.ui.confirm(
-				"Clear session?",
-				"This will delete all messages in the current session.",
-			);
+    if (event.reason === "new") {
+      const confirmed = await ctx.ui.confirm(
+        "Clear session?",
+        "This will delete all messages in the current session.",
+      );
 
-			if (!confirmed) {
-				ctx.ui.notify("Clear cancelled", "info");
-				return { cancel: true };
-			}
-			return;
-		}
+      if (!confirmed) {
+        ctx.ui.notify("Clear cancelled", "info");
+        return { cancel: true };
+      }
+      return;
+    }
 
-		// reason === "resume" - check if there are unsaved changes (user messages newer than the last assistant response)
-		const entries = ctx.sessionManager.getEntries();
-		const hasUnsavedWork = hasUnsavedUserWork(entries);
+    // reason === "resume" - check if there are unsaved changes (user messages newer than the last assistant response)
+    const entries = ctx.sessionManager.getEntries();
+    const hasUnsavedWork = hasUnsavedUserWork(entries);
 
-		if (hasUnsavedWork) {
-			const confirmed = await ctx.ui.confirm(
-				"Switch session?",
-				"You have messages in the current session. Switch anyway?",
-			);
+    if (hasUnsavedWork) {
+      const confirmed = await ctx.ui.confirm(
+        "Switch session?",
+        "You have messages in the current session. Switch anyway?",
+      );
 
-			if (!confirmed) {
-				ctx.ui.notify("Switch cancelled", "info");
-				return { cancel: true };
-			}
-		}
-	});
+      if (!confirmed) {
+        ctx.ui.notify("Switch cancelled", "info");
+        return { cancel: true };
+      }
+    }
+  });
 
-	pi.on("session_before_fork", async (event, ctx) => {
-		if (!ctx.hasUI) return;
+  pi.on("session_before_fork", async (event, ctx) => {
+    if (!ctx.hasUI) return;
 
-		const choice = await ctx.ui.select(`Fork from entry ${event.entryId.slice(0, 8)}?`, [
-			"Yes, create fork",
-			"No, stay in current session",
-		]);
+    const choice = await ctx.ui.select(`Fork from entry ${event.entryId.slice(0, 8)}?`, [
+      "Yes, create fork",
+      "No, stay in current session",
+    ]);
 
-		if (choice !== "Yes, create fork") {
-			ctx.ui.notify("Fork cancelled", "info");
-			return { cancel: true };
-		}
-	});
+    if (choice !== "Yes, create fork") {
+      ctx.ui.notify("Fork cancelled", "info");
+      return { cancel: true };
+    }
+  });
 }
