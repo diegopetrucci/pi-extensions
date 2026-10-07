@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as path from "node:path";
 
 import type { AgentSession, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -9,6 +10,7 @@ import {
   createAgentSession,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import type { Usage } from "@earendil-works/pi-ai";
@@ -102,6 +104,33 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
   ],
+  azure: [
+    "gpt-6-astra ",
+    "gpt-6-astra",
+    "gpt-6.1-sol ",
+    "gpt-6-sol ",
+    "gpt-6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-luna ",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "gpt-5.5-pro",
+    "gpt-5.5",
+    "gpt-5.4-pro",
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    "gpt-5-pro",
+    "gpt-5-chat-latest",
+    "gpt-5.2-pro",
+    "gpt-5.2",
+    "gpt-5.1",
+    "o3-pro",
+    "o1-pro",
+    "gpt-5.4-mini",
+    "gpt-5-mini",
+  ],
+  // Legacy alias for Pi 1.0.0–1.0.2 hosts (renamed to `azure` in Pi 1.0.3).
   "azure-openai-responses": [
     "gpt-6-astra ",
     "gpt-6-astra",
@@ -131,10 +160,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   "cloudflare-ai-gateway": [
     "claude-fable-5",
     "claude-opus-5",
-    "claude-opus-4.8",
-    "claude-opus-4.7",
-    "claude-opus-4.6",
-    "claude-opus-4.5",
     "gpt-6-astra ",
     "gpt-6-astra",
     "gpt-5.5",
@@ -285,6 +310,93 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "google/gemini-3.5-flash",
   ],
 };
+
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+
+// Derive project-trust for the isolated subagent session from the host tool context.
+// Fails closed: returns false if the host has not trusted the project, or if the subagent
+// runs in a different directory (e.g. a temp workspace), preventing an untrusted project's
+// .pi/mcp.json from being loaded by the MCP extension.
+function resolveSubagentProjectTrusted(
+  ctx: { cwd: string; isProjectTrusted(): boolean },
+  subagentCwd: string,
+): boolean {
+  // Feature-detected for older Pi hosts that may lack isProjectTrusted.
+  const hostTrusted =
+    typeof (ctx as { isProjectTrusted?: unknown }).isProjectTrusted === "function"
+      ? ctx.isProjectTrusted()
+      : false;
+  if (!hostTrusted) return false;
+  try {
+    return realpathSync(subagentCwd) === realpathSync(ctx.cwd);
+  } catch {
+    return false; // fail closed if realpath resolution fails
+  }
+}
+
+function isSubagentMcpTool(toolName: string): boolean {
+  return (
+    toolName.startsWith("mcp__") ||
+    toolName === "tool_search" ||
+    toolName === "list_mcp_resources" ||
+    toolName === "list_mcp_resource_templates" ||
+    toolName === "read_mcp_resource"
+  );
+}
+
+/** Returns true when v is a semver string >=1.0.4 (ignores prerelease; missing/garbage -> false). */
+function isMcpCompatibleVersion(v: string | undefined): boolean {
+  if (!v) return false;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return false;
+  const major = Number(m[1]),
+    minor = Number(m[2]),
+    patch = Number(m[3]);
+  if (major !== 1) return major > 1;
+  if (minor !== 0) return minor > 0;
+  return patch >= 4;
+}
+
+// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
+// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// matches that resolve nothing, so spawning MCP servers provides no benefit.
+function createMcpSubagentFactories(): ExtensionFactory[] {
+  const ns = piCodingAgent as Record<string, unknown>;
+  if (!isMcpCompatibleVersion(ns["VERSION"] as string | undefined)) return [];
+  const factories: ExtensionFactory[] = [];
+  const mcp = ns["createMcpExtension"];
+  const toolSearch = ns["createToolSearchExtension"];
+  if (typeof mcp === "function") factories.push((mcp as () => ExtensionFactory)());
+  if (typeof toolSearch === "function") factories.push((toolSearch as () => ExtensionFactory)());
+  return factories;
+}
+
+// Emit session_shutdown before dispose so MCP closes server connections (no leaked child processes).
+async function disposeSubagentSession(session: AgentSession | undefined): Promise<void> {
+  if (!session) return;
+  try {
+    const runner = (
+      session as unknown as {
+        extensionRunner?: {
+          hasHandlers(n: string): boolean;
+          emit(e: { type: string; reason: string }): Promise<unknown>;
+        };
+      }
+    ).extensionRunner;
+    if (runner?.hasHandlers("session_shutdown")) {
+      await runner.emit({ type: "session_shutdown", reason: "quit" });
+    }
+  } catch {
+    // Shutdown errors must not prevent dispose.
+  }
+  session.dispose();
+}
 
 const READ_ONLY_TOOL_NAMES = new Set(["read", "grep", "find", "ls", "bash"]);
 const READ_ONLY_BASH_COMMANDS = new Set(["gh", "git", "pwd"]);
@@ -1428,10 +1540,10 @@ function createCodeReviewerRuntimeGuardExtension(options: {
     });
 
     pi.on("tool_call", async (event) => {
-      if (!READ_ONLY_TOOL_NAMES.has(event.toolName)) {
+      if (!READ_ONLY_TOOL_NAMES.has(event.toolName) && !isSubagentMcpTool(event.toolName)) {
         return {
           block: true,
-          reason: `code_reviewer exposes read-only tools only; ${event.toolName} is not allowed.`,
+          reason: `code_reviewer exposes read-only built-in tools and MCP tools; ${event.toolName} is not allowed.`,
         };
       }
 
@@ -1505,7 +1617,7 @@ function buildSystemPrompt(options: {
   maxTurns: number;
   maxRunSeconds: number;
 }): string {
-  return `You are Code Reviewer, an isolated read-only review agent running inside the code-reviewer package. Review the proposed change against the stated task and the local checkout, then return a concise evidence-based review report.\n\nWorking directory: ${options.cwd}\nTurn budget: ${options.maxTurns} turns total, including your final answer.\nWall-clock budget: ${options.maxRunSeconds} seconds.\n\nAvailable tools are intended to be read-only: read, grep, find, ls, and bash. Use the built-in read, grep, find, and ls tools for local file inspection. Use bash only for a single read-only git, gh, or pwd invocation, such as git status/diff/show/log/blame, gh pr view/diff/list/status/checks, gh api GET calls, or pwd. A runtime guard blocks write/edit tools, shell pipelines/control operators, redirection, mutating git/gh commands, npm/publish commands, path traversal outside the checkout, and other filesystem mutation.\n\nReview priorities, in order:\n1. Ticket fit: does the change actually satisfy the requested task and stay in scope?\n2. Diff accuracy: do the files and edits match what the task claims changed?\n3. Correctness: could the change fail, regress behavior, mishandle errors, or break edge cases?\n4. Security and safety: look for unsafe command use, path handling issues, secret exposure, injection risks, destructive behavior, and policy violations.\n5. Simplicity and maintainability: call out unnecessary complexity, unclear behavior, or avoidable duplication.\n6. Tests and validation: check whether meaningful verification exists and whether gaps matter for this task.\n\nNon-negotiable constraints:\n- Never implement changes. Never edit, write, move, delete, format, install, commit, checkout, reset, clean, push, publish, or mutate GitHub.\n- Treat the supplied task and diff/context as claims to verify, not as facts. Cite file paths, line ranges, git diff/status output, or supplied diff excerpts as evidence.\n- Prefer the built-in file tools over bash when local file inspection is enough.\n- If evidence is missing, stale, or contradictory, say so plainly.\n- Keep the final review concise and actionable. Report the most important findings first; do not pad with non-findings.\n\nOutput format, exact order:\n## Verdict\nOne short paragraph with the overall review outcome.\n\n## Findings\nUse bullets ordered by severity. For each finding include: severity ('blocker', 'major', or 'minor'), a short title, evidence, and why it matters. If there are no findings, write '- none'.\n\n## Validation\nList the read-only checks you performed, including key files inspected, notable git/gh commands, and any uncertainty that limited the review, or '- none'.\n\n## Scope check\nState whether the change appears to match the requested task and note any missing or extra scope.`;
+  return `You are Code Reviewer, an isolated read-only review agent running inside the code-reviewer package. Review the proposed change against the stated task and the local checkout, then return a concise evidence-based review report.\n\nWorking directory: ${options.cwd}\nTurn budget: ${options.maxTurns} turns total, including your final answer.\nWall-clock budget: ${options.maxRunSeconds} seconds.\n\nAvailable tools are intended to be read-only: read, grep, find, ls, and bash. Use the built-in read, grep, find, and ls tools for local file inspection. Use bash only for a single read-only git, gh, or pwd invocation, such as git status/diff/show/log/blame, gh pr view/diff/list/status/checks, gh api GET calls, or pwd. A runtime guard blocks write/edit tools, shell pipelines/control operators, redirection, mutating git/gh commands, npm/publish commands, path traversal outside the checkout, and other filesystem mutation. Configured MCP tools are also available and run without confirmation; use them only to gather evidence or context, not for state-changing actions unless the task explicitly requires it. MCP access requires host Pi >=1.0.4; on older hosts MCP tools are absent with no error.\n\nReview priorities, in order:\n1. Ticket fit: does the change actually satisfy the requested task and stay in scope?\n2. Diff accuracy: do the files and edits match what the task claims changed?\n3. Correctness: could the change fail, regress behavior, mishandle errors, or break edge cases?\n4. Security and safety: look for unsafe command use, path handling issues, secret exposure, injection risks, destructive behavior, and policy violations.\n5. Simplicity and maintainability: call out unnecessary complexity, unclear behavior, or avoidable duplication.\n6. Tests and validation: check whether meaningful verification exists and whether gaps matter for this task.\n\nNon-negotiable constraints:\n- Never implement changes. Never edit, write, move, delete, format, install, commit, checkout, reset, clean, push, publish, or mutate GitHub.\n- Treat the supplied task and diff/context as claims to verify, not as facts. Cite file paths, line ranges, git diff/status output, or supplied diff excerpts as evidence.\n- Prefer the built-in file tools over bash when local file inspection is enough.\n- If evidence is missing, stale, or contradictory, say so plainly.\n- Keep the final review concise and actionable. Report the most important findings first; do not pad with non-findings.\n\nOutput format, exact order:\n## Verdict\nOne short paragraph with the overall review outcome.\n\n## Findings\nUse bullets ordered by severity. For each finding include: severity ('blocker', 'major', or 'minor'), a short title, evidence, and why it matters. If there are no findings, write '- none'.\n\n## Validation\nList the read-only checks you performed, including key files inspected, notable git/gh commands, and any uncertainty that limited the review, or '- none'.\n\n## Scope check\nState whether the change appears to match the requested task and note any missing or extra scope.`;
 }
 
 function buildUserPrompt(
@@ -1569,10 +1681,15 @@ function appendRunDetails(report: string, details: ReviewDetails): string {
 }
 
 export const __test__ = {
+  SUBAGENT_MCP_TOOLS,
+  isMcpCompatibleVersion,
+  resolveSubagentProjectTrusted,
+  createMcpSubagentFactories,
+  disposeSubagentSession,
+  createCodeReviewerRuntimeGuardExtension,
   assertToolPathInsideCwd,
   buildSystemPrompt,
   buildUserPrompt,
-  createCodeReviewerRuntimeGuardExtension,
   buildSafeGitCommand,
   formatToolCall,
   getBlockedBashReason,
@@ -1599,11 +1716,11 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
     name: "code_reviewer",
     label: "Code reviewer",
     description:
-      "Read-only isolated reviewer that checks a proposed change for ticket fit, diff accuracy, correctness, security, simplicity, and validation gaps without implementing anything.",
+      "Isolated reviewer with read-only built-in tools and configured MCP tools that checks a proposed change for ticket fit, diff accuracy, correctness, security, simplicity, and validation gaps without implementing anything.",
     promptSnippet:
-      "Run an isolated read-only code review against the local checkout and optional diff; returns concise findings with evidence and run details.",
+      "Run an isolated code review against the local checkout and optional diff using read-only built-in tools plus any configured MCP tools; returns concise findings with evidence and run details.",
     promptGuidelines: [
-      "Use code_reviewer when you want an independent read-only review of a proposed change or task implementation.",
+      "Use code_reviewer when you want an independent review of a proposed change or task implementation; it uses read-only built-in tools and any configured MCP tools.",
       "Provide the requested task and any relevant diff/context. Do not use code_reviewer to implement or edit files.",
     ],
     parameters: CodeReviewerParams,
@@ -1661,7 +1778,8 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
       try {
         emit();
 
-        const isolatedSettingsManager = SettingsManager.inMemory({});
+        const projectTrusted = resolveSubagentProjectTrusted(ctx, cwd);
+        const isolatedSettingsManager = SettingsManager.inMemory({}, { projectTrusted });
         const resourceLoader = new DefaultResourceLoader({
           cwd,
           agentDir: getAgentDir(),
@@ -1673,6 +1791,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
           noContextFiles: true,
           extensionFactories: [
             createCodeReviewerRuntimeGuardExtension({ cwd, maxTurns: MAX_TURNS }),
+            ...createMcpSubagentFactories(),
           ],
           systemPromptOverride: () =>
             buildSystemPrompt({
@@ -1712,10 +1831,12 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
               sessionManager: SessionManager.inMemory(cwd),
               model: candidate as CreateAgentSessionModel,
               thinkingLevel: thinking.effective,
-              tools: ["read", "grep", "find", "ls", "bash"],
+              tools: ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS],
             });
             attemptSession = created.session;
             session = attemptSession;
+            // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
+            await (created.session as any).bindExtensions?.({ mode: "json" });
             attemptUnsubscribe = attemptSession.subscribe((event) => {
               addSessionEventUsage(usage, event);
               switch (event.type) {
@@ -1797,7 +1918,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
             if (attemptSession && !succeeded) {
               attemptUnsubscribe?.();
               if (unsubscribe === attemptUnsubscribe) unsubscribe = undefined;
-              attemptSession.dispose();
+              await disposeSubagentSession(attemptSession);
               if (session === attemptSession) session = undefined;
             }
           }
@@ -1837,7 +1958,7 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
         if (runTimeout) clearTimeout(runTimeout);
         if (signal && abortListenerAdded) signal.removeEventListener("abort", abortFromCaller);
         unsubscribe?.();
-        session?.dispose();
+        await disposeSubagentSession(session);
       }
     },
   });

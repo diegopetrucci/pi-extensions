@@ -369,11 +369,18 @@ test("code_reviewer falls back to lower-priority selected models when preferred 
     createCalls.map((call) => `${call.model.provider}/${call.model.id}`),
     ["anthropic/claude-opus-4.8", "openai/gpt-5.5-pro"],
   );
+  const subagentMcpTools = [
+    "mcp__*",
+    "tool_search",
+    "list_mcp_resources",
+    "list_mcp_resource_templates",
+    "read_mcp_resource",
+  ];
   assert.deepEqual(
     createCalls.map((call) => call.tools),
     [
-      ["read", "grep", "find", "ls", "bash"],
-      ["read", "grep", "find", "ls", "bash"],
+      ["read", "grep", "find", "ls", "bash", ...subagentMcpTools],
+      ["read", "grep", "find", "ls", "bash", ...subagentMcpTools],
     ],
   );
   assert.deepEqual(

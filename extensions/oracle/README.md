@@ -4,11 +4,11 @@
 
 An Amp-style oracle for [pi](https://github.com/earendil-works/pi).
 
-It adds an `oracle` tool that spins up a separate read-only pi subprocess and sends it to the strongest reasoning model available on the **same provider/subscription** the user is currently using.
+It adds an `oracle` tool that spins up a separate pi subprocess with read-only built-in tools and any configured MCP tools, and sends it to the strongest reasoning model available on the **same provider/subscription** the user is currently using.
 
 ## What it does
 
-- creates an isolated read-only subprocess
+- creates an isolated subprocess with read-only built-in tools (read, grep, find, ls) and any configured MCP tools
 - auto-picks the strongest reasoning model on the current provider
 - uses provider-specific hardcoded rankings first, then a heuristic fallback
 - requests `xhigh` by default for reasoning models, then clamps to the model-supported thinking level
@@ -110,7 +110,8 @@ When the current Pi session has a non-empty model scope, Oracle limits automatic
 
 ## Notes
 
-- The oracle is intentionally **read-only by default**.
+- The oracle subprocess uses read-only built-in tools (read, grep, find, ls) by default, plus any configured MCP tools. It can optionally include bash for non-mutating inspection.
+- Configured MCP tools run without confirmation inside the subprocess and may have side effects — use them only for gathering evidence. MCP access requires host Pi >=1.0.4; older hosts degrade to no MCP, no error.
 - It is best for review, analysis, planning, debugging, and second opinions.
 - It is slower than using the main model directly, so it should be used selectively.
 - While it runs in interactive mode, it adds a footer status line and a widget below the editor.

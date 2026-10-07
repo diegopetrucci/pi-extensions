@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent, Stats } from "node:fs";
+import { realpathSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -19,6 +20,7 @@ import {
   getAgentDir,
   getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -90,6 +92,82 @@ function getModelRuntimeOption(ctx: {
 const DEFAULT_CACHE_MODE: CacheMode = "disabled";
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "low";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+
+// Derive project-trust for the isolated subagent session from the host tool context.
+// Fails closed: returns false if the host has not trusted the project, or if the subagent
+// runs in a different directory (e.g. a temp workspace), preventing an untrusted project's
+// .pi/mcp.json from being loaded by the MCP extension.
+function resolveSubagentProjectTrusted(
+  ctx: { cwd: string; isProjectTrusted(): boolean },
+  subagentCwd: string,
+): boolean {
+  // Feature-detected for older Pi hosts that may lack isProjectTrusted.
+  const hostTrusted =
+    typeof (ctx as { isProjectTrusted?: unknown }).isProjectTrusted === "function"
+      ? ctx.isProjectTrusted()
+      : false;
+  if (!hostTrusted) return false;
+  try {
+    return realpathSync(subagentCwd) === realpathSync(ctx.cwd);
+  } catch {
+    return false; // fail closed if realpath resolution fails
+  }
+}
+
+/** Returns true when v is a semver string >=1.0.4 (ignores prerelease; missing/garbage → false). */
+function isMcpCompatibleVersion(v: string | undefined): boolean {
+  if (!v) return false;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return false;
+  const major = Number(m[1]),
+    minor = Number(m[2]),
+    patch = Number(m[3]);
+  if (major !== 1) return major > 1;
+  if (minor !== 0) return minor > 0;
+  return patch >= 4;
+}
+
+// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
+// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// matches that resolve nothing, so spawning MCP servers provides no benefit.
+function createMcpSubagentFactories(): ExtensionFactory[] {
+  const ns = piCodingAgent as Record<string, unknown>;
+  if (!isMcpCompatibleVersion(ns["VERSION"] as string | undefined)) return [];
+  const factories: ExtensionFactory[] = [];
+  const mcp = ns["createMcpExtension"];
+  const toolSearch = ns["createToolSearchExtension"];
+  if (typeof mcp === "function") factories.push((mcp as () => ExtensionFactory)());
+  if (typeof toolSearch === "function") factories.push((toolSearch as () => ExtensionFactory)());
+  return factories;
+}
+
+// Emit session_shutdown before dispose so MCP closes server connections (no leaked child processes).
+async function disposeSubagentSession(
+  session: { extensionRunner?: unknown; dispose(): void } | undefined,
+): Promise<void> {
+  if (!session) return;
+  try {
+    const runner = session.extensionRunner as
+      | {
+          hasHandlers(n: string): boolean;
+          emit(e: { type: string; reason: string }): Promise<unknown>;
+        }
+      | undefined;
+    if (runner?.hasHandlers("session_shutdown")) {
+      await runner.emit({ type: "session_shutdown", reason: "quit" });
+    }
+  } catch {
+    // Shutdown errors must not prevent dispose.
+  }
+  session.dispose();
+}
 
 const PREFERRED_FAST_MODEL_PATTERNS = [
   /\bgpt[-_. ]?5\.5(?:[-_. ].*)?\b(?:mini|nano|fast|lite)\b/,
@@ -1045,7 +1123,7 @@ function buildSystemPrompt(options: {
     ? `\nLocal checkout cache is ENABLED for this call.\n- Cache root: ${options.cacheRoot}\n- Use checkout path pattern: ${options.cacheRoot}/github.com/<owner>/<repo>\n- Reuse an existing checkout when it has a .git directory. Fetch/prune before relying on it: git -C "$DIR" fetch --all --prune --tags --quiet\n- If missing, clone with gh repo clone "$REPO" "$DIR" (or git clone https://github.com/$REPO.git "$DIR").\n- If a ref/branch/SHA is requested, fetch it and check it out locally before citing files from that ref.\n- After using a checkout, update its cache marker: touch "$DIR/${CACHE_MARKER_FILE}"\n- Prefer local rg/read inside cached checkouts once a repo is cloned, and cite absolute cached paths with line ranges.\n- Clone only repositories that are relevant to the query; do not bulk-clone broad owner/org scopes unless necessary.`
     : `\nLocal checkout cache is DISABLED for this call.\n- Do not clone repositories.\n- Use gh search/API/tree/contents calls and cache only necessary proof files under ${options.workspace}/repos/<owner>/<repo>/<path>.`;
 
-  return `You are Librarian, an evidence-first GitHub code scout running inside pi.\n\nUse only the available bash/read tools. Use gh, jq, rg, find/fd, ls, stat, mkdir, base64, and nl -ba for GitHub reconnaissance and numbered evidence. Use read for focused local file inspection.\n\nWorkspace: ${options.workspace}\nDefault gh search limit: ${options.maxSearchResults}\nTurn budget: ${MAX_TURNS} turns total, including your final answer. Stop searching once you have enough evidence.\n${cacheSection}\n\nPerformance guidance:\n- Prefer fast, parallel exploration. When probes are independent, issue multiple separate tool calls in the same assistant turn instead of waiting for each result one-by-one.\n- Aim for 4-8 independent bash/read calls in an exploration turn when useful: parallel gh searches, tree probes, contents fetches, and targeted file reads.\n- Keep dependent work sequential, and avoid concurrent writes to the same file, checkout, or cache directory.\n\nNon-negotiable constraints:\n- Never treat gh search snippets as proof by themselves. Use fetched files or local checkouts for code-content claims.\n- Keep temporary workspace writes under ${options.workspace}/repos unless local checkout cache is enabled, in which case writes under the cache root are also allowed.
+  return `You are Librarian, an evidence-first GitHub code scout running inside pi.\n\nUse the available bash and read tools for local inspection, and any configured MCP tools for additional context (MCP tools run without confirmation inside this subagent; use them only to gather evidence, not for state-changing actions unless the task explicitly asks; MCP access requires host Pi >=1.0.4, older hosts degrade to no MCP). Use gh, jq, rg, find/fd, ls, stat, mkdir, base64, and nl -ba for GitHub reconnaissance and numbered evidence. Use read for focused local file inspection.\n\nWorkspace: ${options.workspace}\nDefault gh search limit: ${options.maxSearchResults}\nTurn budget: ${MAX_TURNS} turns total, including your final answer. Stop searching once you have enough evidence.\n${cacheSection}\n\nPerformance guidance:\n- Prefer fast, parallel exploration. When probes are independent, issue multiple separate tool calls in the same assistant turn instead of waiting for each result one-by-one.\n- Aim for 4-8 independent bash/read calls in an exploration turn when useful: parallel gh searches, tree probes, contents fetches, and targeted file reads.\n- Keep dependent work sequential, and avoid concurrent writes to the same file, checkout, or cache directory.\n\nNon-negotiable constraints:\n- Never treat gh search snippets as proof by themselves. Use fetched files or local checkouts for code-content claims.\n- Keep temporary workspace writes under ${options.workspace}/repos unless local checkout cache is enabled, in which case writes under the cache root are also allowed.
 - A runtime guard blocks destructive shell commands, credential/environment inspection, and reads outside the workspace/cache.\n- Never paste whole files. Use short snippets only when they clarify the evidence.\n- If evidence is partial or access fails (404/403), state the limitation clearly.\n- Do not present anything as fact unless it appeared in tool output or in a file you read.\n\nRecommended search flow:\n1. If symbols/text are known, start with gh search code and the provided repo/owner filters.\n2. If a repo is known but paths are unclear, resolve the default branch and inspect the git tree or contents API.\n3. Fetch or clone only the files/repos required to prove the answer.\n4. Use rg/read/nl -ba locally to produce stable path and line evidence.\n\nUseful gh patterns:\n- gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'\n- gh search code '<terms>' --json path,repository,sha,url,textMatches --limit ${options.maxSearchResults}\n- gh api "repos/$REPO/git/trees/$REF?recursive=1" > tree.json\n- gh api "repos/$REPO/contents/$FILE?ref=$REF" --jq .content | tr -d '\\n' | base64 --decode > "repos/$REPO/$FILE"\n- rg -n '<pattern>' '<local path>'\n- nl -ba '<local file>' | sed -n '10,30p'\n\nOutput format, exact order:\n## Summary\n1-3 concise sentences.\n## Locations\n- \`path\` or \`path:lineStart-lineEnd\` — what is here and why it matters; include GitHub URL when useful. If nothing relevant is found, write \`- (none)\`.\n## Evidence\n- \`path\` or \`path:lineStart-lineEnd\` — what this proves. Include concise snippets only if useful.\n## Searched\nOnly include when incomplete/not found or when the search path matters. List queries, filters, and probes used.\n## Next steps\nOptional: 1-3 narrow follow-up checks for remaining ambiguity.`;
 }
 
@@ -1277,6 +1355,12 @@ function renderAnswer(details: LibrarianDetails): string {
 }
 
 export const __test__ = {
+  SUBAGENT_MCP_TOOLS,
+  isMcpCompatibleVersion,
+  resolveSubagentProjectTrusted,
+  createMcpSubagentFactories,
+  disposeSubagentSession,
+  createLibrarianRuntimeGuardExtension,
   buildLibrarianCandidates,
   findAvailableModel,
   isModelAvailabilityError,
@@ -1652,7 +1736,10 @@ export default function librarianExtension(pi: ExtensionAPI) {
         // Keep the research session from inheriting user/project tool, shell,
         // retry, or provider-request settings. The host model runtime is still
         // passed explicitly below so the selected provider/auth policy is kept.
-        const isolatedSettingsManager = SettingsManager.inMemory({});
+        // workspace is a temp clone dir — always a different dir from ctx.cwd,
+        // so projectTrusted is always false here (project .pi/mcp.json is never loaded).
+        const projectTrusted = resolveSubagentProjectTrusted(ctx, workspace);
+        const isolatedSettingsManager = SettingsManager.inMemory({}, { projectTrusted });
         const resourceLoader = new DefaultResourceLoader({
           cwd: workspace,
           agentDir: getAgentDir(),
@@ -1669,6 +1756,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
               cacheRoot,
               cacheEnabled: cacheDecision.enabled,
             }),
+            ...createMcpSubagentFactories(),
           ],
           systemPromptOverride: () => systemPrompt,
           skillsOverride: () => ({ skills: [], diagnostics: [] }),
@@ -1693,10 +1781,15 @@ export default function librarianExtension(pi: ExtensionAPI) {
             sessionManager: SessionManager.inMemory(workspace),
             model: candidate.model,
             thinkingLevel: candidate.details.thinkingLevel,
-            tools: ["read", "bash"],
+            tools: ["read", "bash", ...SUBAGENT_MCP_TOOLS],
           });
 
+          // Assign session BEFORE bindExtensions so the finally block can dispose it
+          // even if binding fails partway through (e.g. a server starts then an
+          // extension's session_start throws).
           session = created.session as typeof session;
+          // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
+          await (created.session as any).bindExtensions?.({ mode: "json" });
           if (abortController.callerAborted) abortController.abortForCleanup();
           unsubscribe = (created.session as any).subscribe((event: any) => {
             addSessionEventUsage(usage, event);
@@ -1758,7 +1851,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
             }
             unsubscribe?.();
             unsubscribe = undefined;
-            session?.dispose();
+            await disposeSubagentSession(session);
             session = undefined;
           }
         };
@@ -1841,7 +1934,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
         if (runTimeout) clearTimeout(runTimeout);
         if (signal && abortListenerAdded) signal.removeEventListener("abort", abortFromCaller);
         unsubscribe?.();
-        session?.dispose();
+        await disposeSubagentSession(session);
       }
     },
 

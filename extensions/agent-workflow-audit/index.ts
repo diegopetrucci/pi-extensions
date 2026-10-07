@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as path from "node:path";
 
 import type {
@@ -15,6 +16,7 @@ import {
   getAgentDir,
   getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 const CUSTOM_TYPE = "agent-workflow-audit";
@@ -329,6 +331,93 @@ const SAFE_DIRECT_COMMANDS = new Set([
   "tox",
   "yarn",
 ]);
+
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+
+// Derive project-trust for the isolated subagent session from the host tool context.
+// Fails closed: returns false if the host has not trusted the project, or if the subagent
+// runs in a different directory, preventing an untrusted project's .pi/mcp.json from
+// being loaded by the MCP extension.
+function resolveSubagentProjectTrusted(
+  ctx: { cwd: string; isProjectTrusted(): boolean },
+  subagentCwd: string,
+): boolean {
+  // Feature-detected for older Pi hosts that may lack isProjectTrusted.
+  const hostTrusted =
+    typeof (ctx as { isProjectTrusted?: unknown }).isProjectTrusted === "function"
+      ? ctx.isProjectTrusted()
+      : false;
+  if (!hostTrusted) return false;
+  try {
+    return realpathSync(subagentCwd) === realpathSync(ctx.cwd);
+  } catch {
+    return false; // fail closed if realpath resolution fails
+  }
+}
+
+/** Returns true when v is a semver string >=1.0.4 (ignores prerelease; missing/garbage -> false). */
+function isMcpCompatibleVersion(v: string | undefined): boolean {
+  if (!v) return false;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return false;
+  const major = Number(m[1]),
+    minor = Number(m[2]),
+    patch = Number(m[3]);
+  if (major !== 1) return major > 1;
+  if (minor !== 0) return minor > 0;
+  return patch >= 4;
+}
+
+// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
+// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// matches that resolve nothing, so spawning MCP servers provides no benefit.
+function createMcpSubagentFactories(): ExtensionFactory[] {
+  const ns = piCodingAgent as Record<string, unknown>;
+  if (!isMcpCompatibleVersion(ns["VERSION"] as string | undefined)) return [];
+  const factories: ExtensionFactory[] = [];
+  const mcp = ns["createMcpExtension"];
+  const toolSearch = ns["createToolSearchExtension"];
+  if (typeof mcp === "function") factories.push((mcp as () => ExtensionFactory)());
+  if (typeof toolSearch === "function") factories.push((toolSearch as () => ExtensionFactory)());
+  return factories;
+}
+
+// Emit session_shutdown before dispose so MCP closes server connections (no leaked child processes).
+async function disposeSubagentSession(session: AgentSession | undefined): Promise<void> {
+  if (!session) return;
+  try {
+    const runner = (
+      session as unknown as {
+        extensionRunner?: {
+          hasHandlers(n: string): boolean;
+          emit(e: { type: string; reason: string }): Promise<unknown>;
+        };
+      }
+    ).extensionRunner;
+    if (runner?.hasHandlers("session_shutdown")) {
+      await runner.emit({ type: "session_shutdown", reason: "quit" });
+    }
+  } catch {
+    // Shutdown errors must not prevent dispose.
+  }
+  session.dispose();
+}
+
+function isSubagentMcpTool(toolName: string): boolean {
+  return (
+    toolName.startsWith("mcp__") ||
+    toolName === "tool_search" ||
+    toolName === "list_mcp_resources" ||
+    toolName === "list_mcp_resource_templates" ||
+    toolName === "read_mcp_resource"
+  );
+}
 
 const READ_ONLY_GIT_SUBCOMMANDS = new Set([
   "blame",
@@ -1137,10 +1226,13 @@ function createAuditRuntimeGuardExtension(options: {
     });
 
     pi.on("tool_call", async (event) => {
-      if (!["read", "grep", "find", "ls", "bash"].includes(event.toolName)) {
+      if (
+        !["read", "grep", "find", "ls", "bash"].includes(event.toolName) &&
+        !isSubagentMcpTool(event.toolName)
+      ) {
         return {
           block: true,
-          reason: `agent-workflow-audit exposes only read, grep, find, ls, and guarded bash; ${event.toolName} is not allowed.`,
+          reason: `agent-workflow-audit exposes only read, grep, find, ls, guarded bash, and MCP tools; ${event.toolName} is not allowed.`,
         };
       }
 
@@ -1233,7 +1325,7 @@ Workflow:
 
 Constraints:
 - Do not fix application code or failing tests. Do not edit, write, move, delete, commit, checkout, reset, clean, push, publish, deploy, or mutate GitHub.
-- Use built-in read/grep/find/ls for file inspection. Use bash only for safe documented project commands or read-only local inspection.
+- Use built-in read/grep/find/ls for file inspection. Use bash only for safe documented project commands or read-only local inspection. Configured MCP tools are also available and run without confirmation; use them only to gather evidence or context, not for state-changing actions unless the task explicitly requires it. MCP access requires host Pi >=1.0.4; on older hosts MCP tools are absent with no error.
 - Do not paste raw full logs. Summarize command output and include short excerpts only when needed to prove a finding.
 - Never present a command as successful unless tool output showed success.
 - Mark inferred steps as assumptions.
@@ -1374,7 +1466,8 @@ async function runAudit(
 
   try {
     emit();
-    const isolatedSettingsManager = SettingsManager.inMemory({});
+    const projectTrusted = resolveSubagentProjectTrusted(ctx, cwd);
+    const isolatedSettingsManager = SettingsManager.inMemory({}, { projectTrusted });
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: getAgentDir(),
@@ -1386,6 +1479,7 @@ async function runAudit(
       noContextFiles: true,
       extensionFactories: [
         createAuditRuntimeGuardExtension({ cwd, maxTurns: MAX_TURNS, planOnly: options.planOnly }),
+        ...createMcpSubagentFactories(),
       ],
       systemPromptOverride: () =>
         buildSystemPrompt({
@@ -1404,8 +1498,8 @@ async function runAudit(
     await resourceLoader.reload();
 
     const tools = options.planOnly
-      ? ["read", "grep", "find", "ls"]
-      : ["read", "grep", "find", "ls", "bash"];
+      ? ["read", "grep", "find", "ls", ...SUBAGENT_MCP_TOOLS]
+      : ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS];
     const created = await createAgentSession({
       cwd,
       ...getModelRuntimeOption(ctx),
@@ -1417,7 +1511,12 @@ async function runAudit(
       tools,
     });
 
+    // Assign session BEFORE bindExtensions so the finally block can dispose it
+    // even if binding fails partway through (e.g. a server starts then an
+    // extension's session_start throws).
     session = created.session;
+    // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
+    await (created.session as any).bindExtensions?.({ mode: "json" });
     unsubscribe = session.subscribe((event) => {
       switch (event.type) {
         case "message_update":
@@ -1510,16 +1609,21 @@ async function runAudit(
     if (runTimeout) clearTimeout(runTimeout);
     if (ctx.signal && abortListenerAdded) ctx.signal.removeEventListener("abort", abort);
     unsubscribe?.();
-    session?.dispose();
+    await disposeSubagentSession(session);
   }
 }
 
 export const __test__ = {
+  SUBAGENT_MCP_TOOLS,
+  isMcpCompatibleVersion,
+  resolveSubagentProjectTrusted,
+  createMcpSubagentFactories,
+  disposeSubagentSession,
+  createAuditRuntimeGuardExtension,
   appendRunBoundary,
   assertToolPathInsideCwd,
   buildSystemPrompt,
   buildUserPrompt,
-  createAuditRuntimeGuardExtension,
   inspectFinalAssistant,
   formatToolCall,
   getBlockedBashReason,

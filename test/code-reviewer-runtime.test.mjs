@@ -477,7 +477,7 @@ test("runtime guard blocks unsafe calls, rewrites git bash commands, and enforce
 
   assert.deepEqual(await toolCall({ toolName: "write", input: { path: "x" } }), {
     block: true,
-    reason: "code_reviewer exposes read-only tools only; write is not allowed.",
+    reason: "code_reviewer exposes read-only built-in tools and MCP tools; write is not allowed.",
   });
 
   await turnStart({ turnIndex: 0 });

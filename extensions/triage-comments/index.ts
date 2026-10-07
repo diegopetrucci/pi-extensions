@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as path from "node:path";
 
 import type {
@@ -17,6 +18,7 @@ import {
   getAgentDir,
   getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
+import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -58,6 +60,92 @@ const TRIAGE_COMMAND_USAGE =
 const IMPLEMENTATION_NOTE =
   "Do not implement changes from this triage automatically; ask the parent/user which option to take before implementation.";
 
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+
+// Derive project-trust for the isolated subagent session from the host tool context.
+// Fails closed: returns false if the host has not trusted the project, or if the subagent
+// runs in a different directory, preventing an untrusted project's .pi/mcp.json from
+// being loaded by the MCP extension.
+function resolveSubagentProjectTrusted(
+  ctx: { cwd: string; isProjectTrusted(): boolean },
+  subagentCwd: string,
+): boolean {
+  // Feature-detected for older Pi hosts that may lack isProjectTrusted.
+  const hostTrusted =
+    typeof (ctx as { isProjectTrusted?: unknown }).isProjectTrusted === "function"
+      ? ctx.isProjectTrusted()
+      : false;
+  if (!hostTrusted) return false;
+  try {
+    return realpathSync(subagentCwd) === realpathSync(ctx.cwd);
+  } catch {
+    return false; // fail closed if realpath resolution fails
+  }
+}
+
+function isSubagentMcpTool(toolName: string): boolean {
+  return (
+    toolName.startsWith("mcp__") ||
+    toolName === "tool_search" ||
+    toolName === "list_mcp_resources" ||
+    toolName === "list_mcp_resource_templates" ||
+    toolName === "read_mcp_resource"
+  );
+}
+
+/** Returns true when v is a semver string >=1.0.4 (ignores prerelease; missing/garbage -> false). */
+function isMcpCompatibleVersion(v: string | undefined): boolean {
+  if (!v) return false;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return false;
+  const major = Number(m[1]),
+    minor = Number(m[2]),
+    patch = Number(m[3]);
+  if (major !== 1) return major > 1;
+  if (minor !== 0) return minor > 0;
+  return patch >= 4;
+}
+
+// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
+// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// matches that resolve nothing, so spawning MCP servers provides no benefit.
+function createMcpSubagentFactories(): ExtensionFactory[] {
+  const ns = piCodingAgent as Record<string, unknown>;
+  if (!isMcpCompatibleVersion(ns["VERSION"] as string | undefined)) return [];
+  const factories: ExtensionFactory[] = [];
+  const mcp = ns["createMcpExtension"];
+  const toolSearch = ns["createToolSearchExtension"];
+  if (typeof mcp === "function") factories.push((mcp as () => ExtensionFactory)());
+  if (typeof toolSearch === "function") factories.push((toolSearch as () => ExtensionFactory)());
+  return factories;
+}
+
+// Emit session_shutdown before dispose so MCP closes server connections (no leaked child processes).
+async function disposeSubagentSession(session: AgentSession | undefined): Promise<void> {
+  if (!session) return;
+  try {
+    const runner = (
+      session as unknown as {
+        extensionRunner?: {
+          hasHandlers(n: string): boolean;
+          emit(e: { type: string; reason: string }): Promise<unknown>;
+        };
+      }
+    ).extensionRunner;
+    if (runner?.hasHandlers("session_shutdown")) {
+      await runner.emit({ type: "session_shutdown", reason: "quit" });
+    }
+  } catch {
+    // Shutdown errors must not prevent dispose.
+  }
+  session.dispose();
+}
 const READ_ONLY_TOOL_NAMES = new Set(["read", "grep", "find", "ls", "bash"]);
 const READ_ONLY_BASH_COMMANDS = new Set(["gh", "git", "pwd"]);
 const READ_ONLY_GIT_SUBCOMMANDS = new Set([
@@ -372,7 +460,7 @@ function buildSystemPrompt(options: {
   maxTurns: number;
   maxRunSeconds: number;
 }): string {
-  return `You are Triage Comments, an isolated read-only code-review investigation agent running inside the triage-comments package. Your job is to evaluate selected PR review comments against the local checkout and local git context.\n\nWorking directory: ${options.cwd}\nTurn budget: ${options.maxTurns} turns total, including your final answer.\nWall-clock budget: ${options.maxRunSeconds} seconds.\n\nAvailable tools are intended to be read-only: read, grep, find, ls, and bash. Use the built-in read, grep, find, and ls tools for local file inspection. Use bash only for a single read-only git, gh, or pwd invocation, such as git status/diff/show/log/blame, gh pr view/diff/list/status/checks, gh api GET calls, or pwd. A runtime guard blocks write/edit tools, shell pipelines/control operators, local filesystem utility commands, mutating git, and mutating gh/GitHub API calls.\n\nNon-negotiable constraints:\n- Never implement changes. Never edit, write, move, delete, format, commit, checkout, reset, clean, push, publish, or mutate GitHub.\n- Keep all inspection local to the checkout unless a read-only gh call is necessary for supplied PR metadata.\n- Treat the supplied comments as claims to verify, not as facts. Cite file paths, line ranges, git diff/status/log output, or supplied diff hunks as evidence.\n- If evidence is missing, stale, contradictory, or the local checkout does not match the PR context, say so and classify accordingly.\n- Distinguish objective correctness issues from style/preferences.\n- For valid or partially valid comments, propose one or more handling options, but do not choose implementation without parent/user confirmation.\n\nVerdicts must be one of: valid, invalid, partially valid, subjective, needs clarification.\n\nOutput format, exact order:\n## Summary\n1-3 concise sentences summarizing the triage.\n\n## Per-comment triage\nFor each selected comment, use:\n### Comment <index or id> — <verdict>\n- **What the reviewer asked:** concise paraphrase.\n- **Evidence:** path/line or command-output citations. If evidence is insufficient, state exactly what is missing.\n- **Reasoning:** why the evidence supports the verdict.\n- **Suggested response:** a short review-thread reply the parent/user can post or adapt.\n- **Handling options:** one or more options for valid/partially valid comments; for invalid/subjective/unclear comments, give the appropriate response/clarification path.\n\n## Read-only checks performed\nList the files/commands/probes used, or \`- (none)\`.\n\n## Before implementation\nState explicitly: \"Do not implement changes from this triage automatically; ask the parent/user which option to take before implementation.\"`;
+  return `You are Triage Comments, an isolated read-only code-review investigation agent running inside the triage-comments package. Your job is to evaluate selected PR review comments against the local checkout and local git context.\n\nWorking directory: ${options.cwd}\nTurn budget: ${options.maxTurns} turns total, including your final answer.\nWall-clock budget: ${options.maxRunSeconds} seconds.\n\nAvailable tools are intended to be read-only: read, grep, find, ls, and bash. Use the built-in read, grep, find, and ls tools for local file inspection. Use bash only for a single read-only git, gh, or pwd invocation, such as git status/diff/show/log/blame, gh pr view/diff/list/status/checks, gh api GET calls, or pwd. A runtime guard blocks write/edit tools, shell pipelines/control operators, local filesystem utility commands, mutating git, and mutating gh/GitHub API calls. Configured MCP tools are also available and run without confirmation; use them only to gather evidence or context, not for state-changing actions unless the task explicitly requires it. MCP access requires host Pi >=1.0.4; on older hosts MCP tools are absent with no error.\n\nNon-negotiable constraints:\n- Never implement changes. Never edit, write, move, delete, format, commit, checkout, reset, clean, push, publish, or mutate GitHub.\n- Keep all inspection local to the checkout unless a read-only gh call is necessary for supplied PR metadata.\n- Treat the supplied comments as claims to verify, not as facts. Cite file paths, line ranges, git diff/status/log output, or supplied diff hunks as evidence.\n- If evidence is missing, stale, contradictory, or the local checkout does not match the PR context, say so and classify accordingly.\n- Distinguish objective correctness issues from style/preferences.\n- For valid or partially valid comments, propose one or more handling options, but do not choose implementation without parent/user confirmation.\n\nVerdicts must be one of: valid, invalid, partially valid, subjective, needs clarification.\n\nOutput format, exact order:\n## Summary\n1-3 concise sentences summarizing the triage.\n\n## Per-comment triage\nFor each selected comment, use:\n### Comment <index or id> — <verdict>\n- **What the reviewer asked:** concise paraphrase.\n- **Evidence:** path/line or command-output citations. If evidence is insufficient, state exactly what is missing.\n- **Reasoning:** why the evidence supports the verdict.\n- **Suggested response:** a short review-thread reply the parent/user can post or adapt.\n- **Handling options:** one or more options for valid/partially valid comments; for invalid/subjective/unclear comments, give the appropriate response/clarification path.\n\n## Read-only checks performed\nList the files/commands/probes used, or \`- (none)\`.\n\n## Before implementation\nState explicitly: \"Do not implement changes from this triage automatically; ask the parent/user which option to take before implementation.\"`;
 }
 
 function buildUserPrompt(input: NormalizedInput, cwd: string): string {
@@ -998,10 +1086,10 @@ function createTriageRuntimeGuardExtension(options: {
     });
 
     pi.on("tool_call", async (event) => {
-      if (!READ_ONLY_TOOL_NAMES.has(event.toolName)) {
+      if (!READ_ONLY_TOOL_NAMES.has(event.toolName) && !isSubagentMcpTool(event.toolName)) {
         return {
           block: true,
-          reason: `triage_comments exposes read-only tools only; ${event.toolName} is not allowed.`,
+          reason: `triage_comments exposes read-only built-in tools and MCP tools; ${event.toolName} is not allowed.`,
         };
       }
 
@@ -2327,11 +2415,16 @@ async function runPrMode(
 }
 
 export const __test__ = {
+  SUBAGENT_MCP_TOOLS,
+  isMcpCompatibleVersion,
+  resolveSubagentProjectTrusted,
+  createMcpSubagentFactories,
+  disposeSubagentSession,
+  createTriageRuntimeGuardExtension,
   assertToolPathInsideCwd,
   buildCommandPayload,
   buildSystemPrompt,
   buildUserPrompt,
-  createTriageRuntimeGuardExtension,
   ensureImplementationNote,
   formatFetchedCommentsForSelection,
   formatInlineFilterContext,
@@ -2411,9 +2504,9 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
     name: "triage_comments",
     label: "Triage comments",
     description:
-      "Read-only subagent that triages selected PR review comments against the local checkout and git context. It classifies each comment with evidence, suggests review responses, and proposes handling options without implementing changes.",
+      "Isolated subagent with read-only built-in tools and configured MCP tools that triages selected PR review comments against the local checkout and git context. It classifies each comment with evidence, suggests review responses, and proposes handling options without implementing changes.",
     promptSnippet:
-      "Triage selected PR review comments in a read-only isolated subagent; returns verdicts, evidence, response text, and handling options without editing files.",
+      "Triage selected PR review comments in an isolated subagent using read-only built-in tools plus any configured MCP tools; returns verdicts, evidence, response text, and handling options without editing files.",
     promptGuidelines: [
       "Use triage_comments when selected PR review comments need evidence-based classification against the local checkout.",
       "Do not use triage_comments to implement changes; ask the user which valid handling option to take after triage.",
@@ -2476,7 +2569,8 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
         });
 
         // Keep the guarded subagent from inheriting user/project shell prefix or shell path settings.
-        const isolatedSettingsManager = SettingsManager.inMemory({});
+        const projectTrusted = resolveSubagentProjectTrusted(ctx, cwd);
+        const isolatedSettingsManager = SettingsManager.inMemory({}, { projectTrusted });
         const resourceLoader = new DefaultResourceLoader({
           cwd,
           agentDir: getAgentDir(),
@@ -2486,7 +2580,10 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
-          extensionFactories: [createTriageRuntimeGuardExtension({ cwd, maxTurns: MAX_TURNS })],
+          extensionFactories: [
+            createTriageRuntimeGuardExtension({ cwd, maxTurns: MAX_TURNS }),
+            ...createMcpSubagentFactories(),
+          ],
           systemPromptOverride: () => systemPrompt,
           appendSystemPromptOverride: () => [],
           skillsOverride: () => ({ skills: [], diagnostics: [] }),
@@ -2505,10 +2602,15 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
           sessionManager: SessionManager.inMemory(cwd),
           model: ctx.model,
           thinkingLevel: pi.getThinkingLevel(),
-          tools: ["read", "grep", "find", "ls", "bash"],
+          tools: ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS],
         });
 
+        // Assign session BEFORE bindExtensions so the finally block can dispose it
+        // even if binding fails partway through (e.g. a server starts then an
+        // extension's session_start throws).
         session = created.session;
+        // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
+        await (created.session as any).bindExtensions?.({ mode: "json" });
         unsubscribe = session.subscribe((event) => {
           addSessionEventUsage(usage, event);
           switch (event.type) {
@@ -2598,7 +2700,7 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
         if (runTimeout) clearTimeout(runTimeout);
         if (signal && abortListenerAdded) signal.removeEventListener("abort", abortFromCaller);
         unsubscribe?.();
-        session?.dispose();
+        await disposeSubagentSession(session);
       }
     },
 

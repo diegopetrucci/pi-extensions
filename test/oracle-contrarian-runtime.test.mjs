@@ -402,7 +402,9 @@ test("oracle and contrarian preserve discovered resources and keep explicit tool
       oracleArgs.indexOf("--tools") + 1,
       oracleArgs.indexOf("--append-system-prompt"),
     ),
-    ["read,grep,find,ls"],
+    [
+      "read,grep,find,ls,mcp__*,tool_search,list_mcp_resources,list_mcp_resource_templates,read_mcp_resource",
+    ],
   );
 
   const contrarian = await loadRoleTestUtils("contrarian");
@@ -433,7 +435,9 @@ test("oracle and contrarian preserve discovered resources and keep explicit tool
       contrarianArgs.indexOf("--tools") + 1,
       contrarianArgs.indexOf("--append-system-prompt"),
     ),
-    ["read,grep,find,ls,bash"],
+    [
+      "read,grep,find,ls,bash,mcp__*,tool_search,list_mcp_resources,list_mcp_resource_templates,read_mcp_resource",
+    ],
   );
 });
 

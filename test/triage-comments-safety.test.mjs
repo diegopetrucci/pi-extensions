@@ -418,7 +418,7 @@ test("triage-comments runtime guard enforces read-only tools, default timeout, a
 
   assert.deepEqual(await toolCall({ toolName: "write", input: { path: "x" } }), {
     block: true,
-    reason: "triage_comments exposes read-only tools only; write is not allowed.",
+    reason: "triage_comments exposes read-only built-in tools and MCP tools; write is not allowed.",
   });
 
   await turnStart({ turnIndex: 0 });

@@ -102,8 +102,15 @@ interface ContrarianPreferences {
   thinkingLevel?: ThinkingLevel;
 }
 
-const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
-const READ_ONLY_PLUS_BASH_TOOLS = [...READ_ONLY_TOOLS, "bash"];
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ...SUBAGENT_MCP_TOOLS];
+const READ_ONLY_PLUS_BASH_TOOLS = ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS];
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const COLLAPSED_LINE_LIMIT = 8;
@@ -213,6 +220,33 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-sonnet-4-5",
   ],
   "ant-ling": ["Ling-2.6-1T", "Ling-2.6-flash"],
+  azure: [
+    "gpt-6-astra ",
+    "gpt-6-astra",
+    "gpt-6.1-sol ",
+    "gpt-6-sol ",
+    "gpt-6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-luna ",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "gpt-5.5-pro",
+    "gpt-5.5",
+    "gpt-5.4-pro",
+    "gpt-5.4 ",
+    "gpt-5.3-codex",
+    "gpt-5-pro",
+    "gpt-5-chat-latest",
+    "gpt-5.2-pro",
+    "gpt-5.2",
+    "gpt-5.1",
+    "o3-pro",
+    "o1-pro",
+    "gpt-5.4-mini",
+    "gpt-5-mini",
+  ],
+  // Legacy alias for Pi 1.0.0–1.0.2 hosts (renamed to `azure` in Pi 1.0.3).
   "azure-openai-responses": [
     "gpt-6-astra ",
     "gpt-6-astra",
@@ -263,10 +297,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   "cloudflare-ai-gateway": [
     "claude-fable-5",
     "claude-opus-5",
-    "claude-opus-4.8",
-    "claude-opus-4.7",
-    "claude-opus-4.6",
-    "claude-opus-4.5",
     "gpt-6-astra ",
     "gpt-6-astra",
     "gpt-5.5",
@@ -603,9 +633,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "MiniMaxAI/MiniMax-M3",
     "MiniMaxAI/MiniMax-M2.7",
     "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
     "nvidia/nemotron-3-ultra-550b-a55b",
-    "google/gemma-4-31B-it",
   ],
   typesafe: [],
   "vercel-ai-gateway": [
@@ -681,13 +709,14 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 };
 
 const CONTRARIAN_SYSTEM_PROMPT = [
-  "You are the Contrarian: an independent, read-only adversarial analyst.",
+  "You are the Contrarian: an independent adversarial analyst with access to read-only built-in tools and any configured MCP tools.",
   "Your job is to stress-test a proposal, plan, design, assumption, bug hypothesis, review conclusion, product direction, or decision by developing the strongest credible opposing case for the delegating primary agent.",
-  "You are read-only. Never modify files, create patches, install dependencies, change configuration, implement fixes, or delegate work to other agents. Your output is adversarial analysis, evidence, and recommendations only.",
+  "Never modify files, create patches, install dependencies, change configuration, implement fixes, or delegate work to other agents. Your output is adversarial analysis, evidence, and recommendations only.",
   "Use the available tools to inspect the repository and gather evidence. If bash is available, use it only for non-mutating inspection commands.",
+  "Configured MCP tools are available and run without confirmation inside this subagent. Use them only to gather evidence or context. Avoid side-effecting MCP actions unless the task explicitly asks for them.",
   "Analysis process:",
   "1. Identify the core claim, decision, or direction being challenged.",
-  "2. Gather the local read-only context needed to evaluate it accurately.",
+  "2. Gather the local context needed to evaluate it accurately.",
   "3. Steelman the strongest credible opposing position before judging whether it holds.",
   "4. Identify hidden assumptions, failure modes, alternative interpretations, tradeoffs, and disconfirming evidence.",
   "5. Clearly separate confirmed objections, plausible concerns, and unresolved unknowns.",
@@ -1814,15 +1843,16 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
     name: "contrarian",
     label: "Contrarian",
     description:
-      "Consult a separate read-only contrarian subprocess that stress-tests plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.",
+      "Consult a separate contrarian subprocess with read-only built-in tools and configured MCP tools that stress-tests plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.",
     promptSnippet:
-      "Consult a read-only contrarian that prefers a strong opposite-family/provider model for adversarial analysis.",
+      "Consult a contrarian subprocess that prefers a strong opposite-family/provider model for adversarial analysis; exposes read-only built-in tools plus any configured MCP tools.",
     promptGuidelines: [
       "Use contrarian when you need to stress-test a proposal, implementation plan, design, assumption, bug hypothesis, review conclusion, or product direction.",
       "Ask contrarian to steelman the strongest opposing case and separate confirmed objections, plausible concerns, and unresolved unknowns.",
       "Do not use contrarian for routine low-value work; contrarian is slower than the main agent.",
-      "The contrarian tool is read-only by default and only exposes read, grep, find, and ls unless contrarian includeBash is enabled.",
+      "The contrarian tool exposes read-only built-in tools (read, grep, find, and ls) plus any configured MCP tools; contrarian includeBash adds the bash inspection tool.",
       "Set contrarian includeBash only when the extra bash inspection tool is genuinely useful; keep contrarian relying on read, grep, find, and ls otherwise.",
+      "Configured MCP tools are available to contrarian and run without confirmation inside the subagent; they may have side effects — use them only for gathering evidence, not for state-changing actions unless the task explicitly asks. MCP access requires host Pi >=1.0.4; older hosts degrade to no MCP, no error.",
       "The contrarian tool requests high by default for reasoning models; contrarian defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
     ],
     parameters: ContrarianParams,

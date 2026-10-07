@@ -124,7 +124,7 @@ test("agent-workflow-audit runtime guard blocks unsafe calls, normalizes bash ti
   assert.deepEqual(await toolCall({ toolName: "write", input: { path: "x" } }), {
     block: true,
     reason:
-      "agent-workflow-audit exposes only read, grep, find, ls, and guarded bash; write is not allowed.",
+      "agent-workflow-audit exposes only read, grep, find, ls, guarded bash, and MCP tools; write is not allowed.",
   });
 
   await turnStart({ turnIndex: 0 });

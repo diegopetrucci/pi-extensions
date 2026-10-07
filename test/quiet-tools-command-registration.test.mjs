@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,51 +14,8 @@ const quietToolsExtension = quietToolsModule.default;
 
 initTheme("dark");
 
-test("Pi 0.85.1 quiet tool execution uses current context cwd rather than registration cwd", async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "quiet-cwd-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const current = path.join(root, "current");
-  mkdirSync(current);
-  writeFileSync(path.join(root, "fixture.txt"), "original");
-  writeFileSync(path.join(current, "fixture.txt"), "current");
-  const harness = createExtensionHarness();
-  quietToolsExtension(harness.pi);
-  await getSessionStartHandler(harness)({}, { cwd: root });
-  const ctx = {
-    cwd: current,
-    sessionManager: { getSessionId: () => "cwd-test", getSessionFile: () => undefined },
-  };
-  const run = (name, args) =>
-    harness.tools.get(name).execute(name, args, undefined, undefined, ctx);
-  writeFileSync(path.join(current, "current-only.txt"), "unique-current-marker");
-  assert.match((await run("ls", { path: "." })).content[0].text, /current-only.txt/);
-  assert.match(
-    (await run("find", { pattern: "current-only.txt" })).content[0].text,
-    /current-only.txt/,
-  );
-  assert.match(
-    (await run("grep", { pattern: "unique-current-marker" })).content[0].text,
-    /current-only.txt/,
-  );
-  assert.match((await run("bash", { command: "cat fixture.txt" })).content[0].text, /^current\s*$/);
-  const result = await harness.tools
-    .get("read")
-    .execute("read", { path: "fixture.txt" }, undefined, undefined, ctx);
-  assert.equal(result.content[0].text, "current");
-  await harness.tools
-    .get("write")
-    .execute("write", { path: "fixture.txt", content: "updated" }, undefined, undefined, ctx);
-  assert.equal(readFileSync(path.join(current, "fixture.txt"), "utf8"), "updated");
-  await run("edit", { path: "fixture.txt", edits: [{ oldText: "updated", newText: "edited" }] });
-  assert.equal(readFileSync(path.join(current, "fixture.txt"), "utf8"), "edited");
-  assert.equal(readFileSync(path.join(root, "fixture.txt"), "utf8"), "original");
-});
-
 const theme = {
   fg(kind, text) {
-    return `<${kind}>${text}</${kind}>`;
-  },
-  bg(kind, text) {
     return `<${kind}>${text}</${kind}>`;
   },
   bold(text) {
@@ -68,24 +23,8 @@ const theme = {
   },
 };
 
-const quietToolCases = new Map([
-  ["bash", { command: "echo hello" }],
-  ["edit", { file_path: "README.md" }],
-  ["find", { pattern: "src/**/*.ts" }],
-  ["grep", { pattern: "TODO" }],
-  ["ls", { path: "." }],
-  ["read", { path: "README.md" }],
-  ["write", { path: "README.md", content: "" }],
-]);
-
 function stripAnsi(text) {
   return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trimEnd();
-}
-
-function getSessionStartHandler(harness) {
-  const handler = harness.handlers.get("session_start");
-  assert.equal(typeof handler, "function", "expected session_start handler to be registered");
-  return handler;
 }
 
 function getQuietToolsCommand(harness) {
@@ -109,74 +48,181 @@ function createCommandContext() {
   };
 }
 
-function renderCollapsedCall(tool) {
-  const lines = tool
-    .renderCall(quietToolCases.get(tool.name), theme, {
-      argsComplete: true,
-      cwd: repoRoot,
-      executionStarted: true,
-      expanded: false,
-      isPartial: false,
-      lastComponent: undefined,
-      state: {},
-    })
-    .render(200);
-
-  return lines.map(stripAnsi);
+/**
+ * Simulate running a tool call through the single registered resolver with a given next() result.
+ * Returns the rendered lines of the collapsed call component, or null if no resolver is registered.
+ */
+function simulateCollapsedCall(harness, toolName, args, nextRenderers = undefined) {
+  if (harness.toolRendererResolvers.length === 0) return null;
+  const resolver = harness.toolRendererResolvers[0];
+  const renderers = resolver(toolName, () => nextRenderers);
+  if (!renderers?.renderCall) return null;
+  const component = renderers.renderCall(args, theme, {
+    expanded: false,
+    executionStarted: true,
+    argsComplete: true,
+    cwd: repoRoot,
+    lastComponent: undefined,
+    state: {},
+  });
+  return component.render(200).map(stripAnsi);
 }
 
-function assertRegisteredToolNames(tools) {
-  assert.deepEqual([...tools.keys()].sort(), [...quietToolCases.keys()].sort());
+function simulateExpandedCall(harness, toolName, nextRenderers) {
+  if (harness.toolRendererResolvers.length === 0) return null;
+  const resolver = harness.toolRendererResolvers[0];
+  const renderers = resolver(toolName, () => nextRenderers);
+  if (!renderers?.renderCall) return null;
+  return renderers.renderCall({}, theme, {
+    expanded: true,
+    executionStarted: false,
+    argsComplete: true,
+    cwd: repoRoot,
+    lastComponent: undefined,
+    state: {},
+  });
 }
 
-function assertQuietRegistrations(tools) {
-  assertRegisteredToolNames(tools);
-  for (const toolName of quietToolCases.keys()) {
-    const tool = tools.get(toolName);
-    const lines = renderCollapsedCall(tool);
-    assert.equal(lines.length, 2, `${toolName} should render a two-line quiet preview`);
-    assert.match(
-      lines[1],
-      /to expand/,
-      `${toolName} should include the expand hint when quiet previews are enabled`,
-    );
-  }
-}
+const quietToolCases = new Map([
+  ["bash", { command: "echo hello" }],
+  ["edit", { file_path: "README.md" }],
+  ["find", { pattern: "src/**/*.ts" }],
+  ["grep", { pattern: "TODO" }],
+  ["ls", { path: "." }],
+  ["read", { path: "README.md" }],
+  ["write", { path: "README.md", content: "" }],
+]);
 
-function assertStandardRegistrations(tools) {
-  assertRegisteredToolNames(tools);
-  for (const toolName of quietToolCases.keys()) {
-    const tool = tools.get(toolName);
-    const lines = renderCollapsedCall(tool);
-    if (toolName !== "edit") {
-      assert.equal(
-        lines.length,
-        1,
-        `${toolName} should fall back to the standard collapsed renderer without an extra quiet hint row`,
-      );
-    }
-    assert.equal(
-      lines.some((line) => line.includes("to expand")),
-      false,
-      `${toolName} should not include the quiet expand hint when previews are disabled`,
-    );
-  }
-}
-
-test("quiet-tools registers quiet built-in previews on session start and reports status changes", async () => {
+test("quiet-tools registers one resolver via registerToolRenderer (not registerTool)", () => {
   const harness = createExtensionHarness();
   quietToolsExtension(harness.pi);
 
-  const sessionStart = getSessionStartHandler(harness);
-  const command = getQuietToolsCommand(harness);
-  const { ctx, notifications } = createCommandContext();
+  assert.equal(harness.tools.size, 0, "no pi.registerTool calls");
+  assert.equal(harness.toolRendererResolvers.length, 1, "exactly one resolver registered");
+});
 
-  await sessionStart({}, ctx);
-  assertQuietRegistrations(harness.tools);
+test("quiet-tools resolver quiets collapsed built-in rows", () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  for (const [toolName, args] of quietToolCases) {
+    const lines = simulateCollapsedCall(harness, toolName, args);
+    assert.equal(lines?.length, 2, `${toolName}: collapsed quiet call renders 2 lines`);
+    assert.match(lines[1], /to expand/, `${toolName}: expand hint present`);
+  }
+});
+
+test("quiet-tools resolver quiets collapsed mcp__ rows", () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  const lines = simulateCollapsedCall(harness, "mcp__my_server__do_thing", { input: "test" });
+  assert.equal(lines?.length, 2, "mcp__ tool: collapsed quiet call renders 2 lines");
+  assert.match(lines[0], /mcp__my_server__do_thing/, "tool name in first line");
+  assert.match(lines[1], /to expand/, "expand hint present");
+});
+
+test("quiet-tools resolver does not quiet other tools", () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  const nextCall = { type: "next-call", render: () => ["next line"] };
+  const result = simulateExpandedCall(harness, "my_custom_tool", {
+    renderCall() {
+      return nextCall;
+    },
+  });
+  // For non-builtin non-mcp__ tools, next() is returned directly
+  // so the resolver returns next(), and there's nothing to test beyond that the resolver
+  // doesn't intercept it. We verify by testing a non-builtin tool passes through.
+  const resolver = harness.toolRendererResolvers[0];
+  const nextRenderers = {
+    renderCall() {
+      return nextCall;
+    },
+  };
+  const renderers = resolver("my_custom_tool", () => nextRenderers);
+  assert.equal(renderers, nextRenderers, "non-builtin non-mcp__ tool returns next() directly");
+});
+
+test("quiet-tools resolver delegates to next() when expanded", () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  const nextCall = { type: "next-call", render: () => [] };
+  const nextRenderers = {
+    renderCall() {
+      return nextCall;
+    },
+  };
+  const result = simulateExpandedCall(harness, "bash", nextRenderers);
+  assert.equal(result, nextCall, "expanded call delegates to next()");
+});
+
+test("quiet-tools /quiet-tools off and on toggle quiet rendering at render time", async () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  const { ctx, notifications } = createCommandContext();
+  const command = getQuietToolsCommand(harness);
+
+  // Initially enabled: collapsed renders 2 lines
+  const linesEnabled = simulateCollapsedCall(harness, "bash", { command: "echo" });
+  assert.equal(linesEnabled?.length, 2, "initially enabled: 2-line quiet preview");
+
+  await command.handler("off", ctx);
+
+  // After off: collapsed delegates to next (which is undefined → fallback), not 2 quiet lines
+  // The resolver still exists; behaviour changes at render time
+  const resolver = harness.toolRendererResolvers[0];
+  const nextCall = { type: "next", render: () => ["one line"] };
+  const renderers = resolver("bash", () => ({
+    renderCall() {
+      return nextCall;
+    },
+  }));
+  const delegatedResult = renderers.renderCall({ command: "echo" }, theme, {
+    expanded: false,
+    executionStarted: false,
+    argsComplete: true,
+    cwd: repoRoot,
+    lastComponent: undefined,
+    state: {},
+  });
+  assert.equal(
+    delegatedResult,
+    nextCall,
+    "after quiet off: collapsed call delegates to next at render time",
+  );
+
+  await command.handler("on", ctx);
+
+  // After on: quiet again
+  const linesRenabled = simulateCollapsedCall(harness, "bash", { command: "echo" });
+  assert.equal(linesRenabled?.length, 2, "after quiet on: 2-line quiet preview restored");
+
+  assert.deepEqual(notifications, [
+    {
+      message: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
+      level: "info",
+    },
+    {
+      message:
+        "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint.",
+      level: "info",
+    },
+  ]);
+});
+
+test("quiet-tools /quiet-tools toggle and status commands notify the user", async () => {
+  const harness = createExtensionHarness();
+  quietToolsExtension(harness.pi);
+
+  const { ctx, notifications } = createCommandContext();
+  const command = getQuietToolsCommand(harness);
 
   await command.handler("status", ctx);
-  await command.handler("off", ctx);
-  assertStandardRegistrations(harness.tools);
+  await command.handler("toggle", ctx);
   await command.handler("status", ctx);
 
   assert.deepEqual(notifications, [
@@ -197,37 +243,53 @@ test("quiet-tools registers quiet built-in previews on session start and reports
   ]);
 });
 
-test("quiet-tools on and toggle re-register the active built-in renderers and notify the user", async () => {
+test("quiet-tools fallback: no registerToolRenderer → registers no resolver, notifies once on session_start", async () => {
   const harness = createExtensionHarness();
+  // Remove registerToolRenderer from the mock to simulate Pi <1.0.1
+  delete harness.pi.registerToolRenderer;
+
   quietToolsExtension(harness.pi);
 
-  const sessionStart = getSessionStartHandler(harness);
-  const command = getQuietToolsCommand(harness);
-  const { ctx, notifications } = createCommandContext();
+  assert.equal(harness.toolRendererResolvers.length, 0, "no resolver registered on fallback host");
+  assert.equal(harness.tools.size, 0, "no registerTool calls on fallback host");
 
+  const sessionStart = harness.handlers.get("session_start");
+  assert.equal(typeof sessionStart, "function", "session_start handler registered");
+
+  const notifications = [];
+  const ctx = {
+    cwd: repoRoot,
+    ui: {
+      notify(message, level) {
+        notifications.push({ message, level });
+      },
+    },
+  };
+
+  // First session_start: notifies
   await sessionStart({}, ctx);
-  await command.handler("off", ctx);
-  assertStandardRegistrations(harness.tools);
+  assert.equal(notifications.length, 1, "notified once on first session_start");
+  assert.match(notifications[0].message, /Pi >=1.0.1/, "message mentions Pi >=1.0.1 requirement");
+  assert.equal(notifications[0].level, "warning", "warning level");
 
-  await command.handler("on", ctx);
-  assertQuietRegistrations(harness.tools);
+  // Second session_start: does NOT notify again
+  await sessionStart({}, ctx);
+  assert.equal(notifications.length, 1, "not notified again on subsequent session_start");
+});
 
+test("quiet-tools fallback: /quiet-tools commands still work without rendering effect", async () => {
+  const harness = createExtensionHarness();
+  delete harness.pi.registerToolRenderer;
+
+  quietToolsExtension(harness.pi);
+
+  const command = getQuietToolsCommand(harness);
+  assert.ok(command, "command is registered even on fallback host");
+
+  const { ctx, notifications } = createCommandContext();
   await command.handler("toggle", ctx);
-  assertStandardRegistrations(harness.tools);
+  assert.equal(notifications.length, 1, "toggle still notifies");
 
-  assert.deepEqual(notifications, [
-    {
-      message: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
-      level: "info",
-    },
-    {
-      message:
-        "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint.",
-      level: "info",
-    },
-    {
-      message: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
-      level: "info",
-    },
-  ]);
+  await command.handler("status", ctx);
+  assert.equal(notifications.length, 2, "status still notifies");
 });

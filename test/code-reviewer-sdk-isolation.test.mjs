@@ -15,6 +15,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+// Subagent MCP allowlist entries: matches the constant defined in each extension.
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+
 function createTool(
   name,
   execute = async () => ({ content: [{ type: "text", text: "fixture" }] }),
@@ -28,7 +37,7 @@ function createTool(
   };
 }
 
-test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom execution paths while loading resources", async (t) => {
+test("Pi 1.0.4 subagent allowlist: direct-exposure MCP tools are active/callable/defined; write, edit, codemode, non-MCP extension tools, and custom tools remain absent", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-child-tool-boundary-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -182,11 +191,21 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
         return { content: [{ type: "text", text: "should not execute" }] };
       }),
     );
+    // Direct-exposure MCP tool: should be active/callable/defined when mcp__* is in the allowlist.
     pi.registerTool({
       ...createTool("mcp__fixture__tool", async () => {
         markers.toolCalls.push("mcp__fixture__tool");
-        return { content: [{ type: "text", text: "should not execute" }] };
+        return { content: [{ type: "text", text: "fixture mcp result" }] };
       }),
+      namespace: { name: "mcp__fixture", description: "Fixture MCP namespace" },
+    });
+    // Deferred-exposure MCP tool: should be callable/defined but NOT active at startup; activatable via setActiveToolsByName.
+    pi.registerTool({
+      ...createTool("mcp__fixture__deferred", async () => {
+        markers.toolCalls.push("mcp__fixture__deferred");
+        return { content: [{ type: "text", text: "fixture deferred mcp result" }] };
+      }),
+      exposure: "deferred",
       namespace: { name: "mcp__fixture", description: "Fixture MCP namespace" },
     });
     pi.on("session_start", () => {
@@ -203,6 +222,7 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
     }));
   };
 
+  // defaultTools includes entries that are NOT in the explicit allowlist below; those must stay absent.
   const settingsManager = SettingsManager.inMemory({
     defaultTools: [
       "read",
@@ -211,6 +231,7 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
       "edit",
       "codemode",
       "mcp__fixture__tool",
+      "mcp__fixture__deferred",
       "extension_fixture_tool",
     ],
   });
@@ -229,6 +250,9 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
   });
   await resourceLoader.reload();
 
+  // Subagent allowlist: read-only built-ins + MCP entries (mirrors code-reviewer / oracle allowlists).
+  const subagentAllowlist = ["read", ...SUBAGENT_MCP_TOOLS];
+
   const created = await createAgentSession({
     cwd: root,
     agentDir: root,
@@ -238,7 +262,7 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
     sessionManager: SessionManager.inMemory(root),
     model,
     thinkingLevel: "off",
-    tools: ["read"],
+    tools: subagentAllowlist,
     customTools: [
       createTool("custom_fixture_tool", async () => {
         markers.toolCalls.push("custom_fixture_tool");
@@ -274,34 +298,88 @@ test("Pi 1.0 explicit tool allowlists block built-in, MCP, extension, and custom
       /Fixture project instructions/,
     );
 
+    // mcp__fixture__tool matches mcp__* in the allowlist: must be active, callable, and defined.
+    const active = created.session.getActiveToolNames();
+    const callable = created.session.getCallableToolNames();
+    assert.ok(
+      active.includes("mcp__fixture__tool"),
+      "direct-exposure mcp__fixture__tool must be active when mcp__* is in the allowlist",
+    );
+    assert.ok(
+      callable.includes("mcp__fixture__tool"),
+      "direct-exposure mcp__fixture__tool must be callable",
+    );
+    assert.ok(
+      created.session.getToolDefinition("mcp__fixture__tool"),
+      "direct-exposure mcp__fixture__tool must have a definition",
+    );
+
+    // mcp__fixture__deferred: deferred-exposure; must be registered and callable but NOT active at startup.
+    assert.equal(
+      active.includes("mcp__fixture__deferred"),
+      false,
+      "deferred mcp__fixture__deferred must NOT be active at startup",
+    );
+    assert.ok(
+      callable.includes("mcp__fixture__deferred"),
+      "deferred mcp__fixture__deferred must be callable (registered and allowed by mcp__*)",
+    );
+    assert.ok(
+      created.session.getToolDefinition("mcp__fixture__deferred"),
+      "deferred mcp__fixture__deferred must have a definition",
+    );
+
+    // tool_search: absent in this fixture because no real MCP servers are configured.
+    assert.equal(
+      created.session.getToolDefinition("tool_search"),
+      undefined,
+      "tool_search is absent when no real MCP servers are configured in the fixture",
+    );
+
+    // Built-in read tool must be active.
+    assert.ok(active.includes("read"), "read must be active");
+
+    // Non-MCP, non-allowlisted tools must be absent.
     const blockedNames = [
-      "bash",
       "write",
       "edit",
       "codemode",
-      "mcp__fixture__tool",
       "extension_fixture_tool",
       "custom_fixture_tool",
     ];
-    assert.deepEqual(created.session.getActiveToolNames(), ["read"]);
-    assert.deepEqual(created.session.getCallableToolNames(), ["read"]);
-    assert.deepEqual(
-      created.session.getAllTools().map((tool) => tool.name),
-      ["read"],
-    );
     for (const name of blockedNames) {
       assert.equal(
         created.session.getToolDefinition(name),
         undefined,
-        `${name} must not be executable`,
+        `${name} must not have a definition`,
+      );
+      assert.equal(active.includes(name), false, `${name} must not be active`);
+      assert.equal(callable.includes(name), false, `${name} must not be callable`);
+    }
+
+    // setActiveToolsByName cannot reactivate blocked non-MCP tools.
+    created.session.setActiveToolsByName(["read", ...blockedNames, "mcp__fixture__tool"]);
+    for (const name of blockedNames) {
+      assert.equal(
+        created.session.getActiveToolNames().includes(name),
+        false,
+        `${name} must stay inactive after attempted reactivation`,
       );
     }
-    created.session.setActiveToolsByName(["read", ...blockedNames]);
-    assert.deepEqual(
-      created.session.getActiveToolNames(),
-      ["read"],
-      "the allowlist must prevent reactivation",
+    // mcp__fixture__tool must remain active after attempted reactivation.
+    assert.ok(
+      created.session.getActiveToolNames().includes("mcp__fixture__tool"),
+      "mcp__fixture__tool must remain active after reactivation call",
     );
+
+    // Activating the deferred MCP tool via setActiveToolsByName (mirrors what tool_search does after a search result).
+    const activeAfterBlocked = created.session.getActiveToolNames();
+    created.session.setActiveToolsByName([...activeAfterBlocked, "mcp__fixture__deferred"]);
+    assert.ok(
+      created.session.getActiveToolNames().includes("mcp__fixture__deferred"),
+      "deferred mcp__fixture__deferred must become active after explicit activation (simulating tool_search)",
+    );
+
     assert.deepEqual(markers.toolCalls, [], "blocked tools must not execute");
     assert.equal(authLookups, 0, "loadout inspection must not resolve credentials");
   } finally {
@@ -320,6 +398,7 @@ const boundaryToolNames = [
   "ls",
   "codemode",
   "mcp__fixture__tool",
+  "mcp__fixture__deferred",
   "extension_fixture_tool",
   "late_direct",
   "late_deferred",
@@ -384,27 +463,37 @@ async function createBoundaryResources(root) {
   return { skillDir, promptDir, themeDir };
 }
 
+/**
+ * Returns true when `name` is permitted by the given allowlist.
+ * Handles the `mcp__*` wildcard: any name starting with `mcp__` is allowed
+ * when the allowlist includes the literal string `mcp__*`.
+ */
+function isToolAllowedByList(name, allowlist) {
+  if (allowlist.includes(name)) return true;
+  if (name.startsWith("mcp__") && allowlist.includes("mcp__*")) return true;
+  return false;
+}
+
 function assertBoundarySurface(session, allowlist, phase) {
   const active = session.getActiveToolNames();
   const callable = session.getCallableToolNames();
   const definitions = session.getAllTools();
   const definitionNames = definitions.map((tool) => tool.name);
-  const allowed = new Set(allowlist);
 
   assert.ok(
-    active.every((name) => allowed.has(name)),
+    active.every((name) => isToolAllowedByList(name, allowlist)),
     `${phase}: active tools escaped the allowlist`,
   );
   assert.ok(
-    callable.every((name) => allowed.has(name)),
+    callable.every((name) => isToolAllowedByList(name, allowlist)),
     `${phase}: callable tools escaped the allowlist`,
   );
   assert.ok(
-    definitionNames.every((name) => allowed.has(name)),
+    definitionNames.every((name) => isToolAllowedByList(name, allowlist)),
     `${phase}: definitions escaped the allowlist`,
   );
   for (const name of boundaryToolNames) {
-    if (allowed.has(name)) {
+    if (isToolAllowedByList(name, allowlist)) {
       assert.ok(
         session.getToolDefinition(name),
         `${phase}: allowed tool ${name} must remain registered`,
@@ -451,12 +540,49 @@ function assertBoundaryPositiveControls(session, phase) {
   );
 }
 
-function assertRestoredBoundaryPositiveControls(session, phase) {
+function assertMcpPositiveControls(session, allowlist, phase) {
+  if (!allowlist.includes("mcp__*")) return;
+  // Direct-exposure MCP tool: active, callable, defined.
+  assert.ok(
+    session.getActiveToolNames().includes("mcp__fixture__tool"),
+    `${phase}: mcp__fixture__tool must be active when mcp__* is in the allowlist`,
+  );
+  assert.ok(
+    session.getCallableToolNames().includes("mcp__fixture__tool"),
+    `${phase}: mcp__fixture__tool must be callable when mcp__* is in the allowlist`,
+  );
+  assert.ok(
+    session.getToolDefinition("mcp__fixture__tool"),
+    `${phase}: mcp__fixture__tool must be defined when mcp__* is in the allowlist`,
+  );
+  // Deferred-exposure MCP tool: callable and defined, but NOT active at startup (requires transcript or activation).
+  assert.ok(
+    session.getCallableToolNames().includes("mcp__fixture__deferred"),
+    `${phase}: deferred mcp__fixture__deferred must be callable when mcp__* is in the allowlist`,
+  );
+  assert.ok(
+    session.getToolDefinition("mcp__fixture__deferred"),
+    `${phase}: deferred mcp__fixture__deferred must be defined when mcp__* is in the allowlist`,
+  );
+  assert.equal(
+    session.getToolDefinition("tool_search"),
+    undefined,
+    `${phase}: tool_search is absent in fixture (no real MCP servers)`,
+  );
+}
+
+function assertRestoredBoundaryPositiveControls(session, allowlist, phase) {
   assertBoundaryPositiveControls(session, phase);
   assert.ok(
     session.getActiveToolNames().includes("late_deferred"),
-    `${phase}: restored transcript must activate the allowed deferred tool`,
+    `${phase}: restored transcript must activate the allowed late_deferred tool`,
   );
+  if (allowlist && allowlist.includes("mcp__*")) {
+    assert.ok(
+      session.getActiveToolNames().includes("mcp__fixture__deferred"),
+      `${phase}: restored transcript must activate the allowed deferred MCP tool`,
+    );
+  }
 }
 
 async function createBoundaryScenario(scenario) {
@@ -476,6 +602,7 @@ async function createBoundaryScenario(scenario) {
     "ls",
     "codemode",
     "mcp__fixture__tool",
+    "mcp__fixture__deferred",
     "extension_fixture_tool",
     "late_direct",
     "late_deferred",
@@ -560,6 +687,11 @@ async function createBoundaryScenario(scenario) {
       ...createBoundaryTool("mcp__fixture__tool"),
       namespace: { name: "mcp__fixture", description: "Boundary MCP namespace" },
     });
+    // Deferred-exposure MCP tool: registered at load time, becomes callable/defined when mcp__* is in allowlist.
+    pi.registerTool({
+      ...createBoundaryTool("mcp__fixture__deferred", { exposure: "deferred" }),
+      namespace: { name: "mcp__fixture", description: "Boundary MCP namespace" },
+    });
     pi.on("session_start", (event) => {
       markers.sessionStarts += 1;
       markers.sessionStartReasons.push(event.reason);
@@ -638,6 +770,7 @@ async function createRestoredBoundarySession(
     restoredContext.messages
       .find((message) => message.role === "system")
       ?.toolsAdded?.map((tool) => tool.name) ?? [];
+
   const settingsManager = SettingsManager.create(environment.root, environment.agentDir);
   const resourceLoader = new DefaultResourceLoader({
     cwd: environment.root,
@@ -678,23 +811,26 @@ async function createRestoredBoundarySession(
   return { session, restorationToolNames };
 }
 
-test("Pi 1.0 child allowlists survive real reloads, late registrations, and restored transcripts", async (t) => {
+test("Pi 1.0.4 subagent allowlists survive real reloads, late registrations, and restored transcripts; mcp__* grants access to configured MCP tools", async (t) => {
   const scenarios = [
     { name: "empty allowlist", allowlist: [] },
-    { name: "read allowlist", allowlist: ["read"] },
-    { name: "read+bash allowlist", allowlist: ["read", "bash"] },
     {
-      name: "research read+grep+find+ls+bash allowlist",
-      allowlist: ["read", "grep", "find", "ls", "bash"],
+      name: "oracle plan-only (read+grep+find+ls + MCP) allowlist",
+      allowlist: ["read", "grep", "find", "ls", ...SUBAGENT_MCP_TOOLS],
     },
     {
-      name: "late direct/deferred positive controls",
+      name: "code-reviewer (read+grep+find+ls+bash + MCP) allowlist",
+      allowlist: ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS],
+    },
+    {
+      name: "late direct/deferred positive controls (+ MCP)",
       allowlist: [
         "read",
         "extension_fixture_tool",
         "custom_fixture_tool",
         "late_direct",
         "late_deferred",
+        ...SUBAGENT_MCP_TOOLS,
       ],
       positive: true,
     },
@@ -727,6 +863,7 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
 
         assert.equal(environment.settingsManager.getDefaultTools()?.join(","), "read");
         assertBoundarySurface(created.session, scenario.allowlist, "startup");
+        assertMcpPositiveControls(created.session, scenario.allowlist, "startup");
         assert.deepEqual(environment.markers.sessionStartReasons, ["startup"]);
         assert.equal(
           environment.markers.sessionStarts,
@@ -783,6 +920,7 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
           environment.expandedDefaultTools,
         );
         assertBoundarySurface(created.session, scenario.allowlist, "reload");
+        assertMcpPositiveControls(created.session, scenario.allowlist, "reload");
         assert.ok(
           environment.markers.sessionStartReasons.includes("reload"),
           "reload must emit a reload lifecycle event",
@@ -796,6 +934,7 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
 
         created.session.setActiveToolsByName(boundaryToolNames);
         assertBoundarySurface(created.session, scenario.allowlist, "attempted reactivation");
+        assertMcpPositiveControls(created.session, scenario.allowlist, "attempted reactivation");
         if (scenario.positive)
           assertBoundaryPositiveControls(created.session, "attempted reactivation");
 
@@ -803,23 +942,38 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
           onExtensionError: captureExtensionError,
         });
         restored = restoredResult.session;
-        assert.equal(boundaryToolNames.length, 14, "boundary fixture must declare 14 tools");
+        assert.equal(boundaryToolNames.length, 15, "boundary fixture must declare 15 tools");
         assert.deepEqual(
           restoredResult.restorationToolNames,
           boundaryToolNames,
-          "restoration input must retain all 14 declared fixture tools",
+          "restoration input must retain all 15 declared fixture tools",
         );
         assertBoundarySurface(restored, scenario.allowlist, "restored transcript");
+        assertMcpPositiveControls(restored, scenario.allowlist, "restored transcript");
         if (scenario.positive)
-          assertRestoredBoundaryPositiveControls(restored, "restored transcript");
+          assertRestoredBoundaryPositiveControls(
+            restored,
+            scenario.allowlist,
+            "restored transcript",
+          );
         await restored.reload();
         assertBoundarySurface(restored, scenario.allowlist, "restored transcript reload");
+        assertMcpPositiveControls(restored, scenario.allowlist, "restored transcript reload");
         if (scenario.positive)
-          assertRestoredBoundaryPositiveControls(restored, "restored transcript reload");
+          assertRestoredBoundaryPositiveControls(
+            restored,
+            scenario.allowlist,
+            "restored transcript reload",
+          );
         restored.setActiveToolsByName(boundaryToolNames);
         assertBoundarySurface(restored, scenario.allowlist, "restored attempted reactivation");
+        assertMcpPositiveControls(restored, scenario.allowlist, "restored attempted reactivation");
         if (scenario.positive)
-          assertRestoredBoundaryPositiveControls(restored, "restored attempted reactivation");
+          assertRestoredBoundaryPositiveControls(
+            restored,
+            scenario.allowlist,
+            "restored attempted reactivation",
+          );
 
         if (scenario.positive) {
           const absentResult = await createRestoredBoundarySession(environment, created.session, {
@@ -834,6 +988,7 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
           );
           assertBoundarySurface(absentTranscript, scenario.allowlist, "absent transcript");
           assertBoundaryPositiveControls(absentTranscript, "absent transcript");
+          assertMcpPositiveControls(absentTranscript, scenario.allowlist, "absent transcript");
           assert.equal(
             absentTranscript.getActiveToolNames().includes("late_deferred"),
             false,
@@ -852,6 +1007,7 @@ test("Pi 1.0 child allowlists survive real reloads, late registrations, and rest
           );
           assertBoundarySurface(emptyTranscript, scenario.allowlist, "empty transcript");
           assertBoundaryPositiveControls(emptyTranscript, "empty transcript");
+          assertMcpPositiveControls(emptyTranscript, scenario.allowlist, "empty transcript");
           assert.equal(
             emptyTranscript.getActiveToolNames().includes("late_deferred"),
             false,
