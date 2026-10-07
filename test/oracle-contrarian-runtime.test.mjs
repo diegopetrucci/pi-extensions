@@ -1,11 +1,20 @@
-import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import test from "node:test";
 
-import { createExtensionHarness } from './extension-test-helpers.mjs';
-import { loadRoleTestUtils } from './support/provider-policy-contract-support.mjs';
+import { createExtensionHarness } from "./extension-test-helpers.mjs";
+import { loadRoleTestUtils } from "./support/provider-policy-contract-support.mjs";
 
-function createUsage({ input, output, cacheRead, cacheWrite, cacheWrite1h, reasoning, totalTokens, cost }) {
+function createUsage({
+  input,
+  output,
+  cacheRead,
+  cacheWrite,
+  cacheWrite1h,
+  reasoning,
+  totalTokens,
+  cost,
+}) {
   return {
     input,
     output,
@@ -18,12 +27,12 @@ function createUsage({ input, output, cacheRead, cacheWrite, cacheWrite1h, reaso
   };
 }
 
-function messageEndEvent({ text, stopReason = 'stop', errorMessage, usage }) {
+function messageEndEvent({ text, stopReason = "stop", errorMessage, usage }) {
   return {
-    type: 'message_end',
+    type: "message_end",
     message: {
-      role: 'assistant',
-      content: text ? [{ type: 'text', text }] : [],
+      role: "assistant",
+      content: text ? [{ type: "text", text }] : [],
       stopReason,
       ...(errorMessage ? { errorMessage } : {}),
       ...(usage ? { usage } : {}),
@@ -33,7 +42,7 @@ function messageEndEvent({ text, stopReason = 'stop', errorMessage, usage }) {
 
 function compactionEndEvent({ usage }) {
   return {
-    type: 'compaction_end',
+    type: "compaction_end",
     result: usage ? { usage } : {},
   };
 }
@@ -44,7 +53,7 @@ function createSpawnQueue(scripts) {
   const spawnImpl = (command, args, options) => {
     invocations.push({ command, args, options });
     const script = scripts.shift();
-    if (!script) throw new Error('unexpected spawn call');
+    if (!script) throw new Error("unexpected spawn call");
     const proc = new EventEmitter();
     proc.stdout = new EventEmitter();
     proc.stderr = new EventEmitter();
@@ -66,19 +75,19 @@ function createSpawnQueue(scripts) {
 function endProcess(proc, { code = 0, signalCode = null, closeCode = code } = {}) {
   proc.exitCode = code;
   proc.signalCode = signalCode;
-  proc.emit('exit', code, signalCode);
-  proc.emit('close', closeCode, signalCode);
+  proc.emit("exit", code, signalCode);
+  proc.emit("close", closeCode, signalCode);
 }
 
 function emitJsonLines(proc, events, code = 0) {
-  const payload = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
-  proc.stdout.emit('data', Buffer.from(payload));
+  const payload = `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+  proc.stdout.emit("data", Buffer.from(payload));
   endProcess(proc, { code });
 }
 
 function createToolContext(model) {
   return {
-    cwd: '/repo',
+    cwd: "/repo",
     hasUI: false,
     model,
     modelRegistry: {
@@ -108,8 +117,8 @@ function withFakeTimers(t, run) {
   return run(timers);
 }
 
-test('oracle aggregates usage across fallback attempts, exposes parent tool usage, and marks terminal errors', async () => {
-  const { createOracleExtension } = await loadRoleTestUtils('oracle');
+test("oracle aggregates usage across fallback attempts, exposes parent tool usage, and marks terminal errors", async () => {
+  const { createOracleExtension } = await loadRoleTestUtils("oracle");
   const firstUsage = createUsage({
     input: 10,
     output: 3,
@@ -143,28 +152,46 @@ test('oracle aggregates usage across fallback attempts, exposes parent tool usag
   const { spawnImpl } = createSpawnQueue([
     {
       start(proc) {
-        emitJsonLines(proc, [messageEndEvent({ stopReason: 'error', errorMessage: '404 model not found', usage: firstUsage })]);
+        emitJsonLines(proc, [
+          messageEndEvent({
+            stopReason: "error",
+            errorMessage: "404 model not found",
+            usage: firstUsage,
+          }),
+        ]);
       },
     },
     {
       start(proc) {
-        emitJsonLines(proc, [compactionEndEvent({ usage: compactionUsage }), messageEndEvent({ text: 'oracle success', usage: secondUsage })]);
+        emitJsonLines(proc, [
+          compactionEndEvent({ usage: compactionUsage }),
+          messageEndEvent({ text: "oracle success", usage: secondUsage }),
+        ]);
       },
     },
   ]);
 
   const harness = createExtensionHarness();
   createOracleExtension(harness.pi, { spawnImpl });
-  const tool = harness.tools.get('oracle');
-  const toolResult = harness.handlers.get('tool_result');
+  const tool = harness.tools.get("oracle");
+  const toolResult = harness.handlers.get("tool_result");
 
-  assert.ok(tool.promptGuidelines.every((guideline) => /oracle/i.test(guideline)), 'every oracle guideline names oracle');
-  assert.match(tool.promptGuidelines.join(' '), /read, grep, find, and ls/i);
-  assert.match(tool.promptGuidelines.join(' '), /bash inspection tool/i);
+  assert.ok(
+    tool.promptGuidelines.every((guideline) => /oracle/i.test(guideline)),
+    "every oracle guideline names oracle",
+  );
+  assert.match(tool.promptGuidelines.join(" "), /read, grep, find, and ls/i);
+  assert.match(tool.promptGuidelines.join(" "), /bash inspection tool/i);
 
-  const result = await tool.execute('oracle-call', { task: 'Audit this', model: 'openai/ghost' }, undefined, undefined, createToolContext({ provider: 'anthropic', id: 'claude-sonnet-5', reasoning: true }));
+  const result = await tool.execute(
+    "oracle-call",
+    { task: "Audit this", model: "openai/ghost" },
+    undefined,
+    undefined,
+    createToolContext({ provider: "anthropic", id: "claude-sonnet-5", reasoning: true }),
+  );
 
-  assert.equal(result.content[0].text, 'oracle success');
+  assert.equal(result.content[0].text, "oracle success");
   assert.deepEqual(result.usage, {
     input: 34,
     output: 9,
@@ -173,7 +200,13 @@ test('oracle aggregates usage across fallback attempts, exposes parent tool usag
     cacheWrite1h: 8,
     reasoning: 18,
     totalTokens: 61,
-    cost: { input: 0.44999999999999996, output: 0.66, cacheRead: 0.11, cacheWrite: 0.13999999999999999, total: 1.36 },
+    cost: {
+      input: 0.44999999999999996,
+      output: 0.66,
+      cacheRead: 0.11,
+      cacheWrite: 0.13999999999999999,
+      total: 1.36,
+    },
   });
   assert.deepEqual(result.details.usage, {
     input: 34,
@@ -191,12 +224,14 @@ test('oracle aggregates usage across fallback attempts, exposes parent tool usag
     turns: 2,
     contextTokens: 32,
   });
-  assert.deepEqual(await toolResult({ toolName: 'oracle', details: { exitCode: 1 } }), { isError: true });
-  assert.equal(await toolResult({ toolName: 'oracle', details: { exitCode: 0 } }), undefined);
+  assert.deepEqual(await toolResult({ toolName: "oracle", details: { exitCode: 1 } }), {
+    isError: true,
+  });
+  assert.equal(await toolResult({ toolName: "oracle", details: { exitCode: 0 } }), undefined);
 });
 
-test('contrarian aggregates usage across fallback attempts, exposes parent tool usage, and marks terminal errors', async () => {
-  const { createContrarianExtension } = await loadRoleTestUtils('contrarian');
+test("contrarian aggregates usage across fallback attempts, exposes parent tool usage, and marks terminal errors", async () => {
+  const { createContrarianExtension } = await loadRoleTestUtils("contrarian");
   const firstUsage = createUsage({
     input: 7,
     output: 2,
@@ -226,28 +261,46 @@ test('contrarian aggregates usage across fallback attempts, exposes parent tool 
   const { spawnImpl } = createSpawnQueue([
     {
       start(proc) {
-        emitJsonLines(proc, [messageEndEvent({ stopReason: 'error', errorMessage: '404 model not found', usage: firstUsage })]);
+        emitJsonLines(proc, [
+          messageEndEvent({
+            stopReason: "error",
+            errorMessage: "404 model not found",
+            usage: firstUsage,
+          }),
+        ]);
       },
     },
     {
       start(proc) {
-        emitJsonLines(proc, [compactionEndEvent({ usage: compactionUsage }), messageEndEvent({ text: 'contrarian success', usage: secondUsage })]);
+        emitJsonLines(proc, [
+          compactionEndEvent({ usage: compactionUsage }),
+          messageEndEvent({ text: "contrarian success", usage: secondUsage }),
+        ]);
       },
     },
   ]);
 
   const harness = createExtensionHarness();
   createContrarianExtension(harness.pi, { spawnImpl });
-  const tool = harness.tools.get('contrarian');
-  const toolResult = harness.handlers.get('tool_result');
+  const tool = harness.tools.get("contrarian");
+  const toolResult = harness.handlers.get("tool_result");
 
-  assert.ok(tool.promptGuidelines.every((guideline) => /contrarian/i.test(guideline)), 'every contrarian guideline names contrarian');
-  assert.match(tool.promptGuidelines.join(' '), /read, grep, find, and ls/i);
-  assert.match(tool.promptGuidelines.join(' '), /bash inspection tool/i);
+  assert.ok(
+    tool.promptGuidelines.every((guideline) => /contrarian/i.test(guideline)),
+    "every contrarian guideline names contrarian",
+  );
+  assert.match(tool.promptGuidelines.join(" "), /read, grep, find, and ls/i);
+  assert.match(tool.promptGuidelines.join(" "), /bash inspection tool/i);
 
-  const result = await tool.execute('contrarian-call', { task: 'Challenge this', model: 'openai/ghost' }, undefined, undefined, createToolContext({ provider: 'anthropic', id: 'claude-sonnet-5', reasoning: true }));
+  const result = await tool.execute(
+    "contrarian-call",
+    { task: "Challenge this", model: "openai/ghost" },
+    undefined,
+    undefined,
+    createToolContext({ provider: "anthropic", id: "claude-sonnet-5", reasoning: true }),
+  );
 
-  assert.equal(result.content[0].text, 'contrarian success');
+  assert.equal(result.content[0].text, "contrarian success");
   assert.deepEqual(result.usage, {
     input: 20,
     output: 7,
@@ -255,7 +308,13 @@ test('contrarian aggregates usage across fallback attempts, exposes parent tool 
     cacheWrite: 5,
     cacheWrite1h: 0,
     totalTokens: 34,
-    cost: { input: 0.2, output: 0.22999999999999998, cacheRead: 0.059000000000000004, cacheWrite: 0.07, total: 0.559 },
+    cost: {
+      input: 0.2,
+      output: 0.22999999999999998,
+      cacheRead: 0.059000000000000004,
+      cacheWrite: 0.07,
+      total: 0.559,
+    },
   });
   assert.deepEqual(result.details.usage, {
     input: 20,
@@ -272,100 +331,239 @@ test('contrarian aggregates usage across fallback attempts, exposes parent tool 
     turns: 2,
     contextTokens: 18,
   });
-  assert.equal(Object.hasOwn(result.usage, 'reasoning'), false, 'unreported parent reasoning stays undefined');
-  assert.equal(Object.hasOwn(result.details.usage, 'reasoning'), false, 'unreported detail reasoning stays undefined');
-  assert.equal(result.usage.cacheWrite1h, 0, 'an explicitly reported parent cacheWrite1h zero is retained');
-  assert.equal(result.details.usage.cacheWrite1h, 0, 'an explicitly reported detail cacheWrite1h zero is retained');
-  assert.deepEqual(await toolResult({ toolName: 'contrarian', details: { exitCode: 1 } }), { isError: true });
-  assert.equal(await toolResult({ toolName: 'contrarian', details: { exitCode: 0 } }), undefined);
+  assert.equal(
+    Object.hasOwn(result.usage, "reasoning"),
+    false,
+    "unreported parent reasoning stays undefined",
+  );
+  assert.equal(
+    Object.hasOwn(result.details.usage, "reasoning"),
+    false,
+    "unreported detail reasoning stays undefined",
+  );
+  assert.equal(
+    result.usage.cacheWrite1h,
+    0,
+    "an explicitly reported parent cacheWrite1h zero is retained",
+  );
+  assert.equal(
+    result.details.usage.cacheWrite1h,
+    0,
+    "an explicitly reported detail cacheWrite1h zero is retained",
+  );
+  assert.deepEqual(await toolResult({ toolName: "contrarian", details: { exitCode: 1 } }), {
+    isError: true,
+  });
+  assert.equal(await toolResult({ toolName: "contrarian", details: { exitCode: 0 } }), undefined);
 });
 
-test('oracle and contrarian preserve discovered resources and keep explicit tool allowlists', async () => {
+test("oracle and contrarian preserve discovered resources and keep explicit tool allowlists", async () => {
   const selection = {
-    modelRef: 'anthropic/claude-sonnet-5',
-    provider: 'anthropic',
-    modelId: 'claude-sonnet-5',
-    thinkingLevel: 'high',
+    modelRef: "anthropic/claude-sonnet-5",
+    provider: "anthropic",
+    modelId: "claude-sonnet-5",
+    thinkingLevel: "high",
     autoSelected: true,
-    selectionReason: 'test',
+    selectionReason: "test",
   };
-  const suppressedResourceFlags = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files'];
+  const suppressedResourceFlags = [
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-themes",
+    "--no-context-files",
+  ];
 
-  const oracle = await loadRoleTestUtils('oracle');
-  const oracleSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, [messageEndEvent({ text: 'oracle' })]); } }]);
-  const oracleResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, undefined, '/repo', oracleSpawn.spawnImpl);
+  const oracle = await loadRoleTestUtils("oracle");
+  const oracleSpawn = createSpawnQueue([
+    {
+      start(proc) {
+        emitJsonLines(proc, [messageEndEvent({ text: "oracle" })]);
+      },
+    },
+  ]);
+  const oracleResult = await oracle.runOracle(
+    selection,
+    { task: "inspect" },
+    undefined,
+    undefined,
+    "/repo",
+    oracleSpawn.spawnImpl,
+  );
   assert.equal(oracleResult.ok, true);
   const oracleArgs = oracleSpawn.invocations[0].args;
-  assert.ok(oracleArgs.includes('--no-session'));
-  assert.ok(suppressedResourceFlags.every((flag) => !oracleArgs.includes(flag)), 'oracle must not suppress discovered resources');
-  assert.deepEqual(oracleArgs.slice(oracleArgs.indexOf('--tools') + 1, oracleArgs.indexOf('--append-system-prompt')), ['read,grep,find,ls']);
+  assert.ok(oracleArgs.includes("--no-session"));
+  assert.ok(
+    suppressedResourceFlags.every((flag) => !oracleArgs.includes(flag)),
+    "oracle must not suppress discovered resources",
+  );
+  assert.deepEqual(
+    oracleArgs.slice(
+      oracleArgs.indexOf("--tools") + 1,
+      oracleArgs.indexOf("--append-system-prompt"),
+    ),
+    ["read,grep,find,ls"],
+  );
 
-  const contrarian = await loadRoleTestUtils('contrarian');
-  const contrarianSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, [messageEndEvent({ text: 'contrarian' })]); } }]);
-  const contrarianResult = await contrarian.runContrarian(selection, { task: 'inspect', includeBash: true }, undefined, undefined, '/repo', contrarianSpawn.spawnImpl);
+  const contrarian = await loadRoleTestUtils("contrarian");
+  const contrarianSpawn = createSpawnQueue([
+    {
+      start(proc) {
+        emitJsonLines(proc, [messageEndEvent({ text: "contrarian" })]);
+      },
+    },
+  ]);
+  const contrarianResult = await contrarian.runContrarian(
+    selection,
+    { task: "inspect", includeBash: true },
+    undefined,
+    undefined,
+    "/repo",
+    contrarianSpawn.spawnImpl,
+  );
   assert.equal(contrarianResult.ok, true);
   const contrarianArgs = contrarianSpawn.invocations[0].args;
-  assert.ok(contrarianArgs.includes('--no-session'));
-  assert.ok(suppressedResourceFlags.every((flag) => !contrarianArgs.includes(flag)), 'contrarian must not suppress discovered resources');
-  assert.deepEqual(contrarianArgs.slice(contrarianArgs.indexOf('--tools') + 1, contrarianArgs.indexOf('--append-system-prompt')), ['read,grep,find,ls,bash']);
+  assert.ok(contrarianArgs.includes("--no-session"));
+  assert.ok(
+    suppressedResourceFlags.every((flag) => !contrarianArgs.includes(flag)),
+    "contrarian must not suppress discovered resources",
+  );
+  assert.deepEqual(
+    contrarianArgs.slice(
+      contrarianArgs.indexOf("--tools") + 1,
+      contrarianArgs.indexOf("--append-system-prompt"),
+    ),
+    ["read,grep,find,ls,bash"],
+  );
 });
 
-test('oracle and contrarian assemble the final assistant turn without leaking thinking or stale tool-only text', async () => {
+test("oracle and contrarian assemble the final assistant turn without leaking thinking or stale tool-only text", async () => {
   const selection = {
-    modelRef: 'anthropic/claude-sonnet-5',
-    provider: 'anthropic',
-    modelId: 'claude-sonnet-5',
-    thinkingLevel: 'high',
+    modelRef: "anthropic/claude-sonnet-5",
+    provider: "anthropic",
+    modelId: "claude-sonnet-5",
+    thinkingLevel: "high",
     autoSelected: true,
-    selectionReason: 'test',
+    selectionReason: "test",
   };
   const events = [
-    { type: 'message_start', message: { role: 'assistant', content: [] } },
-    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'private reasoning' } },
-    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'intermediate ' } },
-    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0 } },
-    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: '{"path":"."}' } },
-    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }], stopReason: 'toolUse' } },
-    { type: 'message_start', message: { role: 'assistant', content: [] } },
-    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'public final' } },
-    { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "thinking_delta", delta: "private reasoning" },
+    },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "intermediate " },
+    },
+    { type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 } },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"path":"."}' },
+    },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read" }],
+        stopReason: "toolUse",
+      },
+    },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "public final" },
+    },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } },
   ];
-  const oracle = await loadRoleTestUtils('oracle');
+  const oracle = await loadRoleTestUtils("oracle");
   const oracleUpdates = [];
-  const oracleSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, events); } }]);
-  const oracleResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, (update) => oracleUpdates.push(update), '/repo', oracleSpawn.spawnImpl);
+  const oracleSpawn = createSpawnQueue([
+    {
+      start(proc) {
+        emitJsonLines(proc, events);
+      },
+    },
+  ]);
+  const oracleResult = await oracle.runOracle(
+    selection,
+    { task: "inspect" },
+    undefined,
+    (update) => oracleUpdates.push(update),
+    "/repo",
+    oracleSpawn.spawnImpl,
+  );
   assert.equal(oracleResult.ok, true);
-  assert.equal(oracleResult.output, 'public final');
-  assert.equal(oracleUpdates.some((update) => update.content[0].text.includes('private reasoning')), false);
+  assert.equal(oracleResult.output, "public final");
+  assert.equal(
+    oracleUpdates.some((update) => update.content[0].text.includes("private reasoning")),
+    false,
+  );
 
-  const contrarian = await loadRoleTestUtils('contrarian');
-  const contrarianSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, events); } }]);
-  const contrarianResult = await contrarian.runContrarian(selection, { task: 'inspect' }, undefined, undefined, '/repo', contrarianSpawn.spawnImpl);
+  const contrarian = await loadRoleTestUtils("contrarian");
+  const contrarianSpawn = createSpawnQueue([
+    {
+      start(proc) {
+        emitJsonLines(proc, events);
+      },
+    },
+  ]);
+  const contrarianResult = await contrarian.runContrarian(
+    selection,
+    { task: "inspect" },
+    undefined,
+    undefined,
+    "/repo",
+    contrarianSpawn.spawnImpl,
+  );
   assert.equal(contrarianResult.ok, true);
-  assert.equal(contrarianResult.output, 'public final');
+  assert.equal(contrarianResult.output, "public final");
 
   const missingFinalEvents = [
-    { type: 'message_start', message: { role: 'assistant', content: [] } },
-    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'stale answer' } },
-    { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'stop' } },
-    { type: 'message_start', message: { role: 'assistant', content: [] } },
-    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'read' }], stopReason: 'toolUse' } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "stale answer" },
+    },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read" }],
+        stopReason: "toolUse",
+      },
+    },
   ];
-  const missingSpawn = createSpawnQueue([{ start(proc) { emitJsonLines(proc, missingFinalEvents); } }]);
-  const missingResult = await oracle.runOracle(selection, { task: 'inspect' }, undefined, undefined, '/repo', missingSpawn.spawnImpl);
+  const missingSpawn = createSpawnQueue([
+    {
+      start(proc) {
+        emitJsonLines(proc, missingFinalEvents);
+      },
+    },
+  ]);
+  const missingResult = await oracle.runOracle(
+    selection,
+    { task: "inspect" },
+    undefined,
+    undefined,
+    "/repo",
+    missingSpawn.spawnImpl,
+  );
   assert.equal(missingResult.ok, false);
   assert.match(missingResult.error, /without returning any text/);
 });
 
-test('oracle cancellation only escalates to SIGKILL when the child stays alive past the grace period', async (t) => {
-  const { runOracle } = await loadRoleTestUtils('oracle');
+test("oracle cancellation only escalates to SIGKILL when the child stays alive past the grace period", async (t) => {
+  const { runOracle } = await loadRoleTestUtils("oracle");
   const selection = {
-    modelRef: 'anthropic/claude-sonnet-5',
-    provider: 'anthropic',
-    modelId: 'claude-sonnet-5',
-    thinkingLevel: 'xhigh',
+    modelRef: "anthropic/claude-sonnet-5",
+    provider: "anthropic",
+    modelId: "claude-sonnet-5",
+    thinkingLevel: "xhigh",
     autoSelected: true,
-    selectionReason: 'test',
+    selectionReason: "test",
   };
 
   await withFakeTimers(t, async (timers) => {
@@ -373,68 +571,91 @@ test('oracle cancellation only escalates to SIGKILL when the child stays alive p
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGTERM') process.nextTick(() => endProcess(proc, { code: 143, signalCode: 'SIGTERM' }));
+          if (signal === "SIGTERM")
+            process.nextTick(() => endProcess(proc, { code: 143, signalCode: "SIGTERM" }));
         },
       },
     ]);
     const gracefulController = new AbortController();
     gracefulController.abort();
-    const gracefulResult = await runOracle(selection, { task: 'cancel' }, gracefulController.signal, undefined, '/repo', graceful.spawnImpl);
+    const gracefulResult = await runOracle(
+      selection,
+      { task: "cancel" },
+      gracefulController.signal,
+      undefined,
+      "/repo",
+      graceful.spawnImpl,
+    );
     assert.equal(gracefulResult.ok, false);
-    assert.deepEqual(graceful.calls[0].killSignals, ['SIGTERM']);
+    assert.deepEqual(graceful.calls[0].killSignals, ["SIGTERM"]);
     assert.equal(timers[0].cleared, true);
 
     const exitBeforeClose = createSpawnQueue([
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGTERM') {
+          if (signal === "SIGTERM") {
             proc.exitCode = 143;
-            proc.signalCode = 'SIGTERM';
-            process.nextTick(() => proc.emit('exit', 143, 'SIGTERM'));
-            process.nextTick(() => process.nextTick(() => proc.emit('close', 143, 'SIGTERM')));
+            proc.signalCode = "SIGTERM";
+            process.nextTick(() => proc.emit("exit", 143, "SIGTERM"));
+            process.nextTick(() => process.nextTick(() => proc.emit("close", 143, "SIGTERM")));
           }
         },
       },
     ]);
     const exitBeforeCloseController = new AbortController();
     exitBeforeCloseController.abort();
-    const exitBeforeClosePromise = runOracle(selection, { task: 'cancel' }, exitBeforeCloseController.signal, undefined, '/repo', exitBeforeClose.spawnImpl);
+    const exitBeforeClosePromise = runOracle(
+      selection,
+      { task: "cancel" },
+      exitBeforeCloseController.signal,
+      undefined,
+      "/repo",
+      exitBeforeClose.spawnImpl,
+    );
     await Promise.resolve();
     const exitBeforeCloseResult = await exitBeforeClosePromise;
     assert.equal(exitBeforeCloseResult.ok, false);
-    assert.deepEqual(exitBeforeClose.calls[0].killSignals, ['SIGTERM']);
+    assert.deepEqual(exitBeforeClose.calls[0].killSignals, ["SIGTERM"]);
     assert.equal(timers.length, 1);
 
     const forced = createSpawnQueue([
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGKILL') process.nextTick(() => endProcess(proc, { code: 137, signalCode: 'SIGKILL' }));
+          if (signal === "SIGKILL")
+            process.nextTick(() => endProcess(proc, { code: 137, signalCode: "SIGKILL" }));
         },
       },
     ]);
     const forcedController = new AbortController();
     forcedController.abort();
-    const forcedPromise = runOracle(selection, { task: 'cancel' }, forcedController.signal, undefined, '/repo', forced.spawnImpl);
+    const forcedPromise = runOracle(
+      selection,
+      { task: "cancel" },
+      forcedController.signal,
+      undefined,
+      "/repo",
+      forced.spawnImpl,
+    );
     await Promise.resolve();
     timers[1].fn();
     const forcedResult = await forcedPromise;
     assert.equal(forcedResult.ok, false);
-    assert.deepEqual(forced.calls[0].killSignals, ['SIGTERM', 'SIGKILL']);
+    assert.deepEqual(forced.calls[0].killSignals, ["SIGTERM", "SIGKILL"]);
     assert.equal(timers[1].cleared, true);
   });
 });
 
-test('contrarian cancellation only escalates to SIGKILL when the child stays alive past the grace period', async (t) => {
-  const { runContrarian } = await loadRoleTestUtils('contrarian');
+test("contrarian cancellation only escalates to SIGKILL when the child stays alive past the grace period", async (t) => {
+  const { runContrarian } = await loadRoleTestUtils("contrarian");
   const selection = {
-    modelRef: 'anthropic/claude-sonnet-5',
-    provider: 'anthropic',
-    modelId: 'claude-sonnet-5',
-    thinkingLevel: 'high',
+    modelRef: "anthropic/claude-sonnet-5",
+    provider: "anthropic",
+    modelId: "claude-sonnet-5",
+    thinkingLevel: "high",
     autoSelected: true,
-    selectionReason: 'test',
+    selectionReason: "test",
   };
 
   await withFakeTimers(t, async (timers) => {
@@ -442,55 +663,78 @@ test('contrarian cancellation only escalates to SIGKILL when the child stays ali
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGTERM') process.nextTick(() => endProcess(proc, { code: 143, signalCode: 'SIGTERM' }));
+          if (signal === "SIGTERM")
+            process.nextTick(() => endProcess(proc, { code: 143, signalCode: "SIGTERM" }));
         },
       },
     ]);
     const gracefulController = new AbortController();
     gracefulController.abort();
-    const gracefulResult = await runContrarian(selection, { task: 'cancel' }, gracefulController.signal, undefined, '/repo', graceful.spawnImpl);
+    const gracefulResult = await runContrarian(
+      selection,
+      { task: "cancel" },
+      gracefulController.signal,
+      undefined,
+      "/repo",
+      graceful.spawnImpl,
+    );
     assert.equal(gracefulResult.ok, false);
-    assert.deepEqual(graceful.calls[0].killSignals, ['SIGTERM']);
+    assert.deepEqual(graceful.calls[0].killSignals, ["SIGTERM"]);
     assert.equal(timers[0].cleared, true);
 
     const exitBeforeClose = createSpawnQueue([
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGTERM') {
+          if (signal === "SIGTERM") {
             proc.exitCode = 143;
-            proc.signalCode = 'SIGTERM';
-            process.nextTick(() => proc.emit('exit', 143, 'SIGTERM'));
-            process.nextTick(() => process.nextTick(() => proc.emit('close', 143, 'SIGTERM')));
+            proc.signalCode = "SIGTERM";
+            process.nextTick(() => proc.emit("exit", 143, "SIGTERM"));
+            process.nextTick(() => process.nextTick(() => proc.emit("close", 143, "SIGTERM")));
           }
         },
       },
     ]);
     const exitBeforeCloseController = new AbortController();
     exitBeforeCloseController.abort();
-    const exitBeforeClosePromise = runContrarian(selection, { task: 'cancel' }, exitBeforeCloseController.signal, undefined, '/repo', exitBeforeClose.spawnImpl);
+    const exitBeforeClosePromise = runContrarian(
+      selection,
+      { task: "cancel" },
+      exitBeforeCloseController.signal,
+      undefined,
+      "/repo",
+      exitBeforeClose.spawnImpl,
+    );
     await Promise.resolve();
     const exitBeforeCloseResult = await exitBeforeClosePromise;
     assert.equal(exitBeforeCloseResult.ok, false);
-    assert.deepEqual(exitBeforeClose.calls[0].killSignals, ['SIGTERM']);
+    assert.deepEqual(exitBeforeClose.calls[0].killSignals, ["SIGTERM"]);
     assert.equal(timers.length, 1);
 
     const forced = createSpawnQueue([
       {
         start() {},
         onKill(signal, proc) {
-          if (signal === 'SIGKILL') process.nextTick(() => endProcess(proc, { code: 137, signalCode: 'SIGKILL' }));
+          if (signal === "SIGKILL")
+            process.nextTick(() => endProcess(proc, { code: 137, signalCode: "SIGKILL" }));
         },
       },
     ]);
     const forcedController = new AbortController();
     forcedController.abort();
-    const forcedPromise = runContrarian(selection, { task: 'cancel' }, forcedController.signal, undefined, '/repo', forced.spawnImpl);
+    const forcedPromise = runContrarian(
+      selection,
+      { task: "cancel" },
+      forcedController.signal,
+      undefined,
+      "/repo",
+      forced.spawnImpl,
+    );
     await Promise.resolve();
     timers[1].fn();
     const forcedResult = await forcedPromise;
     assert.equal(forcedResult.ok, false);
-    assert.deepEqual(forced.calls[0].killSignals, ['SIGTERM', 'SIGKILL']);
+    assert.deepEqual(forced.calls[0].killSignals, ["SIGTERM", "SIGKILL"]);
     assert.equal(timers[1].cleared, true);
   });
 });

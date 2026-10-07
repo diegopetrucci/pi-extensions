@@ -1,19 +1,19 @@
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import ts from 'typescript';
+import ts from "typescript";
 
 const testSupportDir = path.dirname(fileURLToPath(import.meta.url));
-const testDir = path.resolve(testSupportDir, '..');
-export const repoRoot = path.resolve(testDir, '..');
+const testDir = path.resolve(testSupportDir, "..");
+export const repoRoot = path.resolve(testDir, "..");
 
 const roleModulePaths = {
-  oracle: 'extensions/oracle/index.ts',
-  contrarian: 'extensions/contrarian/index.ts',
-  'code-reviewer': 'extensions/code-reviewer/index.ts',
-  librarian: 'extensions/librarian/index.ts',
+  oracle: "extensions/oracle/index.ts",
+  contrarian: "extensions/contrarian/index.ts",
+  "code-reviewer": "extensions/code-reviewer/index.ts",
+  librarian: "extensions/librarian/index.ts",
 };
 
 export function createModelSelectionContext({ model, available = [], scopedModels } = {}) {
@@ -38,12 +38,23 @@ export async function loadRoleTestUtils(role) {
 
 export function extractConst(relativeFilePath, constName) {
   const filePath = path.join(repoRoot, relativeFilePath);
-  const source = fs.readFileSync(filePath, 'utf8');
-  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const source = fs.readFileSync(filePath, "utf8");
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== constName || !declaration.initializer) continue;
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        declaration.name.text !== constName ||
+        !declaration.initializer
+      )
+        continue;
       return Function(`return (${declaration.initializer.getText(sourceFile)});`)();
     }
   }
@@ -51,9 +62,9 @@ export function extractConst(relativeFilePath, constName) {
 }
 
 export function parseOracleProviderMatrix() {
-  const markdown = fs.readFileSync(path.join(repoRoot, 'docs/oracle-provider-matrix.md'), 'utf8');
+  const markdown = fs.readFileSync(path.join(repoRoot, "docs/oracle-provider-matrix.md"), "utf8");
   const rows = [];
-  for (const line of markdown.split('\n')) {
+  for (const line of markdown.split("\n")) {
     const match = /^\| `([^`]+)` \| `([^`]+)` \|/.exec(line.trim());
     if (match) rows.push({ provider: match[1], topPick: match[2] });
   }
@@ -64,40 +75,89 @@ export const PROVIDER_POLICY_CONTRACT = {
   catalogParity: {
     providerPreferenceConstants: [
       {
-        label: 'oracle-provider-preferences',
-        source: { file: 'extensions/oracle/index.ts', constName: 'PROVIDER_MODEL_PREFERENCES' },
-        parity: [{ file: 'extensions/contrarian/index.ts', constName: 'PROVIDER_MODEL_PREFERENCES' }],
+        label: "oracle-provider-preferences",
+        source: { file: "extensions/oracle/index.ts", constName: "PROVIDER_MODEL_PREFERENCES" },
+        parity: [
+          { file: "extensions/contrarian/index.ts", constName: "PROVIDER_MODEL_PREFERENCES" },
+        ],
       },
     ],
     frontierPreferenceConstants: [
       {
-        label: 'cross-provider-frontier-preferences',
-        source: { file: 'extensions/contrarian/index.ts', constName: 'CONTRARIAN_MODEL_PREFERENCES' },
-        parity: [{ file: 'extensions/code-reviewer/index.ts', constName: 'CODE_REVIEWER_MODEL_PREFERENCES' }],
+        label: "cross-provider-frontier-preferences",
+        source: {
+          file: "extensions/contrarian/index.ts",
+          constName: "CONTRARIAN_MODEL_PREFERENCES",
+        },
+        parity: [
+          {
+            file: "extensions/code-reviewer/index.ts",
+            constName: "CODE_REVIEWER_MODEL_PREFERENCES",
+          },
+        ],
       },
     ],
   },
   orderingAndFallbackCases: [
     {
-      role: 'oracle',
-      method: 'selectOracleModel',
-      description: 'Oracle stays on the current provider, prefers GPT-6.1 Sol before older Sol, and defaults Sol to high thinking',
+      role: "oracle",
+      method: "selectOracleModel",
+      description:
+        "Oracle stays on the current provider, prefers GPT-6.1 Sol before older Sol, and defaults Sol to high thinking",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.4', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.4", reasoning: true },
         scopedModels: [],
         available: [
-          { provider: 'openai', id: 'gpt-5.5', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
-          { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
-          { provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
-          { provider: 'openai', id: 'gpt-6.1-sol', reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: {}, medium: {}, high: {}, xhigh: {}, max: {} } },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } },
+          {
+            provider: "openai",
+            id: "gpt-5.5",
+            reasoning: true,
+            thinkingLevelMap: { high: {}, xhigh: {} },
+          },
+          {
+            provider: "openai",
+            id: "gpt-5.5-pro",
+            reasoning: true,
+            thinkingLevelMap: { high: {}, xhigh: {} },
+          },
+          {
+            provider: "openai",
+            id: "gpt-5.6-sol",
+            reasoning: true,
+            thinkingLevelMap: { high: {}, xhigh: {} },
+          },
+          {
+            provider: "openai",
+            id: "gpt-6.1-sol",
+            reasoning: true,
+            thinkingLevelMap: {
+              off: null,
+              minimal: null,
+              low: {},
+              medium: {},
+              high: {},
+              xhigh: {},
+              max: {},
+            },
+          },
+          {
+            provider: "anthropic",
+            id: "claude-opus-4.8",
+            reasoning: true,
+            thinkingLevelMap: { high: {}, xhigh: {} },
+          },
         ],
       },
       expected: {
-        selectionModelRef: 'openai/gpt-6.1-sol',
-        orderedModelRefs: ['openai/gpt-6.1-sol', 'openai/gpt-5.6-sol', 'openai/gpt-5.5-pro', 'openai/gpt-5.5'],
+        selectionModelRef: "openai/gpt-6.1-sol",
+        orderedModelRefs: [
+          "openai/gpt-6.1-sol",
+          "openai/gpt-5.6-sol",
+          "openai/gpt-5.5-pro",
+          "openai/gpt-5.5",
+        ],
         selectionProperties: {
-          thinkingLevel: 'high',
+          thinkingLevel: "high",
           requestedThinkingLevel: undefined,
           thinkingLevelClamped: undefined,
           autoSelected: true,
@@ -106,73 +166,90 @@ export const PROVIDER_POLICY_CONTRACT = {
       },
     },
     {
-      role: 'oracle',
-      method: 'selectOracleModel',
-      description: 'Oracle prefers Claude Opus 5 over older Claude frontier models on providers that expose it',
+      role: "oracle",
+      method: "selectOracleModel",
+      description:
+        "Oracle prefers Claude Opus 5 over older Claude frontier models on providers that expose it",
       ctx: {
-        model: { provider: 'anthropic', id: 'claude-sonnet-5', reasoning: true },
+        model: { provider: "anthropic", id: "claude-sonnet-5", reasoning: true },
         scopedModels: [],
         available: [
-          { provider: 'anthropic', id: 'claude-fable-5', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-4-8', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "anthropic", id: "claude-fable-5", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4-8", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
       },
       expected: {
-        selectionModelRef: 'anthropic/claude-opus-5',
-        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4-8', 'anthropic/claude-fable-5'],
-        selectionProperties: { thinkingLevel: 'high', autoSelected: true },
+        selectionModelRef: "anthropic/claude-opus-5",
+        orderedModelRefs: [
+          "anthropic/claude-opus-5",
+          "anthropic/claude-opus-4-8",
+          "anthropic/claude-fable-5",
+        ],
+        selectionProperties: { thinkingLevel: "high", autoSelected: true },
         selectionReason: /hardcoded preference list for anthropic/i,
       },
     },
     {
-      role: 'contrarian',
-      method: 'selectContrarianModel',
-      description: 'Contrarian stops at the first non-empty opposite-provider reasoning frontier tier and prefers Claude Opus 5',
+      role: "contrarian",
+      method: "selectContrarianModel",
+      description:
+        "Contrarian stops at the first non-empty opposite-provider reasoning frontier tier and prefers Claude Opus 5",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         scopedModels: [],
         available: [
-          { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-          { provider: 'anthropic', id: 'claude-sonnet-4.6', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
+          { provider: "anthropic", id: "claude-sonnet-4.6", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
       },
       expected: {
-        selectionModelRef: 'anthropic/claude-opus-5',
-        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-4.6'],
-        selectionProperties: { thinkingLevel: 'high', autoSelected: true },
+        selectionModelRef: "anthropic/claude-opus-5",
+        orderedModelRefs: [
+          "anthropic/claude-opus-5",
+          "anthropic/claude-opus-4.8",
+          "anthropic/claude-sonnet-4.6",
+        ],
+        selectionProperties: { thinkingLevel: "high", autoSelected: true },
         selectionReason: /opposite provider\/model family/i,
       },
     },
     {
-      role: 'code-reviewer',
-      method: 'selectCodeReviewerModel',
-      description: 'Code Reviewer keeps exhaustive fallback tiers after preferring Claude Opus 5 as its contrarian frontier candidate',
+      role: "code-reviewer",
+      method: "selectCodeReviewerModel",
+      description:
+        "Code Reviewer keeps exhaustive fallback tiers after preferring Claude Opus 5 as its contrarian frontier candidate",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         scopedModels: [],
         available: [
-          { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
-          { provider: 'openai', id: 'gpt-5.5-mini', reasoning: false },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
+          { provider: "openai", id: "gpt-5.5-mini", reasoning: false },
+          { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
       },
       expected: {
-        selectionModelRef: 'anthropic/claude-opus-5',
-        orderedModelRefs: ['anthropic/claude-opus-5', 'anthropic/claude-opus-4.8', 'openai/gpt-5.5-pro', 'openai/gpt-5.5-mini'],
+        selectionModelRef: "anthropic/claude-opus-5",
+        orderedModelRefs: [
+          "anthropic/claude-opus-5",
+          "anthropic/claude-opus-4.8",
+          "openai/gpt-5.5-pro",
+          "openai/gpt-5.5-mini",
+        ],
       },
     },
     {
-      role: 'librarian',
-      method: 'buildLibrarianCandidates',
-      description: 'Librarian auto-selects the fast/cheap path first and keeps the current model as the final fallback',
+      role: "librarian",
+      method: "buildLibrarianCandidates",
+      description:
+        "Librarian auto-selects the fast/cheap path first and keeps the current model as the final fallback",
       ctx: {
         model: {
-          provider: 'openai',
-          id: 'gpt-5.5-pro',
+          provider: "openai",
+          id: "gpt-5.5-pro",
           reasoning: true,
           cost: { input: 5, output: 15 },
           contextWindow: 200000,
@@ -180,19 +257,19 @@ export const PROVIDER_POLICY_CONTRACT = {
         scopedModels: [],
         available: [
           {
-            provider: 'anthropic',
-            id: 'claude-haiku-4-5',
-            name: 'Claude Haiku 4.5',
+            provider: "anthropic",
+            id: "claude-haiku-4-5",
+            name: "Claude Haiku 4.5",
             reasoning: false,
             cost: { input: 1, output: 1 },
             contextWindow: 200000,
           },
         ],
       },
-      args: ['openai/gpt-5.5-mini', 'low'],
+      args: ["openai/gpt-5.5-mini", "low"],
       expected: {
-        orderedModelRefs: ['anthropic/claude-haiku-4-5', 'openai/gpt-5.5-pro'],
-        thinkingLevels: ['off', 'low'],
+        orderedModelRefs: ["anthropic/claude-haiku-4-5", "openai/gpt-5.5-pro"],
+        thinkingLevels: ["off", "low"],
         firstCandidateProperties: { autoSelected: true },
         selectionReasons: [
           /preferred fast Librarian model.*Configured model openai\/gpt-5\.5-mini was unavailable, so Librarian fell back to auto-selection\./i,
@@ -203,362 +280,503 @@ export const PROVIDER_POLICY_CONTRACT = {
   ],
   scopedModelSelectionCases: [
     {
-      role: 'oracle',
-      method: 'selectOracleModel',
+      role: "oracle",
+      method: "selectOracleModel",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'custom', id: 'small', reasoning: false },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "custom", id: "small", reasoning: false },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
-        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+        scopedModels: [{ model: { provider: "custom", id: "small", reasoning: false } }],
       },
-      expectedModelRefs: ['custom/small'],
+      expectedModelRefs: ["custom/small"],
     },
     {
-      role: 'contrarian',
-      method: 'selectContrarianModel',
+      role: "contrarian",
+      method: "selectContrarianModel",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'custom', id: 'small', reasoning: false },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "custom", id: "small", reasoning: false },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
-        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+        scopedModels: [{ model: { provider: "custom", id: "small", reasoning: false } }],
       },
-      expectedModelRefs: ['custom/small'],
+      expectedModelRefs: ["custom/small"],
     },
     {
-      role: 'code-reviewer',
-      method: 'selectCodeReviewerModel',
+      role: "code-reviewer",
+      method: "selectCodeReviewerModel",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'custom', id: 'small', reasoning: false },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true },
+          { provider: "custom", id: "small", reasoning: false },
+          { provider: "anthropic", id: "claude-opus-5", reasoning: true },
         ],
-        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+        scopedModels: [{ model: { provider: "custom", id: "small", reasoning: false } }],
       },
-      expectedModelRefs: ['custom/small'],
+      expectedModelRefs: ["custom/small"],
     },
     {
-      role: 'librarian',
-      method: 'buildLibrarianCandidates',
-      args: [undefined, 'low'],
+      role: "librarian",
+      method: "buildLibrarianCandidates",
+      args: [undefined, "low"],
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'custom', id: 'small', reasoning: false, cost: { input: 1, output: 1 } },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true, cost: { input: 5, output: 10 } },
+          { provider: "custom", id: "small", reasoning: false, cost: { input: 1, output: 1 } },
+          {
+            provider: "anthropic",
+            id: "claude-opus-5",
+            reasoning: true,
+            cost: { input: 5, output: 10 },
+          },
         ],
-        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+        scopedModels: [{ model: { provider: "custom", id: "small", reasoning: false } }],
       },
-      expectedModelRefs: ['custom/small'],
+      expectedModelRefs: ["custom/small"],
     },
     {
-      role: 'librarian',
-      method: 'buildLibrarianCandidates',
-      args: ['anthropic/claude-opus-5', 'low'],
+      role: "librarian",
+      method: "buildLibrarianCandidates",
+      args: ["anthropic/claude-opus-5", "low"],
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'custom', id: 'small', reasoning: false, cost: { input: 1, output: 1 } },
-          { provider: 'anthropic', id: 'claude-opus-5', reasoning: true, cost: { input: 5, output: 10 } },
+          { provider: "custom", id: "small", reasoning: false, cost: { input: 1, output: 1 } },
+          {
+            provider: "anthropic",
+            id: "claude-opus-5",
+            reasoning: true,
+            cost: { input: 5, output: 10 },
+          },
         ],
-        scopedModels: [{ model: { provider: 'custom', id: 'small', reasoning: false } }],
+        scopedModels: [{ model: { provider: "custom", id: "small", reasoning: false } }],
       },
-      expectedModelRefs: ['anthropic/claude-opus-5', 'custom/small'],
+      expectedModelRefs: ["anthropic/claude-opus-5", "custom/small"],
     },
   ],
   emptyScopedModelSelectionCases: [
     {
-      role: 'oracle',
-      type: 'result',
-      method: 'selectOracleModel',
-      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+      role: "oracle",
+      type: "result",
+      method: "selectOracleModel",
+      expected: {
+        ok: false,
+        error:
+          "No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.",
+      },
     },
     {
-      role: 'contrarian',
-      type: 'result',
-      method: 'selectContrarianModel',
-      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+      role: "contrarian",
+      type: "result",
+      method: "selectContrarianModel",
+      expected: {
+        ok: false,
+        error:
+          "No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.",
+      },
     },
     {
-      role: 'code-reviewer',
-      type: 'result',
-      method: 'selectCodeReviewerModel',
-      expected: { ok: false, error: 'No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.' },
+      role: "code-reviewer",
+      type: "result",
+      method: "selectCodeReviewerModel",
+      expected: {
+        ok: false,
+        error:
+          "No authenticated models are available in the current session model scope. Adjust the scope, log in, or configure an API key.",
+      },
     },
     {
-      role: 'librarian',
-      type: 'throws',
-      method: 'buildLibrarianCandidates',
-      args: [undefined, 'low'],
-      expectedMessage: 'No authenticated models are available for Librarian in the current session model scope. Adjust the scope, log in, or configure an API key.',
+      role: "librarian",
+      type: "throws",
+      method: "buildLibrarianCandidates",
+      args: [undefined, "low"],
+      expectedMessage:
+        "No authenticated models are available for Librarian in the current session model scope. Adjust the scope, log in, or configure an API key.",
     },
   ],
   parseModelPreferenceCases: [
     {
-      roles: ['oracle', 'contrarian'],
+      roles: ["oracle", "contrarian"],
       assertions: [
         {
-          input: ' anthropic/claude-opus-4.8:medium ',
-          expected: { model: 'anthropic/claude-opus-4.8', thinkingLevel: 'medium' },
+          input: " anthropic/claude-opus-4.8:medium ",
+          expected: { model: "anthropic/claude-opus-4.8", thinkingLevel: "medium" },
         },
         {
-          input: ' openai/gpt-5.5-pro:xhigh ',
-          expected: { model: 'openai/gpt-5.5-pro', thinkingLevel: 'xhigh' },
+          input: " openai/gpt-5.5-pro:xhigh ",
+          expected: { model: "openai/gpt-5.5-pro", thinkingLevel: "xhigh" },
         },
         {
-          input: 'openai/gpt-5.5-pro:max',
-          expected: { model: 'openai/gpt-5.5-pro', thinkingLevel: 'max' },
+          input: "openai/gpt-5.5-pro:max",
+          expected: { model: "openai/gpt-5.5-pro", thinkingLevel: "max" },
         },
         {
-          input: 'openai/gpt-5.5-pro',
-          expected: { model: 'openai/gpt-5.5-pro' },
+          input: "openai/gpt-5.5-pro",
+          expected: { model: "openai/gpt-5.5-pro" },
         },
       ],
     },
   ],
   exactProviderQualifiedMatchingCases: [
     {
-      role: 'oracle',
-      requestedModelRef: 'anthropic/claude-opus-4.8',
+      role: "oracle",
+      requestedModelRef: "anthropic/claude-opus-4.8",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'anthropic', id: 'claude-opus-4.8-fast', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4.8-fast", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
         ],
-        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5', reasoning: true } }],
+        scopedModels: [{ model: { provider: "openai", id: "gpt-5.5", reasoning: true } }],
       },
-      expectedModelRef: 'anthropic/claude-opus-4.8',
+      expectedModelRef: "anthropic/claude-opus-4.8",
     },
     {
-      role: 'contrarian',
-      requestedModelRef: 'anthropic/claude-opus-4.8',
+      role: "contrarian",
+      requestedModelRef: "anthropic/claude-opus-4.8",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5", reasoning: true },
         available: [
-          { provider: 'anthropic', id: 'claude-opus-4.8-fast', reasoning: true },
-          { provider: 'anthropic', id: 'claude-opus-4.8', reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4.8-fast", reasoning: true },
+          { provider: "anthropic", id: "claude-opus-4.8", reasoning: true },
         ],
-        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5', reasoning: true } }],
+        scopedModels: [{ model: { provider: "openai", id: "gpt-5.5", reasoning: true } }],
       },
-      expectedModelRef: 'anthropic/claude-opus-4.8',
+      expectedModelRef: "anthropic/claude-opus-4.8",
     },
     {
-      role: 'librarian',
-      requestedModelRef: 'anthropic/claude-haiku-4-5',
+      role: "librarian",
+      requestedModelRef: "anthropic/claude-haiku-4-5",
       ctx: {
-        model: { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true },
+        model: { provider: "openai", id: "gpt-5.5-pro", reasoning: true },
         available: [
-          { provider: 'anthropic', id: 'claude-haiku-4-5-fast', reasoning: false },
-          { provider: 'anthropic', id: 'claude-haiku-4-5', reasoning: false },
+          { provider: "anthropic", id: "claude-haiku-4-5-fast", reasoning: false },
+          { provider: "anthropic", id: "claude-haiku-4-5", reasoning: false },
         ],
-        scopedModels: [{ model: { provider: 'openai', id: 'gpt-5.5-pro', reasoning: true } }],
+        scopedModels: [{ model: { provider: "openai", id: "gpt-5.5-pro", reasoning: true } }],
       },
-      expectedModelRef: 'anthropic/claude-haiku-4-5',
+      expectedModelRef: "anthropic/claude-haiku-4-5",
     },
   ],
   noAuthenticatedModelCases: [
     {
-      role: 'oracle',
-      type: 'result',
-      method: 'selectOracleModel',
+      role: "oracle",
+      type: "result",
+      method: "selectOracleModel",
       ctx: {},
-      expected: { ok: false, error: 'No authenticated models are available. Log in or configure an API key first.' },
+      expected: {
+        ok: false,
+        error: "No authenticated models are available. Log in or configure an API key first.",
+      },
     },
     {
-      role: 'contrarian',
-      type: 'result',
-      method: 'selectContrarianModel',
+      role: "contrarian",
+      type: "result",
+      method: "selectContrarianModel",
       ctx: {},
-      expected: { ok: false, error: 'No authenticated models are available. Log in or configure an API key first.' },
+      expected: {
+        ok: false,
+        error: "No authenticated models are available. Log in or configure an API key first.",
+      },
     },
     {
-      role: 'code-reviewer',
-      type: 'result',
-      method: 'selectCodeReviewerModel',
+      role: "code-reviewer",
+      type: "result",
+      method: "selectCodeReviewerModel",
       ctx: {},
-      expected: { ok: false, error: 'No authenticated models are available. Log in or configure an API key first.' },
+      expected: {
+        ok: false,
+        error: "No authenticated models are available. Log in or configure an API key first.",
+      },
     },
     {
-      role: 'librarian',
-      type: 'throws',
-      method: 'buildLibrarianCandidates',
+      role: "librarian",
+      type: "throws",
+      method: "buildLibrarianCandidates",
       ctx: {},
-      args: [undefined, 'low'],
-      expectedMessage: 'No authenticated models are available for Librarian. Log in or configure an API key first.',
+      args: [undefined, "low"],
+      expectedMessage:
+        "No authenticated models are available for Librarian. Log in or configure an API key first.",
     },
   ],
   thinkingLevelCases: [
     {
-      role: 'oracle',
-      description: 'Oracle defaults GPT-5.6/GPT-6/GPT-6.1 Sol to high while other reasoning models default to xhigh',
-      method: 'resolveThinkingLevel',
-      assertions: [
-        {
-          args: [{ provider: 'openai', id: 'gpt-5.6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
-          expected: { requested: 'high', effective: 'high', clamped: false },
-        },
-        {
-          args: [{ provider: 'openai', id: 'gpt-6-sol', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
-          expected: { requested: 'high', effective: 'high', clamped: false },
-        },
-        {
-          args: [{ provider: 'openai', id: 'gpt-6.1-sol', reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: {}, high: {}, xhigh: {}, max: {} } }, undefined],
-          expected: { requested: 'high', effective: 'high', clamped: false },
-        },
-        {
-          args: [{ provider: 'openai', id: 'gpt-5.5-pro', reasoning: true, thinkingLevelMap: { high: {}, xhigh: {} } }, undefined],
-          expected: { requested: 'xhigh', effective: 'xhigh', clamped: false },
-        },
-      ],
-    },
-    {
-      role: 'contrarian',
-      description: 'Contrarian defaults to high and clamps unsupported requests down to the highest supported tier, including max',
-      method: 'resolveThinkingLevel',
+      role: "oracle",
+      description:
+        "Oracle defaults GPT-5.6/GPT-6/GPT-6.1 Sol to high while other reasoning models default to xhigh",
+      method: "resolveThinkingLevel",
       assertions: [
         {
           args: [
             {
-              provider: 'anthropic',
-              id: 'claude-opus-4.8',
+              provider: "openai",
+              id: "gpt-5.6-sol",
               reasoning: true,
-              thinkingLevelMap: { off: {}, minimal: {}, low: {}, medium: null, high: null, xhigh: null },
+              thinkingLevelMap: { high: {}, xhigh: {} },
             },
-            'high',
+            undefined,
           ],
-          expected: { requested: 'high', effective: 'low', clamped: true },
+          expected: { requested: "high", effective: "high", clamped: false },
         },
         {
           args: [
             {
-              provider: 'anthropic',
-              id: 'claude-opus-4.8',
+              provider: "openai",
+              id: "gpt-6-sol",
               reasoning: true,
-              thinkingLevelMap: { off: {}, minimal: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: {} },
+              thinkingLevelMap: { high: {}, xhigh: {} },
             },
-            'max',
+            undefined,
           ],
-          expected: { requested: 'max', effective: 'max', clamped: false },
+          expected: { requested: "high", effective: "high", clamped: false },
         },
         {
           args: [
             {
-              provider: 'anthropic',
-              id: 'claude-opus-4.8',
+              provider: "openai",
+              id: "gpt-6.1-sol",
               reasoning: true,
-              thinkingLevelMap: { off: {}, minimal: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: null },
+              thinkingLevelMap: { off: null, minimal: null, low: {}, high: {}, xhigh: {}, max: {} },
             },
-            'max',
+            undefined,
           ],
-          expected: { requested: 'max', effective: 'xhigh', clamped: true },
+          expected: { requested: "high", effective: "high", clamped: false },
+        },
+        {
+          args: [
+            {
+              provider: "openai",
+              id: "gpt-5.5-pro",
+              reasoning: true,
+              thinkingLevelMap: { high: {}, xhigh: {} },
+            },
+            undefined,
+          ],
+          expected: { requested: "xhigh", effective: "xhigh", clamped: false },
         },
       ],
     },
     {
-      role: 'code-reviewer',
-      description: 'Code Reviewer defaults to high for reasoning models, off for non-reasoning, and clamps max to xhigh when needed',
-      method: 'resolveThinkingLevel',
+      role: "contrarian",
+      description:
+        "Contrarian defaults to high and clamps unsupported requests down to the highest supported tier, including max",
+      method: "resolveThinkingLevel",
       assertions: [
         {
-          args: [{ provider: 'custom', id: 'solver-2', reasoning: true }, undefined],
-          expected: { requested: 'high', effective: 'high', clamped: false, note: 'defaulted to high' },
-        },
-        {
-          args: [{ provider: 'custom', id: 'solver-1', reasoning: false }, undefined],
-          expected: { requested: 'off', effective: 'off', clamped: false, note: 'defaulted to off for non-reasoning model' },
-        },
-        {
-          method: 'normalizeThinkingLevel',
-          args: ['max'],
-          expected: 'max',
+          args: [
+            {
+              provider: "anthropic",
+              id: "claude-opus-4.8",
+              reasoning: true,
+              thinkingLevelMap: {
+                off: {},
+                minimal: {},
+                low: {},
+                medium: null,
+                high: null,
+                xhigh: null,
+              },
+            },
+            "high",
+          ],
+          expected: { requested: "high", effective: "low", clamped: true },
         },
         {
           args: [
-            { provider: 'custom', id: 'solver-max', reasoning: true, thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: {} } },
-            'max',
+            {
+              provider: "anthropic",
+              id: "claude-opus-4.8",
+              reasoning: true,
+              thinkingLevelMap: {
+                off: {},
+                minimal: {},
+                low: {},
+                medium: {},
+                high: {},
+                xhigh: {},
+                max: {},
+              },
+            },
+            "max",
           ],
-          expected: { requested: 'max', effective: 'max', clamped: false, note: 'requested max' },
+          expected: { requested: "max", effective: "max", clamped: false },
         },
         {
           args: [
-            { provider: 'custom', id: 'solver-max', reasoning: true, thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: null } },
-            'max',
+            {
+              provider: "anthropic",
+              id: "claude-opus-4.8",
+              reasoning: true,
+              thinkingLevelMap: {
+                off: {},
+                minimal: {},
+                low: {},
+                medium: {},
+                high: {},
+                xhigh: {},
+                max: null,
+              },
+            },
+            "max",
           ],
-          expected: { requested: 'max', effective: 'xhigh', clamped: true, note: 'requested max; clamped to xhigh' },
+          expected: { requested: "max", effective: "xhigh", clamped: true },
         },
       ],
     },
     {
-      role: 'librarian',
-      description: 'Librarian defaults to low and preserves max only when the matched model supports it',
-      method: 'resolveThinkingLevel',
+      role: "code-reviewer",
+      description:
+        "Code Reviewer defaults to high for reasoning models, off for non-reasoning, and clamps max to xhigh when needed",
+      method: "resolveThinkingLevel",
       assertions: [
         {
-          args: [{ provider: 'custom', id: 'researcher', reasoning: true, thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: {} } }, 'low'],
-          expected: 'low',
+          args: [{ provider: "custom", id: "solver-2", reasoning: true }, undefined],
+          expected: {
+            requested: "high",
+            effective: "high",
+            clamped: false,
+            note: "defaulted to high",
+          },
         },
         {
-          args: [{ provider: 'custom', id: 'researcher', reasoning: true, thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: {} } }, 'max'],
-          expected: 'max',
+          args: [{ provider: "custom", id: "solver-1", reasoning: false }, undefined],
+          expected: {
+            requested: "off",
+            effective: "off",
+            clamped: false,
+            note: "defaulted to off for non-reasoning model",
+          },
         },
         {
-          args: [{ provider: 'custom', id: 'researcher', reasoning: true, thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: null } }, 'max'],
-          expected: 'xhigh',
+          method: "normalizeThinkingLevel",
+          args: ["max"],
+          expected: "max",
+        },
+        {
+          args: [
+            {
+              provider: "custom",
+              id: "solver-max",
+              reasoning: true,
+              thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: {} },
+            },
+            "max",
+          ],
+          expected: { requested: "max", effective: "max", clamped: false, note: "requested max" },
+        },
+        {
+          args: [
+            {
+              provider: "custom",
+              id: "solver-max",
+              reasoning: true,
+              thinkingLevelMap: { off: {}, high: {}, xhigh: {}, max: null },
+            },
+            "max",
+          ],
+          expected: {
+            requested: "max",
+            effective: "xhigh",
+            clamped: true,
+            note: "requested max; clamped to xhigh",
+          },
+        },
+      ],
+    },
+    {
+      role: "librarian",
+      description:
+        "Librarian defaults to low and preserves max only when the matched model supports it",
+      method: "resolveThinkingLevel",
+      assertions: [
+        {
+          args: [
+            {
+              provider: "custom",
+              id: "researcher",
+              reasoning: true,
+              thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: {} },
+            },
+            "low",
+          ],
+          expected: "low",
+        },
+        {
+          args: [
+            {
+              provider: "custom",
+              id: "researcher",
+              reasoning: true,
+              thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: {} },
+            },
+            "max",
+          ],
+          expected: "max",
+        },
+        {
+          args: [
+            {
+              provider: "custom",
+              id: "researcher",
+              reasoning: true,
+              thinkingLevelMap: { off: {}, low: {}, high: {}, xhigh: {}, max: null },
+            },
+            "max",
+          ],
+          expected: "xhigh",
         },
       ],
     },
   ],
   availabilityErrorCases: [
     {
-      role: 'oracle',
-      method: 'isModelAvailabilityError',
+      role: "oracle",
+      method: "isModelAvailabilityError",
       messages: [
-        { message: '404 model_not_found_error: model does not exist', expected: true },
-        { message: '403 forbidden: you do not have access to this model', expected: true },
-        { message: '404 model unavailable after timeout', expected: false },
-        { message: 'rate limited, please retry later', expected: false },
-        { message: 'socket timeout after 30 seconds', expected: false },
+        { message: "404 model_not_found_error: model does not exist", expected: true },
+        { message: "403 forbidden: you do not have access to this model", expected: true },
+        { message: "404 model unavailable after timeout", expected: false },
+        { message: "rate limited, please retry later", expected: false },
+        { message: "socket timeout after 30 seconds", expected: false },
         { message: undefined, expected: false },
       ],
     },
     {
-      role: 'contrarian',
-      method: 'isModelAvailabilityError',
+      role: "contrarian",
+      method: "isModelAvailabilityError",
       messages: [
-        { message: '404 model_not_found_error: model does not exist', expected: true },
-        { message: '403 forbidden: you do not have access to this model', expected: true },
-        { message: '404 model unavailable after timeout', expected: false },
-        { message: 'rate limited, please retry later', expected: false },
-        { message: 'socket timeout after 30 seconds', expected: false },
+        { message: "404 model_not_found_error: model does not exist", expected: true },
+        { message: "403 forbidden: you do not have access to this model", expected: true },
+        { message: "404 model unavailable after timeout", expected: false },
+        { message: "rate limited, please retry later", expected: false },
+        { message: "socket timeout after 30 seconds", expected: false },
         { message: undefined, expected: false },
       ],
     },
     {
-      role: 'code-reviewer',
-      method: 'isModelAvailabilityError',
+      role: "code-reviewer",
+      method: "isModelAvailabilityError",
       messages: [
-        { message: '404 model_not_found_error: model does not exist', expected: true },
-        { message: '403 forbidden: you do not have access to this model', expected: true },
-        { message: '404 model unavailable after timeout', expected: true },
-        { message: 'rate limited, please retry later', expected: false },
-        { message: 'socket timeout after 30 seconds', expected: false },
+        { message: "404 model_not_found_error: model does not exist", expected: true },
+        { message: "403 forbidden: you do not have access to this model", expected: true },
+        { message: "404 model unavailable after timeout", expected: true },
+        { message: "rate limited, please retry later", expected: false },
+        { message: "socket timeout after 30 seconds", expected: false },
         { message: undefined, expected: false },
       ],
     },
     {
-      role: 'librarian',
-      method: 'isModelAvailabilityError',
+      role: "librarian",
+      method: "isModelAvailabilityError",
       messages: [
-        { message: '404 model_not_found_error: model does not exist', expected: true },
-        { message: '403 forbidden: you do not have access to this model', expected: true },
-        { message: '404 model unavailable after timeout', expected: true },
-        { message: 'rate limited, please retry later', expected: false },
-        { message: 'socket timeout after 30 seconds', expected: false },
+        { message: "404 model_not_found_error: model does not exist", expected: true },
+        { message: "403 forbidden: you do not have access to this model", expected: true },
+        { message: "404 model unavailable after timeout", expected: true },
+        { message: "rate limited, please retry later", expected: false },
+        { message: "socket timeout after 30 seconds", expected: false },
         { message: undefined, expected: false },
       ],
     },

@@ -1,44 +1,46 @@
 export interface LastAssistantMessageLine {
-	number: number;
-	text: string;
+  number: number;
+  text: string;
 }
 
 export interface LastAssistantMessageSection {
-	id: string;
-	index: number;
-	startLine: number;
-	endLine: number;
-	preview: string;
+  id: string;
+  index: number;
+  startLine: number;
+  endLine: number;
+  preview: string;
 }
 
 export interface LastAssistantMessageData {
-	lines: LastAssistantMessageLine[];
-	sections: LastAssistantMessageSection[];
+  lines: LastAssistantMessageLine[];
+  sections: LastAssistantMessageSection[];
 }
 
 export type LastAssistantMessageLookupResult =
-	| { ok: true; data: LastAssistantMessageData }
-	| { ok: false; code: "missing" | "incomplete" | "empty"; message: string };
+  | { ok: true; data: LastAssistantMessageData }
+  | { ok: false; code: "missing" | "incomplete" | "empty"; message: string };
 
 export interface AnnotateLastMessageInlineComment {
-	line: number;
-	body: string;
+  line: number;
+  body: string;
 }
 
 export interface AnnotateLastMessageSectionComment {
-	sectionId: string;
-	body: string;
+  sectionId: string;
+  body: string;
 }
 
 export interface AnnotateLastMessageSubmitPayload {
-	type: "submit";
-	overallComment: string;
-	inlineComments: AnnotateLastMessageInlineComment[];
-	sectionComments: AnnotateLastMessageSectionComment[];
+  type: "submit";
+  overallComment: string;
+  inlineComments: AnnotateLastMessageInlineComment[];
+  sectionComments: AnnotateLastMessageSectionComment[];
 }
 
 export interface AnnotateLastMessageCancelPayload {
-	type: "cancel";
+  type: "cancel";
 }
 
-export type AnnotateLastMessageWindowMessage = AnnotateLastMessageSubmitPayload | AnnotateLastMessageCancelPayload;
+export type AnnotateLastMessageWindowMessage =
+  | AnnotateLastMessageSubmitPayload
+  | AnnotateLastMessageCancelPayload;

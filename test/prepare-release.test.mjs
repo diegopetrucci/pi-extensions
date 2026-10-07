@@ -1,10 +1,10 @@
-import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import test from 'node:test';
-import { gzipSync } from 'node:zlib';
-import { prepareRelease, PUBLIC_REGISTRY } from '../scripts/prepare-release.mjs';
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { gzipSync } from "node:zlib";
+import { prepareRelease, PUBLIC_REGISTRY } from "../scripts/prepare-release.mjs";
 
 async function json(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -12,85 +12,124 @@ async function json(filePath, value) {
 }
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'prepare-release-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), "prepare-release-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await json(path.join(root, 'package.json'), { name: '@example/umbrella', version: '1.0.0', workspaces: ['packages/*'], dependencies: { 'plain-addon': '1.0.0' } });
-  await json(path.join(root, 'packages/a/package.json'), { name: '@example/a', version: '1.0.0', dependencies: { 'plain-addon': '1.0.0' }, peerDependencies: { 'plain-addon': '1.0.0' }, devDependencies: { 'plain-addon': '1.0.0' } });
-  await json(path.join(root, 'packages/b/package.json'), { name: 'plain-addon', version: '1.0.0' });
-  await json(path.join(root, 'package-lock.json'), { name: '@example/umbrella', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: '@example/umbrella', version: '1.0.0' }, 'packages/a': { name: '@example/a', version: '1.0.0' }, 'packages/b': { name: 'plain-addon', version: '1.0.0' } } });
-  const input = { releaseVersion: '1.1.0', versions: { '@example/umbrella': '1.1.0', '@example/a': '1.1.0', 'plain-addon': '1.1.0' }, fleetMarkers: { 'plain-addon': '0.80.6' } };
-  await json(path.join(root, 'release.json'), input);
+  await json(path.join(root, "package.json"), {
+    name: "@example/umbrella",
+    version: "1.0.0",
+    workspaces: ["packages/*"],
+    dependencies: { "plain-addon": "1.0.0" },
+  });
+  await json(path.join(root, "packages/a/package.json"), {
+    name: "@example/a",
+    version: "1.0.0",
+    dependencies: { "plain-addon": "1.0.0" },
+    peerDependencies: { "plain-addon": "1.0.0" },
+    devDependencies: { "plain-addon": "1.0.0" },
+  });
+  await json(path.join(root, "packages/b/package.json"), { name: "plain-addon", version: "1.0.0" });
+  await json(path.join(root, "package-lock.json"), {
+    name: "@example/umbrella",
+    version: "1.0.0",
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "@example/umbrella", version: "1.0.0" },
+      "packages/a": { name: "@example/a", version: "1.0.0" },
+      "packages/b": { name: "plain-addon", version: "1.0.0" },
+    },
+  });
+  const input = {
+    releaseVersion: "1.1.0",
+    versions: { "@example/umbrella": "1.1.0", "@example/a": "1.1.0", "plain-addon": "1.1.0" },
+    fleetMarkers: { "plain-addon": "0.80.6" },
+  };
+  await json(path.join(root, "release.json"), input);
   return { root, input };
 }
 
 function notFoundResult(notFoundOnStdout) {
-  const message = 'npm error code E404\nnpm error 404 Not Found';
+  const message = "npm error code E404\nnpm error 404 Not Found";
   return notFoundOnStdout
-    ? { code: 1, stdout: message, stderr: '' }
-    : { code: 1, stdout: '', stderr: message };
+    ? { code: 1, stdout: message, stderr: "" }
+    : { code: 1, stdout: "", stderr: message };
 }
 
-function mockRunner(root, {
-  local = {},
-  baseline = {},
-  localPayloads = {},
-  baselinePayloads = {},
-  artifactOverrides = {},
-  artifactDirectories = [],
-  target = {},
-  registryError,
-  installError,
-  staleTopLevel = false,
-  notFoundOnStdout = false,
-  calls = [],
-} = {}) {
+function mockRunner(
+  root,
+  {
+    local = {},
+    baseline = {},
+    localPayloads = {},
+    baselinePayloads = {},
+    artifactOverrides = {},
+    artifactDirectories = [],
+    target = {},
+    registryError,
+    installError,
+    staleTopLevel = false,
+    notFoundOnStdout = false,
+    calls = [],
+  } = {},
+) {
   return async (file, args, options = {}) => {
     calls.push({ file, args: [...args], cwd: options.cwd });
-    assert.equal(file, 'npm');
+    assert.equal(file, "npm");
     assert.ok(args.some((arg) => arg === `--registry=${PUBLIC_REGISTRY}`));
-    assert.ok(!args.includes('publish'), 'release preparation must never execute npm publish');
-    if (args[0] === 'install') {
-      assert.deepEqual(args, ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', `--registry=${PUBLIC_REGISTRY}`]);
-      const lockPath = path.join(root, 'package-lock.json');
-      const lock = JSON.parse(await readFile(lockPath, 'utf8'));
+    assert.ok(!args.includes("publish"), "release preparation must never execute npm publish");
+    if (args[0] === "install") {
+      assert.deepEqual(args, [
+        "install",
+        "--package-lock-only",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        `--registry=${PUBLIC_REGISTRY}`,
+      ]);
+      const lockPath = path.join(root, "package-lock.json");
+      const lock = JSON.parse(await readFile(lockPath, "utf8"));
       for (const key of Object.keys(lock.packages)) {
-        const manifestPath = key ? path.join(root, key, 'package.json') : path.join(root, 'package.json');
-        lock.packages[key].version = JSON.parse(await readFile(manifestPath, 'utf8')).version;
+        const manifestPath = key
+          ? path.join(root, key, "package.json")
+          : path.join(root, "package.json");
+        lock.packages[key].version = JSON.parse(await readFile(manifestPath, "utf8")).version;
       }
-      lock.version = staleTopLevel ? '0.0.0' : lock.packages[''].version;
+      lock.version = staleTopLevel ? "0.0.0" : lock.packages[""].version;
       await json(lockPath, lock);
-      if (installError) return { code: 1, stdout: '', stderr: installError };
-      return { code: 0, stdout: '', stderr: '' };
+      if (installError) return { code: 1, stdout: "", stderr: installError };
+      return { code: 0, stdout: "", stderr: "" };
     }
-    if (args[0] === 'view') {
+    if (args[0] === "view") {
       const spec = args[1];
-      if (registryError) return { code: 1, stdout: '', stderr: registryError };
-      if (target[spec] === 'published') return { code: 0, stdout: JSON.stringify(spec.split('@').at(-1)), stderr: '' };
+      if (registryError) return { code: 1, stdout: "", stderr: registryError };
+      if (target[spec] === "published")
+        return { code: 0, stdout: JSON.stringify(spec.split("@").at(-1)), stderr: "" };
       return notFoundResult(notFoundOnStdout);
     }
-    assert.equal(args[0], 'pack');
-    const dryRun = args.includes('--dry-run');
-    assert.ok(args.includes('--json') && args.includes('--ignore-scripts'));
-    if (!dryRun) assert.ok(args.includes('--pack-destination'));
-    const destinationIndex = args.indexOf('--pack-destination');
-    const spec = args.slice(1, destinationIndex === -1 ? args.length : destinationIndex)
-      .filter((arg) => !arg.startsWith('-')).at(-1);
+    assert.equal(args[0], "pack");
+    const dryRun = args.includes("--dry-run");
+    assert.ok(args.includes("--json") && args.includes("--ignore-scripts"));
+    if (!dryRun) assert.ok(args.includes("--pack-destination"));
+    const destinationIndex = args.indexOf("--pack-destination");
+    const spec = args
+      .slice(1, destinationIndex === -1 ? args.length : destinationIndex)
+      .filter((arg) => !arg.startsWith("-"))
+      .at(-1);
     let name;
     let shasum;
     if (spec) {
-      name = spec.slice(0, spec.lastIndexOf('@'));
-      if (baseline[name] === 'absent') return notFoundResult(notFoundOnStdout);
+      name = spec.slice(0, spec.lastIndexOf("@"));
+      if (baseline[name] === "absent") return notFoundResult(notFoundOnStdout);
       shasum = baseline[name] ?? `same:${name}`;
     } else {
-      const manifest = JSON.parse(await readFile(path.join(options.cwd, 'package.json'), 'utf8'));
+      const manifest = JSON.parse(await readFile(path.join(options.cwd, "package.json"), "utf8"));
       name = manifest.name;
       shasum = local[name] ?? `same:${name}`;
     }
-    const filename = `${name.replace(/^@/, '').replaceAll('/', '-')}-1.0.0.tgz`;
+    const filename = `${name.replace(/^@/, "").replaceAll("/", "-")}-1.0.0.tgz`;
     if (!dryRun) {
       const destination = args[destinationIndex + 1];
       artifactDirectories.push(destination);
-      const key = `${spec ? 'baseline' : 'local'}:${name}`;
+      const key = `${spec ? "baseline" : "local"}:${name}`;
       if (Object.prototype.hasOwnProperty.call(artifactOverrides, key)) {
         const artifact = artifactOverrides[key];
         if (artifact !== null) {
@@ -100,194 +139,280 @@ function mockRunner(root, {
       } else {
         await mkdir(destination, { recursive: true });
         const payload = spec
-          ? baselinePayloads[name] ?? `${shasum}\n`
-          : localPayloads[name] ?? `${shasum}\n`;
-        await writeFile(path.join(destination, filename), gzipSync(payload, { level: spec ? 1 : 9 }));
+          ? (baselinePayloads[name] ?? `${shasum}\n`)
+          : (localPayloads[name] ?? `${shasum}\n`);
+        await writeFile(
+          path.join(destination, filename),
+          gzipSync(payload, { level: spec ? 1 : 9 }),
+        );
       }
     }
     return {
       code: 0,
-      stdout: JSON.stringify([{ name, filename, shasum, size: 100 + name.length, unpackedSize: 200 + name.length, files: [{ path: 'package.json' }, { path: 'index.js' }] }]),
-      stderr: '',
+      stdout: JSON.stringify([
+        {
+          name,
+          filename,
+          shasum,
+          size: 100 + name.length,
+          unpackedSize: 200 + name.length,
+          files: [{ path: "package.json" }, { path: "index.js" }],
+        },
+      ]),
+      stderr: "",
     };
   };
 }
 
 const changedHashes = {
-  '@example/umbrella': 'changed-root-artifact',
-  '@example/a': 'changed-a-artifact',
-  'plain-addon': 'changed-unscoped-artifact',
+  "@example/umbrella": "changed-root-artifact",
+  "@example/a": "changed-a-artifact",
+  "plain-addon": "changed-unscoped-artifact",
 };
 
-test('dry-run selects packages by pack artifacts, includes root overlap, orders the DAG, and is stable', async (t) => {
+test("dry-run selects packages by pack artifacts, includes root overlap, orders the DAG, and is stable", async (t) => {
   const { root } = await fixture(t);
   const calls = [];
   const run = mockRunner(root, { local: changedHashes, calls });
-  const before = await readFile(path.join(root, 'package.json'), 'utf8');
-  const first = await prepareRelease({ cwd: path.join(root, 'packages/a'), inputPath: '../../release.json', run });
-  const second = await prepareRelease({ cwd: root, inputPath: 'release.json', run });
+  const before = await readFile(path.join(root, "package.json"), "utf8");
+  const first = await prepareRelease({
+    cwd: path.join(root, "packages/a"),
+    inputPath: "../../release.json",
+    run,
+  });
+  const second = await prepareRelease({ cwd: root, inputPath: "release.json", run });
   assert.deepEqual(first, second);
-  assert.equal(first.mode, 'dry-run');
-  assert.deepEqual(first.packages.map(({ name }) => name), ['plain-addon', '@example/a', '@example/umbrella']);
-  assert.ok(first.packages.every(({ size, unpackedSize, fileCount }) => size > 0 && unpackedSize > size && fileCount === 2));
-  assert.ok(first.documents.every(({ action }) => action === 'would-create'));
-  assert.equal(await readFile(path.join(root, 'package.json'), 'utf8'), before);
-  assert.ok(calls.every(({ args }) => !args.includes('publish') && !args.some((arg) => /token|commit|tag|push|release/.test(arg))));
+  assert.equal(first.mode, "dry-run");
+  assert.deepEqual(
+    first.packages.map(({ name }) => name),
+    ["plain-addon", "@example/a", "@example/umbrella"],
+  );
+  assert.ok(
+    first.packages.every(
+      ({ size, unpackedSize, fileCount }) => size > 0 && unpackedSize > size && fileCount === 2,
+    ),
+  );
+  assert.ok(first.documents.every(({ action }) => action === "would-create"));
+  assert.equal(await readFile(path.join(root, "package.json"), "utf8"), before);
+  assert.ok(
+    calls.every(
+      ({ args }) =>
+        !args.includes("publish") && !args.some((arg) => /token|commit|tag|push|release/.test(arg)),
+    ),
+  );
 });
 
-test('canonical tar payloads ignore recompression and select only genuinely changed packages', async (t) => {
+test("canonical tar payloads ignore recompression and select only genuinely changed packages", async (t) => {
   const { root } = await fixture(t);
   const artifactDirectories = [];
   const summary = await prepareRelease({
     cwd: root,
-    inputPath: 'release.json',
+    inputPath: "release.json",
     run: mockRunner(root, {
-      local: { '@example/a': 'local-a', 'plain-addon': 'local-addon' },
-      baseline: { '@example/a': 'registry-a', 'plain-addon': 'registry-addon' },
-      localPayloads: { '@example/a': 'same tar payload', 'plain-addon': 'local tar payload' },
-      baselinePayloads: { '@example/a': 'same tar payload', 'plain-addon': 'registry tar payload' },
+      local: { "@example/a": "local-a", "plain-addon": "local-addon" },
+      baseline: { "@example/a": "registry-a", "plain-addon": "registry-addon" },
+      localPayloads: { "@example/a": "same tar payload", "plain-addon": "local tar payload" },
+      baselinePayloads: { "@example/a": "same tar payload", "plain-addon": "registry tar payload" },
       artifactDirectories,
     }),
   });
-  assert.deepEqual(summary.packages.map(({ name }) => name), ['plain-addon']);
+  assert.deepEqual(
+    summary.packages.map(({ name }) => name),
+    ["plain-addon"],
+  );
   assert.equal(artifactDirectories.length, 4);
-  for (const directory of artifactDirectories) await assert.rejects(stat(directory), { code: 'ENOENT' });
+  for (const directory of artifactDirectories)
+    await assert.rejects(stat(directory), { code: "ENOENT" });
 });
 
-test('canonical registry tarball download failure aborts with a useful error', async (t) => {
+test("canonical registry tarball download failure aborts with a useful error", async (t) => {
   const { root } = await fixture(t);
   const artifactDirectories = [];
   const baseRun = mockRunner(root, {
-    local: { '@example/a': 'local-a' },
-    baseline: { '@example/a': 'registry-a' },
+    local: { "@example/a": "local-a" },
+    baseline: { "@example/a": "registry-a" },
     artifactDirectories,
   });
   await assert.rejects(
     prepareRelease({
       cwd: root,
-      inputPath: 'release.json',
+      inputPath: "release.json",
       run: async (file, args, options) => {
-        if (args[0] === 'pack' && !args.includes('--dry-run') && args.includes('@example/a@1.0.0')) {
-          return { code: 1, stdout: '', stderr: 'npm error code E503\nnpm error fetch failed: registry unavailable' };
+        if (
+          args[0] === "pack" &&
+          !args.includes("--dry-run") &&
+          args.includes("@example/a@1.0.0")
+        ) {
+          return {
+            code: 1,
+            stdout: "",
+            stderr: "npm error code E503\nnpm error fetch failed: registry unavailable",
+          };
         }
         return baseRun(file, args, options);
       },
     }),
     /registry pack for @example\/a failed \(1\): npm error code E503\nnpm error fetch failed: registry unavailable/,
   );
-  for (const directory of artifactDirectories) await assert.rejects(stat(directory), { code: 'ENOENT' });
+  for (const directory of artifactDirectories)
+    await assert.rejects(stat(directory), { code: "ENOENT" });
 });
 
-test('malformed, bounded-overflow, or missing tar payloads remain changed', async (t) => {
+test("malformed, bounded-overflow, or missing tar payloads remain changed", async (t) => {
   const mib = 1024 * 1024;
   const compressedLimit = 8 * mib;
   const payloadLimit = 16 * mib;
   const cases = [
-    ['malformed', () => ({ 'baseline:@example/a': Buffer.from('not gzip') })],
-    ['compressed-size', () => {
-      const payload = Buffer.alloc(compressedLimit + 1);
-      const localArtifact = gzipSync(payload, { level: 9 });
-      const baselineArtifact = gzipSync(payload, { level: 0 });
-      assert.ok(localArtifact.length < compressedLimit);
-      assert.ok(baselineArtifact.length > compressedLimit);
-      return { 'local:@example/a': localArtifact, 'baseline:@example/a': baselineArtifact };
-    }],
-    ['decompressed-size', () => {
-      const artifact = gzipSync(Buffer.alloc(payloadLimit + 1), { level: 1 });
-      assert.ok(artifact.length < compressedLimit);
-      return { 'local:@example/a': artifact, 'baseline:@example/a': artifact };
-    }],
-    ['missing', () => ({ 'baseline:@example/a': null })],
+    ["malformed", () => ({ "baseline:@example/a": Buffer.from("not gzip") })],
+    [
+      "compressed-size",
+      () => {
+        const payload = Buffer.alloc(compressedLimit + 1);
+        const localArtifact = gzipSync(payload, { level: 9 });
+        const baselineArtifact = gzipSync(payload, { level: 0 });
+        assert.ok(localArtifact.length < compressedLimit);
+        assert.ok(baselineArtifact.length > compressedLimit);
+        return { "local:@example/a": localArtifact, "baseline:@example/a": baselineArtifact };
+      },
+    ],
+    [
+      "decompressed-size",
+      () => {
+        const artifact = gzipSync(Buffer.alloc(payloadLimit + 1), { level: 1 });
+        assert.ok(artifact.length < compressedLimit);
+        return { "local:@example/a": artifact, "baseline:@example/a": artifact };
+      },
+    ],
+    ["missing", () => ({ "baseline:@example/a": null })],
   ];
   for (const [label, artifacts] of cases) {
     const { root } = await fixture(t);
     const summary = await prepareRelease({
       cwd: root,
-      inputPath: 'release.json',
+      inputPath: "release.json",
       run: mockRunner(root, {
-        local: { '@example/a': `local-${label}` },
-        baseline: { '@example/a': `registry-${label}` },
+        local: { "@example/a": `local-${label}` },
+        baseline: { "@example/a": `registry-${label}` },
         artifactOverrides: artifacts(),
       }),
     });
-    assert.deepEqual(summary.packages.map(({ name }) => name), ['@example/a']);
+    assert.deepEqual(
+      summary.packages.map(({ name }) => name),
+      ["@example/a"],
+    );
   }
 });
 
-test('registry target collisions and non-404 errors hard-fail', async (t) => {
+test("registry target collisions and non-404 errors hard-fail", async (t) => {
   const { root } = await fixture(t);
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { local: { '@example/a': 'changed' }, target: { '@example/a@1.1.0': 'published' } }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, {
+        local: { "@example/a": "changed" },
+        target: { "@example/a@1.1.0": "published" },
+      }),
+    }),
     /already published: @example\/a@1\.1\.0/,
   );
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { local: { '@example/a': 'changed' }, registryError: 'npm error code E500\nserver unavailable' }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, {
+        local: { "@example/a": "changed" },
+        registryError: "npm error code E500\nserver unavailable",
+      }),
+    }),
     /registry target check.*E500/,
   );
 });
 
-test('write mode synchronizes selected versions and lock entries, writes optional markers, and preserves prose on rerun', async (t) => {
+test("write mode synchronizes selected versions and lock entries, writes optional markers, and preserves prose on rerun", async (t) => {
   const { root } = await fixture(t);
-  const humanDoc = path.join(root, 'docs/github-release-v1.1.0.md');
+  const humanDoc = path.join(root, "docs/github-release-v1.1.0.md");
   await mkdir(path.dirname(humanDoc), { recursive: true });
-  const evidence = '<!-- prepare-release:packages [["plain-addon","1.1.0"],["@example/a","1.1.0"],["@example/umbrella","1.1.0"]] -->';
-  await writeFile(humanDoc, `Human summary.\n\n## Highlights\n\nKeep this prose.\n\n## Packages\n\nHand edited.\n\n## Install\n\nUse tlh.\n\n${evidence}\n`);
+  const evidence =
+    '<!-- prepare-release:packages [["plain-addon","1.1.0"],["@example/a","1.1.0"],["@example/umbrella","1.1.0"]] -->';
+  await writeFile(
+    humanDoc,
+    `Human summary.\n\n## Highlights\n\nKeep this prose.\n\n## Packages\n\nHand edited.\n\n## Install\n\nUse tlh.\n\n${evidence}\n`,
+  );
   const calls = [];
   const run = mockRunner(root, { local: changedHashes, calls });
-  const first = await prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run });
-  const prose = await readFile(humanDoc, 'utf8');
-  const second = await prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run });
-  assert.equal(await readFile(humanDoc, 'utf8'), prose);
-  assert.equal(prose.startsWith('Human summary.'), true);
+  const first = await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  const prose = await readFile(humanDoc, "utf8");
+  const second = await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  assert.equal(await readFile(humanDoc, "utf8"), prose);
+  assert.equal(prose.startsWith("Human summary."), true);
   assert.match(prose, /## Highlights[\s\S]*## Packages[\s\S]*## Install/);
   assert.doesNotMatch(prose, /^# GitHub release body/m);
-  assert.equal(first.documents.find(({ path: p }) => p.includes('github-release')).action, 'preserved');
-  assert.ok(second.documents.every(({ action }) => action === 'preserved'));
-  for (const relative of ['package.json', 'packages/a/package.json', 'packages/b/package.json']) {
-    assert.equal(JSON.parse(await readFile(path.join(root, relative), 'utf8')).version, '1.1.0');
-  }
-  const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
-  assert.deepEqual(Object.values(lock.packages).map(({ version }) => version), ['1.1.0', '1.1.0', '1.1.0']);
-  assert.equal(await readFile(path.join(root, 'packages/b/.pi-fleet-tested-version'), 'utf8'), '0.80.6\n');
-  assert.equal(calls.filter(({ args }) => args[0] === 'install').length, 2);
-});
-
-test('new absent baseline is changed and exact versions are mandatory', async (t) => {
-  const { root, input } = await fixture(t);
-  delete input.versions['plain-addon'];
-  await json(path.join(root, 'release.json'), input);
-  await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { baseline: { 'plain-addon': 'absent' } }) }),
-    /Changed package plain-addon needs an exact target version/,
+  assert.equal(
+    first.documents.find(({ path: p }) => p.includes("github-release")).action,
+    "preserved",
   );
+  assert.ok(second.documents.every(({ action }) => action === "preserved"));
+  for (const relative of ["package.json", "packages/a/package.json", "packages/b/package.json"]) {
+    assert.equal(JSON.parse(await readFile(path.join(root, relative), "utf8")).version, "1.1.0");
+  }
+  const lock = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  assert.deepEqual(
+    Object.values(lock.packages).map(({ version }) => version),
+    ["1.1.0", "1.1.0", "1.1.0"],
+  );
+  assert.equal(
+    await readFile(path.join(root, "packages/b/.pi-fleet-tested-version"), "utf8"),
+    "0.80.6\n",
+  );
+  assert.equal(calls.filter(({ args }) => args[0] === "install").length, 2);
 });
 
-test('stdout-only exact not-found is an absent baseline', async (t) => {
+test("new absent baseline is changed and exact versions are mandatory", async (t) => {
   const { root, input } = await fixture(t);
-  delete input.versions['plain-addon'];
-  await json(path.join(root, 'release.json'), input);
+  delete input.versions["plain-addon"];
+  await json(path.join(root, "release.json"), input);
   await assert.rejects(
     prepareRelease({
       cwd: root,
-      inputPath: 'release.json',
-      run: mockRunner(root, { baseline: { 'plain-addon': 'absent' }, notFoundOnStdout: true }),
+      inputPath: "release.json",
+      run: mockRunner(root, { baseline: { "plain-addon": "absent" } }),
     }),
     /Changed package plain-addon needs an exact target version/,
   );
 });
 
-test('npm pack ETARGET no matching version output is treated as an absent baseline', async (t) => {
+test("stdout-only exact not-found is an absent baseline", async (t) => {
   const { root, input } = await fixture(t);
-  delete input.versions['plain-addon'];
-  await json(path.join(root, 'release.json'), input);
+  delete input.versions["plain-addon"];
+  await json(path.join(root, "release.json"), input);
+  await assert.rejects(
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, { baseline: { "plain-addon": "absent" }, notFoundOnStdout: true }),
+    }),
+    /Changed package plain-addon needs an exact target version/,
+  );
+});
+
+test("npm pack ETARGET no matching version output is treated as an absent baseline", async (t) => {
+  const { root, input } = await fixture(t);
+  delete input.versions["plain-addon"];
+  await json(path.join(root, "release.json"), input);
   const run = mockRunner(root);
   await assert.rejects(
     prepareRelease({
       cwd: root,
-      inputPath: 'release.json',
+      inputPath: "release.json",
       run: async (file, args, options) => {
-        if (args[0] === 'pack' && args.some((arg) => arg === 'plain-addon@1.0.0')) {
-          return { code: 1, stdout: '', stderr: 'npm error code ETARGET\nnpm error notarget No matching version found for plain-addon@1.0.0.' };
+        if (args[0] === "pack" && args.some((arg) => arg === "plain-addon@1.0.0")) {
+          return {
+            code: 1,
+            stdout: "",
+            stderr:
+              "npm error code ETARGET\nnpm error notarget No matching version found for plain-addon@1.0.0.",
+          };
         }
         return run(file, args, options);
       },
@@ -296,84 +421,143 @@ test('npm pack ETARGET no matching version output is treated as an absent baseli
   );
 });
 
-test('selected root rejects a mismatched explicit releaseVersion before document validation, while unchanged root keeps independent releaseVersion', async (t) => {
+test("selected root rejects a mismatched explicit releaseVersion before document validation, while unchanged root keeps independent releaseVersion", async (t) => {
   const { root, input } = await fixture(t);
-  await mkdir(path.join(root, 'docs'), { recursive: true });
-  await writeFile(path.join(root, 'docs/github-release-v9.9.9.md'), 'stale document without marker\n');
-  input.releaseVersion = '9.9.9';
-  await json(path.join(root, 'release.json'), input);
+  await mkdir(path.join(root, "docs"), { recursive: true });
+  await writeFile(
+    path.join(root, "docs/github-release-v9.9.9.md"),
+    "stale document without marker\n",
+  );
+  input.releaseVersion = "9.9.9";
+  await json(path.join(root, "release.json"), input);
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { local: changedHashes }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, { local: changedHashes }),
+    }),
     /Explicit releaseVersion 9\.9\.9 must match selected root target @example\/umbrella@1\.1\.0/,
   );
 
   const workspaceOnlyInput = {
-    releaseVersion: '4.5.6',
-    versions: { '@example/a': '1.1.0' },
+    releaseVersion: "4.5.6",
+    versions: { "@example/a": "1.1.0" },
   };
-  await json(path.join(root, 'workspace-only.json'), workspaceOnlyInput);
-  const summary = await prepareRelease({ cwd: root, inputPath: 'workspace-only.json', run: mockRunner(root, { local: { '@example/a': 'changed-a-artifact' } }) });
-  assert.equal(summary.releaseVersion, '4.5.6');
-  assert.deepEqual(summary.packages.map(({ name }) => name), ['@example/a']);
-  assert.ok(summary.documents.every(({ path: filePath }) => filePath.includes('v4.5.6')));
+  await json(path.join(root, "workspace-only.json"), workspaceOnlyInput);
+  const summary = await prepareRelease({
+    cwd: root,
+    inputPath: "workspace-only.json",
+    run: mockRunner(root, { local: { "@example/a": "changed-a-artifact" } }),
+  });
+  assert.equal(summary.releaseVersion, "4.5.6");
+  assert.deepEqual(
+    summary.packages.map(({ name }) => name),
+    ["@example/a"],
+  );
+  assert.ok(summary.documents.every(({ path: filePath }) => filePath.includes("v4.5.6")));
 });
 
-test('ambiguous or mixed 404 output hard-fails and an empty selection is rejected', async (t) => {
+test("ambiguous or mixed 404 output hard-fails and an empty selection is rejected", async (t) => {
   const { root } = await fixture(t);
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root, { local: { '@example/a': 'changed' }, registryError: 'npm error code E404\nnpm error code E500\n404 Not Found' }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root, {
+        local: { "@example/a": "changed" },
+        registryError: "npm error code E404\nnpm error code E500\n404 Not Found",
+      }),
+    }),
     /registry target check.*E404.*E500/s,
   );
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', run: mockRunner(root) }),
+    prepareRelease({ cwd: root, inputPath: "release.json", run: mockRunner(root) }),
     /No changed packages were detected/,
   );
 });
 
-test('changed inputs cannot reuse stale managed document evidence or mutate manifests', async (t) => {
+test("changed inputs cannot reuse stale managed document evidence or mutate manifests", async (t) => {
   const { root, input } = await fixture(t);
   const run = mockRunner(root, { local: changedHashes });
-  await prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run });
-  const generatedBody = await readFile(path.join(root, 'docs/github-release-v1.1.0.md'), 'utf8');
-  assert.match(generatedBody, /^Release v1\.1\.0 includes the package set listed below\.\n\n## Highlights[\s\S]*## Packages[\s\S]*## Install/);
+  await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  const generatedBody = await readFile(path.join(root, "docs/github-release-v1.1.0.md"), "utf8");
+  assert.match(
+    generatedBody,
+    /^Release v1\.1\.0 includes the package set listed below\.\n\n## Highlights[\s\S]*## Packages[\s\S]*## Install/,
+  );
   assert.doesNotMatch(generatedBody, /^<!--/);
-  const checklist = await readFile(path.join(root, 'docs/publish-checklist-v1.1.0.md'), 'utf8');
-  assert.match(checklist, /## Agent-safe follow-up actions\n\n- \[ \] commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/);
-  assert.match(checklist, /## Human-only release actions\n\n- \[ \] dispatch the trusted `publish\.yml` workflow from `main` with the exact release tag in both confirmation fields\n- \[ \] inspect the verified package plan and approve the `npm-release` environment deployment/);
-  assert.doesNotMatch(checklist, /Human-only release actions[\s\S]*commit, tag, push, and create the GitHub release/s);
-  const manifestPath = path.join(root, 'packages/a/package.json');
+  const checklist = await readFile(path.join(root, "docs/publish-checklist-v1.1.0.md"), "utf8");
+  assert.match(
+    checklist,
+    /## Agent-safe follow-up actions\n\n- \[ \] commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/,
+  );
+  assert.match(
+    checklist,
+    /## Human-only release actions\n\n- \[ \] dispatch the trusted `publish\.yml` workflow from `main` with the exact release tag in both confirmation fields\n- \[ \] inspect the verified package plan and approve the `npm-release` environment deployment/,
+  );
+  assert.doesNotMatch(
+    checklist,
+    /Human-only release actions[\s\S]*commit, tag, push, and create the GitHub release/s,
+  );
+  const manifestPath = path.join(root, "packages/a/package.json");
   const before = await readFile(manifestPath);
-  input.versions['@example/a'] = '1.2.0';
-  await json(path.join(root, 'release.json'), input);
+  input.versions["@example/a"] = "1.2.0";
+  await json(path.join(root, "release.json"), input);
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run }),
+    prepareRelease({ cwd: root, inputPath: "release.json", write: true, run }),
     /stale package evidence/,
   );
   assert.deepEqual(await readFile(manifestPath), before);
 });
 
-test('install failure rolls back manifests, lockfile, markers, and newly-created documents', async (t) => {
+test("install failure rolls back manifests, lockfile, markers, and newly-created documents", async (t) => {
   const { root } = await fixture(t);
-  const tracked = ['package.json', 'packages/a/package.json', 'packages/b/package.json', 'package-lock.json'];
-  const before = new Map(await Promise.all(tracked.map(async (relative) => [relative, await readFile(path.join(root, relative))])));
+  const tracked = [
+    "package.json",
+    "packages/a/package.json",
+    "packages/b/package.json",
+    "package-lock.json",
+  ];
+  const before = new Map(
+    await Promise.all(
+      tracked.map(async (relative) => [relative, await readFile(path.join(root, relative))]),
+    ),
+  );
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run: mockRunner(root, { local: changedHashes, installError: 'install exploded' }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      write: true,
+      run: mockRunner(root, { local: changedHashes, installError: "install exploded" }),
+    }),
     /lockfile synchronization failed.*install exploded/,
   );
-  for (const [relative, content] of before) assert.deepEqual(await readFile(path.join(root, relative)), content);
-  await assert.rejects(readFile(path.join(root, 'packages/b/.pi-fleet-tested-version')), { code: 'ENOENT' });
-  await assert.rejects(readFile(path.join(root, 'docs/github-release-v1.1.0.md')), { code: 'ENOENT' });
+  for (const [relative, content] of before)
+    assert.deepEqual(await readFile(path.join(root, relative)), content);
+  await assert.rejects(readFile(path.join(root, "packages/b/.pi-fleet-tested-version")), {
+    code: "ENOENT",
+  });
+  await assert.rejects(readFile(path.join(root, "docs/github-release-v1.1.0.md")), {
+    code: "ENOENT",
+  });
 });
 
-test('stale top-level lock version fails post-install verification and rolls back exactly', async (t) => {
+test("stale top-level lock version fails post-install verification and rolls back exactly", async (t) => {
   const { root } = await fixture(t);
-  const manifestBefore = await readFile(path.join(root, 'package.json'));
-  const lockBefore = await readFile(path.join(root, 'package-lock.json'));
+  const manifestBefore = await readFile(path.join(root, "package.json"));
+  const lockBefore = await readFile(path.join(root, "package-lock.json"));
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: 'release.json', write: true, run: mockRunner(root, { local: changedHashes, staleTopLevel: true }) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      write: true,
+      run: mockRunner(root, { local: changedHashes, staleTopLevel: true }),
+    }),
     /Top-level lock version does not match/,
   );
-  assert.deepEqual(await readFile(path.join(root, 'package.json')), manifestBefore);
-  assert.deepEqual(await readFile(path.join(root, 'package-lock.json')), lockBefore);
-  await assert.rejects(readFile(path.join(root, 'docs/release-notes-v1.1.0.md')), { code: 'ENOENT' });
+  assert.deepEqual(await readFile(path.join(root, "package.json")), manifestBefore);
+  assert.deepEqual(await readFile(path.join(root, "package-lock.json")), lockBefore);
+  await assert.rejects(readFile(path.join(root, "docs/release-notes-v1.1.0.md")), {
+    code: "ENOENT",
+  });
 });

@@ -1,17 +1,17 @@
-import assert from 'node:assert/strict';
-import fs, { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { syncBuiltinESMExports } from 'node:module';
-import os from 'node:os';
-import path from 'node:path';
-import test, { after } from 'node:test';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
-import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
+import assert from "node:assert/strict";
+import fs, { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import test, { after } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const moduleCache = new Map();
-const transpileRoot = await mkdtemp(path.join(repoRoot, '.tmp-minimal-footer-config-render-'));
+const transpileRoot = await mkdtemp(path.join(repoRoot, ".tmp-minimal-footer-config-render-"));
 
 after(async () => {
   await rm(transpileRoot, { recursive: true, force: true });
@@ -19,9 +19,9 @@ after(async () => {
 
 function resolveRelativeTsImport(fromFile, specifier) {
   const basePath = path.resolve(path.dirname(fromFile), specifier);
-  const candidates = specifier.endsWith('.ts')
+  const candidates = specifier.endsWith(".ts")
     ? [basePath]
-    : [`${basePath}.ts`, path.join(basePath, 'index.ts')];
+    : [`${basePath}.ts`, path.join(basePath, "index.ts")];
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
@@ -33,7 +33,7 @@ function resolveRelativeTsImport(fromFile, specifier) {
 function rewriteRelativeImportSpecifiers(outputText, specifiers) {
   let rewritten = outputText;
   for (const specifier of specifiers) {
-    const replacement = specifier.endsWith('.ts')
+    const replacement = specifier.endsWith(".ts")
       ? `${specifier.slice(0, -3)}.mjs`
       : `${specifier}.mjs`;
     rewritten = rewritten.replaceAll(`"${specifier}"`, `"${replacement}"`);
@@ -47,13 +47,13 @@ async function transpileTsModule(absolutePath, seen = new Set()) {
   seen.add(absolutePath);
 
   const relativePath = path.relative(repoRoot, absolutePath);
-  const outputPath = path.join(transpileRoot, relativePath).replace(/\.ts$/, '.mjs');
-  const sourceText = await readFile(absolutePath, 'utf8');
+  const outputPath = path.join(transpileRoot, relativePath).replace(/\.ts$/, ".mjs");
+  const sourceText = await readFile(absolutePath, "utf8");
   const relativeSpecifiers = [];
 
   for (const importedFile of ts.preProcessFile(sourceText, true, true).importedFiles) {
     const specifier = importedFile.fileName;
-    if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
+    if (!specifier.startsWith("./") && !specifier.startsWith("../")) continue;
     relativeSpecifiers.push(specifier);
     await transpileTsModule(resolveRelativeTsImport(absolutePath, specifier), seen);
   }
@@ -72,12 +72,15 @@ async function transpileTsModule(absolutePath, seen = new Set()) {
     diagnostics.length,
     0,
     diagnostics
-      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
-      .join('\n'),
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))
+      .join("\n"),
   );
 
   await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, rewriteRelativeImportSpecifiers(transpiled.outputText, relativeSpecifiers));
+  await writeFile(
+    outputPath,
+    rewriteRelativeImportSpecifiers(transpiled.outputText, relativeSpecifiers),
+  );
 }
 
 async function importTsModule(relativePath) {
@@ -86,13 +89,13 @@ async function importTsModule(relativePath) {
   if (cached) return cached;
 
   await transpileTsModule(absolutePath);
-  const outputPath = path.join(transpileRoot, relativePath).replace(/\.ts$/, '.mjs');
+  const outputPath = path.join(transpileRoot, relativePath).replace(/\.ts$/, ".mjs");
   const loaded = await import(pathToFileURL(outputPath).href);
   moduleCache.set(absolutePath, loaded);
   return loaded;
 }
 
-const minimalFooterModule = await importTsModule('extensions/minimal-footer/index.ts');
+const minimalFooterModule = await importTsModule("extensions/minimal-footer/index.ts");
 const minimalFooterExtension = minimalFooterModule.default;
 const { loadConfig, renderFooterLines } = minimalFooterModule.__testing;
 
@@ -107,16 +110,16 @@ function setEnv(t, key, value) {
 }
 
 function setupTempDirs(t) {
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'minimal-footer-test-'));
-  const agentDir = path.join(rootDir, 'agent');
-  const projectDir = path.join(rootDir, 'workspace', 'sample-repo');
-  const nestedDir = path.join(projectDir, 'packages', 'app', 'src');
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "minimal-footer-test-"));
+  const agentDir = path.join(rootDir, "agent");
+  const projectDir = path.join(rootDir, "workspace", "sample-repo");
+  const nestedDir = path.join(projectDir, "packages", "app", "src");
 
-  mkdirSync(path.join(agentDir, 'extensions'), { recursive: true });
+  mkdirSync(path.join(agentDir, "extensions"), { recursive: true });
   mkdirSync(path.join(projectDir, CONFIG_DIR_NAME), { recursive: true });
   mkdirSync(nestedDir, { recursive: true });
 
-  setEnv(t, 'PI_CODING_AGENT_DIR', agentDir);
+  setEnv(t, "PI_CODING_AGENT_DIR", agentDir);
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
 
   return { agentDir, projectDir, nestedDir };
@@ -130,7 +133,7 @@ function captureConsoleError(run) {
   const messages = [];
   const original = console.error;
   console.error = (...args) => {
-    messages.push(args.map(String).join(' '));
+    messages.push(args.map(String).join(" "));
   };
 
   try {
@@ -147,18 +150,18 @@ const plainTheme = {
 };
 
 function fakeCodexToken(accountId) {
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
-    'https://api.openai.com/auth': { chatgpt_account_id: accountId },
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode({
+    "https://api.openai.com/auth": { chatgpt_account_id: accountId },
   })}.fixture-signature`;
 }
 
 function writeFakeCodexCredential(agentDir, accountId) {
-  writeJson(path.join(agentDir, 'auth.json'), {
-    'openai-codex': {
-      type: 'oauth',
+  writeJson(path.join(agentDir, "auth.json"), {
+    "openai-codex": {
+      type: "oauth",
       access: fakeCodexToken(accountId),
-      refresh: 'fixture-refresh',
+      refresh: "fixture-refresh",
       expires: 4_000_000_000_000,
       accountId,
     },
@@ -170,7 +173,7 @@ function createFooterHarness({
   model,
   sessionManager = {},
   oauth = true,
-  codexAccountId = 'fixture-account',
+  codexAccountId = "fixture-account",
 }) {
   const handlers = new Map();
   const footerState = { footer: undefined };
@@ -192,26 +195,23 @@ function createFooterHarness({
       },
       async getProviderAuth(providerId) {
         authCalls.push(providerId);
-        const apiKey = providerId === 'openai-codex'
-          ? fakeCodexToken(currentCodexAccountId)
-          : `fixture-${providerId}`;
+        const apiKey =
+          providerId === "openai-codex"
+            ? fakeCodexToken(currentCodexAccountId)
+            : `fixture-${providerId}`;
         return { auth: { apiKey } };
       },
     },
     ui: {
       setFooter(factory) {
-        footerState.footer = factory(
-          { requestRender() {} },
-          plainTheme,
-          {
-            onBranchChange() {
-              return () => {};
-            },
-            getGitBranch() {
-              return 'main';
-            },
+        footerState.footer = factory({ requestRender() {} }, plainTheme, {
+          onBranchChange() {
+            return () => {};
           },
-        );
+          getGitBranch() {
+            return "main";
+          },
+        });
       },
     },
   };
@@ -221,7 +221,7 @@ function createFooterHarness({
     },
     registerCommand() {},
     getThinkingLevel() {
-      return 'off';
+      return "off";
     },
   };
   minimalFooterExtension(pi);
@@ -270,7 +270,7 @@ async function withAuthReadCounter(run) {
   const originalReadFileSync = fs.readFileSync;
   const authReads = [];
   fs.readFileSync = (filePath, ...args) => {
-    if (path.basename(String(filePath)) === 'auth.json') authReads.push(String(filePath));
+    if (path.basename(String(filePath)) === "auth.json") authReads.push(String(filePath));
     return originalReadFileSync(filePath, ...args);
   };
   syncBuiltinESMExports();
@@ -306,28 +306,28 @@ async function withFakeUsageClock(run) {
   }
 }
 
-test('minimal-footer loadConfig prefers trusted project config over global config and ignores untrusted project overrides', (t) => {
+test("minimal-footer loadConfig prefers trusted project config over global config and ignores untrusted project overrides", (t) => {
   const { agentDir, projectDir, nestedDir } = setupTempDirs(t);
 
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     context: {
       showPercent: false,
       dumbZone: {
         thresholdTokens: 150000,
-        label: 'GLOBAL ZONE',
-        color: 'warning',
+        label: "GLOBAL ZONE",
+        color: "warning",
       },
     },
     codexUsage: {
       requestTimeoutMs: 2222,
       windows: {
-        primary: { label: 'work' },
-        secondary: { enabled: false, label: 'week' },
+        primary: { label: "work" },
+        secondary: { enabled: false, label: "week" },
       },
     },
     experimentalMarker: {
-      label: 'exp',
-      color: 'accent',
+      label: "exp",
+      color: "accent",
     },
     gitStatus: {
       enabled: false,
@@ -337,18 +337,18 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
     },
   });
 
-  writeJson(path.join(projectDir, CONFIG_DIR_NAME, 'minimal-footer.json'), {
+  writeJson(path.join(projectDir, CONFIG_DIR_NAME, "minimal-footer.json"), {
     context: {
       showPercent: true,
       dumbZone: {
         enabled: false,
         thresholdTokens: 275000,
-        label: 'PROJECT ZONE',
+        label: "PROJECT ZONE",
       },
     },
     codexUsage: {
       windows: {
-        secondary: { enabled: true, label: '7day' },
+        secondary: { enabled: true, label: "7day" },
       },
     },
     experimentalMarker: {
@@ -373,8 +373,8 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
       dumbZone: {
         enabled: false,
         thresholdTokens: 275000,
-        label: 'PROJECT ZONE',
-        color: 'warning',
+        label: "PROJECT ZONE",
+        color: "warning",
       },
     },
     codexUsage: {
@@ -384,18 +384,18 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
       windows: {
         primary: {
           enabled: true,
-          label: 'work',
+          label: "work",
         },
         secondary: {
           enabled: true,
-          label: '7day',
+          label: "7day",
         },
       },
     },
     experimentalMarker: {
       enabled: false,
-      label: 'exp',
-      color: 'accent',
+      label: "exp",
+      color: "accent",
     },
     gitStatus: {
       enabled: true,
@@ -418,8 +418,8 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
       dumbZone: {
         enabled: true,
         thresholdTokens: 150000,
-        label: 'GLOBAL ZONE',
-        color: 'warning',
+        label: "GLOBAL ZONE",
+        color: "warning",
       },
     },
     codexUsage: {
@@ -429,18 +429,18 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
       windows: {
         primary: {
           enabled: true,
-          label: 'work',
+          label: "work",
         },
         secondary: {
           enabled: false,
-          label: 'week',
+          label: "week",
         },
       },
     },
     experimentalMarker: {
       enabled: true,
-      label: 'exp',
-      color: 'accent',
+      label: "exp",
+      color: "accent",
     },
     gitStatus: {
       enabled: false,
@@ -451,18 +451,18 @@ test('minimal-footer loadConfig prefers trusted project config over global confi
   });
 });
 
-test('minimal-footer loadConfig falls back when project config is malformed or contains invalid values', (t) => {
+test("minimal-footer loadConfig falls back when project config is malformed or contains invalid values", (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  const projectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, 'minimal-footer.json');
+  const projectConfigPath = path.join(projectDir, CONFIG_DIR_NAME, "minimal-footer.json");
 
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     context: {
       showPercent: false,
       dumbZone: {
         enabled: false,
         thresholdTokens: 123456,
-        label: 'GLOBAL',
-        color: 'accent',
+        label: "GLOBAL",
+        color: "accent",
       },
     },
     codexUsage: {
@@ -470,14 +470,14 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
       cacheTtlMs: 999,
       requestTimeoutMs: 2222,
       windows: {
-        primary: { enabled: false, label: 'five' },
-        secondary: { enabled: true, label: 'seven' },
+        primary: { enabled: false, label: "five" },
+        secondary: { enabled: true, label: "seven" },
       },
     },
     experimentalMarker: {
       enabled: false,
-      label: 'global-exp',
-      color: 'text',
+      label: "global-exp",
+      color: "text",
     },
     gitStatus: {
       enabled: false,
@@ -487,7 +487,7 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
     },
   });
 
-  writeFileSync(projectConfigPath, '{ this is not valid json\n');
+  writeFileSync(projectConfigPath, "{ this is not valid json\n");
   const malformed = captureConsoleError(() =>
     loadConfig({
       cwd: projectDir,
@@ -505,8 +505,8 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
       dumbZone: {
         enabled: false,
         thresholdTokens: 123456,
-        label: 'GLOBAL',
-        color: 'accent',
+        label: "GLOBAL",
+        color: "accent",
       },
     },
     codexUsage: {
@@ -516,18 +516,18 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
       windows: {
         primary: {
           enabled: false,
-          label: 'five',
+          label: "five",
         },
         secondary: {
           enabled: true,
-          label: 'seven',
+          label: "seven",
         },
       },
     },
     experimentalMarker: {
       enabled: false,
-      label: 'global-exp',
-      color: 'text',
+      label: "global-exp",
+      color: "text",
     },
     gitStatus: {
       enabled: false,
@@ -539,33 +539,33 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
 
   writeJson(projectConfigPath, {
     context: {
-      showPercent: 'yes',
+      showPercent: "yes",
       dumbZone: {
-        enabled: 'no',
+        enabled: "no",
         thresholdTokens: -5,
-        label: '   ',
-        color: 'magenta',
+        label: "   ",
+        color: "magenta",
       },
     },
     codexUsage: {
-      enabled: 'true',
+      enabled: "true",
       cacheTtlMs: -1,
       requestTimeoutMs: 0,
       windows: {
-        primary: { enabled: 'no', label: '   ' },
-        secondary: { enabled: 'nope', label: 7 },
+        primary: { enabled: "no", label: "   " },
+        secondary: { enabled: "nope", label: 7 },
       },
     },
     experimentalMarker: {
-      enabled: 'on',
-      label: '',
-      color: 'purple',
+      enabled: "on",
+      label: "",
+      color: "purple",
     },
     gitStatus: {
-      enabled: 'y',
+      enabled: "y",
       refreshIntervalMs: 0,
       gitTimeoutMs: -1,
-      ghTimeoutMs: 'soon',
+      ghTimeoutMs: "soon",
     },
   });
 
@@ -580,12 +580,12 @@ test('minimal-footer loadConfig falls back when project config is malformed or c
   );
 });
 
-test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and ignores late Codex data', async (t) => {
+test("minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and ignores late Codex data", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account');
+  writeFakeCodexCredential(agentDir, "fixture-account");
 
   const handlers = new Map();
   const footerState = { footer: undefined };
@@ -595,14 +595,14 @@ test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and
       return () => {};
     },
     getGitBranch() {
-      return 'main';
+      return "main";
     },
   };
   let oauth = true;
   const authCalls = [];
   const context = {
     cwd: projectDir,
-    model: { provider: 'openai', api: 'openai-responses', id: 'gpt-6-astra' },
+    model: { provider: "openai", api: "openai-responses", id: "gpt-6-astra" },
     sessionManager: {},
     isProjectTrusted() {
       return false;
@@ -616,7 +616,7 @@ test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and
       },
       async getProviderAuth(providerId) {
         authCalls.push(providerId);
-        return { auth: { apiKey: fakeCodexToken('fixture-account') } };
+        return { auth: { apiKey: fakeCodexToken("fixture-account") } };
       },
     },
     ui: {
@@ -631,7 +631,7 @@ test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and
     },
     registerCommand() {},
     getThinkingLevel() {
-      return 'off';
+      return "off";
     },
   };
   minimalFooterExtension(pi);
@@ -642,34 +642,34 @@ test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and
   let resolveLegacyFetch;
   globalThis.fetch = async (url) => {
     fetchCalls.push(url);
-    if (rejectLegacyFetch) throw new Error('fixture unauthorized');
+    if (rejectLegacyFetch) throw new Error("fixture unauthorized");
     return new Promise((resolve) => {
       resolveLegacyFetch = resolve;
     });
   };
 
   try {
-    await handlers.get('session_start')({}, context);
+    await handlers.get("session_start")({}, context);
     await Promise.resolve();
-    assert.equal(fetchCalls.length, 0, 'direct OpenAI OAuth must not call legacy WHAM');
-    assert.match(footerState.footer.render(80).join('\n'), /usage unsupported/);
+    assert.equal(fetchCalls.length, 0, "direct OpenAI OAuth must not call legacy WHAM");
+    assert.match(footerState.footer.render(80).join("\n"), /usage unsupported/);
 
     context.model = {
-      provider: 'openai-codex',
-      api: 'openai-codex-responses',
-      id: 'gpt-5.5',
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      id: "gpt-5.5",
     };
-    await handlers.get('model_select')({}, context);
+    await handlers.get("model_select")({}, context);
     await Promise.resolve();
     assert.equal(fetchCalls.length, 1);
 
     context.model = {
-      provider: 'openai',
-      api: 'openai-responses',
-      id: 'gpt-6-astra',
+      provider: "openai",
+      api: "openai-responses",
+      id: "gpt-6-astra",
     };
-    await handlers.get('model_select')({}, context);
-    assert.match(footerState.footer.render(80).join('\n'), /usage unsupported/);
+    await handlers.get("model_select")({}, context);
+    assert.match(footerState.footer.render(80).join("\n"), /usage unsupported/);
 
     resolveLegacyFetch?.({
       ok: true,
@@ -682,39 +682,39 @@ test('minimal-footer never sends direct OpenAI ChatGPT OAuth to legacy usage and
       },
     });
     await new Promise((resolve) => setImmediate(resolve));
-    const rendered = footerState.footer.render(80).join('\n');
+    const rendered = footerState.footer.render(80).join("\n");
     assert.match(rendered, /usage unsupported/);
     assert.doesNotMatch(rendered, /5h 1%/);
 
     rejectLegacyFetch = true;
     context.model = {
-      provider: 'openai-codex',
-      api: 'openai-codex-responses',
-      id: 'gpt-5.5',
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      id: "gpt-5.5",
     };
-    await handlers.get('model_select')({}, context);
+    await handlers.get("model_select")({}, context);
     await new Promise((resolve) => setImmediate(resolve));
-    const unavailable = footerState.footer.render(80).join('\n');
+    const unavailable = footerState.footer.render(80).join("\n");
     assert.match(unavailable, /usage unavailable/);
     assert.doesNotMatch(unavailable, /5h 1%/);
-    assert.deepEqual(authCalls, ['openai-codex', 'openai-codex']);
+    assert.deepEqual(authCalls, ["openai-codex", "openai-codex"]);
   } finally {
     globalThis.fetch = originalFetch;
     footerState.footer?.dispose();
   }
 });
 
-test('minimal-footer caches Codex account identity outside repeated footer renders', async (t) => {
+test("minimal-footer caches Codex account identity outside repeated footer renders", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const request = deferred();
   const originalFetch = globalThis.fetch;
@@ -726,11 +726,11 @@ test('minimal-footer caches Codex account identity outside repeated footer rende
 
   try {
     await withAuthReadCounter(async (authReads) => {
-      await harness.handlers.get('session_start')({}, harness.context);
+      await harness.handlers.get("session_start")({}, harness.context);
       await flushAsync();
       assert.equal(fetchCalls.length, 1);
-      assert.equal(fetchCalls[0].init.headers['ChatGPT-Account-Id'], 'fixture-account-a');
-      assert.ok(authReads.length >= 1, 'the lifecycle refresh should resolve the fixture account');
+      assert.equal(fetchCalls[0].init.headers["ChatGPT-Account-Id"], "fixture-account-a");
+      assert.ok(authReads.length >= 1, "the lifecycle refresh should resolve the fixture account");
 
       request.resolve(usageResponse(12));
       await flushAsync();
@@ -738,9 +738,9 @@ test('minimal-footer caches Codex account identity outside repeated footer rende
       authReads.length = 0;
 
       for (let index = 0; index < 20; index += 1) {
-        assert.match(harness.footerState.footer.render(80).join('\n'), /5h 12%/);
+        assert.match(harness.footerState.footer.render(80).join("\n"), /5h 12%/);
       }
-      assert.deepEqual(authReads, [], 'repeated renders must not read the credential file');
+      assert.deepEqual(authReads, [], "repeated renders must not read the credential file");
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -748,17 +748,17 @@ test('minimal-footer caches Codex account identity outside repeated footer rende
   }
 });
 
-test('minimal-footer invalidates a Codex snapshot when the OAuth account switches', async (t) => {
+test("minimal-footer invalidates a Codex snapshot when the OAuth account switches", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -769,49 +769,49 @@ test('minimal-footer invalidates a Codex snapshot when the OAuth account switche
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].init.headers['ChatGPT-Account-Id'], 'fixture-account-a');
+    assert.equal(requests[0].init.headers["ChatGPT-Account-Id"], "fixture-account-a");
     requests[0].request.resolve(usageResponse(12));
     await flushAsync();
     await flushAsync();
-    assert.match(harness.footerState.footer.render(80).join('\n'), /5h 12%/);
+    assert.match(harness.footerState.footer.render(80).join("\n"), /5h 12%/);
 
-    writeFakeCodexCredential(agentDir, 'fixture-account-b');
-    harness.setCodexAccountId('fixture-account-b');
-    await harness.handlers.get('model_select')({}, harness.context);
+    writeFakeCodexCredential(agentDir, "fixture-account-b");
+    harness.setCodexAccountId("fixture-account-b");
+    await harness.handlers.get("model_select")({}, harness.context);
     await flushAsync();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].init.headers['ChatGPT-Account-Id'], 'fixture-account-b');
+    assert.equal(requests[1].init.headers["ChatGPT-Account-Id"], "fixture-account-b");
     assert.doesNotMatch(
-      harness.footerState.footer.render(80).join('\n'),
+      harness.footerState.footer.render(80).join("\n"),
       /5h 12%/,
-      'the previous account snapshot must be hidden while the new account loads',
+      "the previous account snapshot must be hidden while the new account loads",
     );
 
     requests[1].request.resolve(usageResponse(34));
     await flushAsync();
     await flushAsync();
-    assert.match(harness.footerState.footer.render(80).join('\n'), /5h 34%/);
+    assert.match(harness.footerState.footer.render(80).join("\n"), /5h 34%/);
   } finally {
     globalThis.fetch = originalFetch;
     harness.footerState.footer?.dispose();
   }
 });
 
-test('minimal-footer detects auth-only Codex account changes on one bounded timer and disposes it', async (t) => {
+test("minimal-footer detects auth-only Codex account changes on one bounded timer and disposes it", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
     codexUsage: { cacheTtlMs: 25 },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -823,53 +823,53 @@ test('minimal-footer detects auth-only Codex account changes on one bounded time
 
   try {
     await withFakeUsageClock(async (intervals) => {
-      await harness.handlers.get('session_start')({}, harness.context);
+      await harness.handlers.get("session_start")({}, harness.context);
       await flushAsync();
       assert.equal(intervals.length, 1);
       assert.equal(intervals[0].ms, 25);
       assert.equal(requests.length, 1);
-      assert.equal(requests[0].init.headers['ChatGPT-Account-Id'], 'fixture-account-a');
+      assert.equal(requests[0].init.headers["ChatGPT-Account-Id"], "fixture-account-a");
 
       requests[0].request.resolve(usageResponse(12));
       await flushAsync();
       await flushAsync();
-      assert.match(harness.footerState.footer.render(80).join('\n'), /5h 12%/);
+      assert.match(harness.footerState.footer.render(80).join("\n"), /5h 12%/);
 
       intervals[0].callback();
       await flushAsync();
-      assert.equal(requests.length, 1, 'an unchanged identity tick must not fetch usage');
+      assert.equal(requests.length, 1, "an unchanged identity tick must not fetch usage");
 
-      writeFakeCodexCredential(agentDir, 'fixture-account-b');
-      harness.setCodexAccountId('fixture-account-b');
+      writeFakeCodexCredential(agentDir, "fixture-account-b");
+      harness.setCodexAccountId("fixture-account-b");
       // No model_select, turn_end, or session event is emitted for this
       // account-only login change in Pi 0.99.
       intervals[0].callback();
       await flushAsync();
       await flushAsync();
       assert.equal(requests.length, 2);
-      assert.equal(requests[1].init.headers['ChatGPT-Account-Id'], 'fixture-account-b');
+      assert.equal(requests[1].init.headers["ChatGPT-Account-Id"], "fixture-account-b");
       intervals[0].callback();
       await flushAsync();
-      assert.equal(requests.length, 2, 'one session timer must not duplicate an in-flight refresh');
+      assert.equal(requests.length, 2, "one session timer must not duplicate an in-flight refresh");
       assert.doesNotMatch(
-        harness.footerState.footer.render(80).join('\n'),
+        harness.footerState.footer.render(80).join("\n"),
         /5h 12%/,
-        'the timer must clear the old account while the replacement loads',
+        "the timer must clear the old account while the replacement loads",
       );
 
       requests[1].request.resolve(usageResponse(34));
       await flushAsync();
       await flushAsync();
-      assert.match(harness.footerState.footer.render(80).join('\n'), /5h 34%/);
+      assert.match(harness.footerState.footer.render(80).join("\n"), /5h 34%/);
 
-      await harness.handlers.get('session_shutdown')({}, harness.context);
+      await harness.handlers.get("session_shutdown")({}, harness.context);
       assert.equal(intervals[0].cleared, true);
 
-      await harness.handlers.get('session_start')({}, harness.context);
+      await harness.handlers.get("session_start")({}, harness.context);
       await flushAsync();
-      assert.equal(intervals.length, 2, 'replacement sessions receive one new usage timer');
+      assert.equal(intervals.length, 2, "replacement sessions receive one new usage timer");
       assert.equal(requests.length, 3);
-      assert.equal(requests[2].init.headers['ChatGPT-Account-Id'], 'fixture-account-b');
+      assert.equal(requests[2].init.headers["ChatGPT-Account-Id"], "fixture-account-b");
       requests[2].request.resolve(usageResponse(35));
       await flushAsync();
       await flushAsync();
@@ -879,7 +879,7 @@ test('minimal-footer detects auth-only Codex account changes on one bounded time
       intervals[0].callback();
       intervals[1].callback();
       await flushAsync();
-      assert.equal(requests.length, 3, 'disposed timers cannot start another usage request');
+      assert.equal(requests.length, 3, "disposed timers cannot start another usage request");
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -887,17 +887,17 @@ test('minimal-footer detects auth-only Codex account changes on one bounded time
   }
 });
 
-test('minimal-footer uses a five-minute identity check without caching usage results at zero TTL', async (t) => {
+test("minimal-footer uses a five-minute identity check without caching usage results at zero TTL", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
     codexUsage: { cacheTtlMs: 0 },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -909,39 +909,39 @@ test('minimal-footer uses a five-minute identity check without caching usage res
 
   try {
     await withFakeUsageClock(async (intervals) => {
-      await harness.handlers.get('session_start')({}, harness.context);
+      await harness.handlers.get("session_start")({}, harness.context);
       await flushAsync();
       assert.equal(intervals.length, 1);
       assert.equal(intervals[0].ms, 5 * 60 * 1000);
-      assert.equal(requests.length, 1, 'session start performs the initial lifecycle refresh');
+      assert.equal(requests.length, 1, "session start performs the initial lifecycle refresh");
       requests[0].request.resolve(usageResponse(8));
       await flushAsync();
       await flushAsync();
 
       intervals[0].callback();
       await flushAsync();
-      assert.equal(requests.length, 1, 'an unchanged zero-TTL identity tick must not fetch usage');
+      assert.equal(requests.length, 1, "an unchanged zero-TTL identity tick must not fetch usage");
 
-      writeFakeCodexCredential(agentDir, 'fixture-account-b');
-      harness.setCodexAccountId('fixture-account-b');
+      writeFakeCodexCredential(agentDir, "fixture-account-b");
+      harness.setCodexAccountId("fixture-account-b");
       intervals[0].callback();
       await flushAsync();
-      assert.equal(requests.length, 2, 'an account change triggers the safe refresh path');
-      assert.equal(requests[1].init.headers['ChatGPT-Account-Id'], 'fixture-account-b');
+      assert.equal(requests.length, 2, "an account change triggers the safe refresh path");
+      assert.equal(requests[1].init.headers["ChatGPT-Account-Id"], "fixture-account-b");
       requests[1].request.resolve(usageResponse(19));
       await flushAsync();
       await flushAsync();
 
-      await harness.handlers.get('turn_start')({}, harness.context);
+      await harness.handlers.get("turn_start")({}, harness.context);
       await flushAsync();
-      assert.equal(requests.length, 3, 'zero TTL keeps turn-boundary usage refreshes uncached');
+      assert.equal(requests.length, 3, "zero TTL keeps turn-boundary usage refreshes uncached");
       requests[2].request.resolve(usageResponse(20));
       await flushAsync();
       await flushAsync();
 
-      await harness.handlers.get('turn_end')({}, harness.context);
+      await harness.handlers.get("turn_end")({}, harness.context);
       await flushAsync();
-      assert.equal(requests.length, 4, 'turn end also refreshes when result caching is disabled');
+      assert.equal(requests.length, 4, "turn end also refreshes when result caching is disabled");
       requests[3].request.resolve(usageResponse(21));
       await flushAsync();
       await flushAsync();
@@ -952,17 +952,17 @@ test('minimal-footer uses a five-minute identity check without caching usage res
   }
 });
 
-test('minimal-footer clamps huge cache TTL identity scheduling to Node maximum without overflow', async (t) => {
+test("minimal-footer clamps huge cache TTL identity scheduling to Node maximum without overflow", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   const hugeTtlMs = 2_147_483_648;
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
     codexUsage: { cacheTtlMs: hugeTtlMs },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account');
+  writeFakeCodexCredential(agentDir, "fixture-account");
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -973,7 +973,7 @@ test('minimal-footer clamps huge cache TTL identity scheduling to Node maximum w
 
   try {
     await withFakeUsageClock(async (intervals) => {
-      await harness.handlers.get('session_start')({}, harness.context);
+      await harness.handlers.get("session_start")({}, harness.context);
       await flushAsync();
       await flushAsync();
       assert.equal(intervals.length, 1);
@@ -982,7 +982,7 @@ test('minimal-footer clamps huge cache TTL identity scheduling to Node maximum w
 
       intervals[0].callback();
       await flushAsync();
-      assert.equal(requests.length, 1, 'the clamped timer still performs identity-only checks');
+      assert.equal(requests.length, 1, "the clamped timer still performs identity-only checks");
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -990,18 +990,18 @@ test('minimal-footer clamps huge cache TTL identity scheduling to Node maximum w
   }
 });
 
-test('minimal-footer revalidates account identity before accepting a late Codex response', async (t) => {
+test("minimal-footer revalidates account identity before accepting a late Codex response", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
     codexUsage: { cacheTtlMs: 0 },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -1012,58 +1012,58 @@ test('minimal-footer revalidates account identity before accepting a late Codex 
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     assert.equal(requests.length, 1);
 
-    writeFakeCodexCredential(agentDir, 'fixture-account-b');
-    harness.setCodexAccountId('fixture-account-b');
+    writeFakeCodexCredential(agentDir, "fixture-account-b");
+    harness.setCodexAccountId("fixture-account-b");
     requests[0].request.resolve(usageResponse(11));
     await flushAsync();
     await flushAsync();
     await flushAsync();
 
-    assert.equal(requests.length, 2, 'the changed account should refresh after discarding A');
-    assert.equal(requests[1].init.headers['ChatGPT-Account-Id'], 'fixture-account-b');
+    assert.equal(requests.length, 2, "the changed account should refresh after discarding A");
+    assert.equal(requests[1].init.headers["ChatGPT-Account-Id"], "fixture-account-b");
     assert.doesNotMatch(
-      harness.footerState.footer.render(80).join('\n'),
+      harness.footerState.footer.render(80).join("\n"),
       /5h 11%/,
-      'a late response for A must never become the current account snapshot',
+      "a late response for A must never become the current account snapshot",
     );
 
     requests[1].request.resolve(usageResponse(29));
     await flushAsync();
     await flushAsync();
-    assert.match(harness.footerState.footer.render(80).join('\n'), /5h 29%/);
+    assert.match(harness.footerState.footer.render(80).join("\n"), /5h 29%/);
   } finally {
     globalThis.fetch = originalFetch;
     harness.footerState.footer?.dispose();
   }
 });
 
-test('minimal-footer rejects a deferred token/account switch before sending WHAM', async (t) => {
+test("minimal-footer rejects a deferred token/account switch before sending WHAM", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
     codexUsage: { cacheTtlMs: 0 },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account-a');
+  writeFakeCodexCredential(agentDir, "fixture-account-a");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
-    codexAccountId: 'fixture-account-a',
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+    codexAccountId: "fixture-account-a",
   });
   const authGate = deferred();
   let authCalls = 0;
   harness.context.modelRegistry.getProviderAuth = async (providerId) => {
-    assert.equal(providerId, 'openai-codex');
+    assert.equal(providerId, "openai-codex");
     authCalls += 1;
     if (authCalls === 1) {
       await authGate.promise;
-      return { auth: { apiKey: fakeCodexToken('fixture-account-b') } };
+      return { auth: { apiKey: fakeCodexToken("fixture-account-b") } };
     }
-    return { auth: { apiKey: fakeCodexToken('fixture-account-b') } };
+    return { auth: { apiKey: fakeCodexToken("fixture-account-b") } };
   };
   const fetchCalls = [];
   const originalFetch = globalThis.fetch;
@@ -1073,40 +1073,40 @@ test('minimal-footer rejects a deferred token/account switch before sending WHAM
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     assert.equal(authCalls, 1);
-    assert.equal(fetchCalls.length, 0, 'the deferred mismatched token must not reach WHAM');
+    assert.equal(fetchCalls.length, 0, "the deferred mismatched token must not reach WHAM");
 
-    writeFakeCodexCredential(agentDir, 'fixture-account-b');
-    harness.setCodexAccountId('fixture-account-b');
+    writeFakeCodexCredential(agentDir, "fixture-account-b");
+    harness.setCodexAccountId("fixture-account-b");
     authGate.resolve();
     await flushAsync();
     await flushAsync();
     await flushAsync();
 
-    assert.equal(fetchCalls.length, 1, 'only the replacement account may be fetched');
+    assert.equal(fetchCalls.length, 1, "only the replacement account may be fetched");
     assert.equal(
       fetchCalls[0].headers.Authorization,
-      `Bearer ${fakeCodexToken('fixture-account-b')}`,
+      `Bearer ${fakeCodexToken("fixture-account-b")}`,
     );
-    assert.equal(fetchCalls[0].headers['ChatGPT-Account-Id'], 'fixture-account-b');
+    assert.equal(fetchCalls[0].headers["ChatGPT-Account-Id"], "fixture-account-b");
   } finally {
     globalThis.fetch = originalFetch;
     harness.footerState.footer?.dispose();
   }
 });
 
-test('minimal-footer ignores late Codex results after shutdown and replacement session_start', async (t) => {
+test("minimal-footer ignores late Codex results after shutdown and replacement session_start", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account');
+  writeFakeCodexCredential(agentDir, "fixture-account");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
   });
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -1117,12 +1117,12 @@ test('minimal-footer ignores late Codex results after shutdown and replacement s
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     assert.equal(requests.length, 1);
 
-    await harness.handlers.get('session_shutdown')({}, harness.context);
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_shutdown")({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     assert.equal(requests.length, 2);
 
@@ -1130,42 +1130,42 @@ test('minimal-footer ignores late Codex results after shutdown and replacement s
     await flushAsync();
     await flushAsync();
     assert.doesNotMatch(
-      harness.footerState.footer.render(80).join('\n'),
+      harness.footerState.footer.render(80).join("\n"),
       /5h 11%/,
-      'a result from the shut-down session must not repaint its replacement',
+      "a result from the shut-down session must not repaint its replacement",
     );
 
     requests[1].request.resolve(usageResponse(29));
     await flushAsync();
     await flushAsync();
-    assert.match(harness.footerState.footer.render(80).join('\n'), /5h 29%/);
+    assert.match(harness.footerState.footer.render(80).join("\n"), /5h 29%/);
   } finally {
     globalThis.fetch = originalFetch;
     harness.footerState.footer?.dispose();
   }
 });
 
-test('minimal-footer does not fetch or render usage for direct OpenAI API-key models', async (t) => {
+test("minimal-footer does not fetch or render usage for direct OpenAI API-key models", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai', api: 'openai-responses', id: 'gpt-6-astra' },
+    model: { provider: "openai", api: "openai-responses", id: "gpt-6-astra" },
     oauth: false,
   });
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
   globalThis.fetch = async () => {
     fetchCalls += 1;
-    throw new Error('fixture fetch should not be called');
+    throw new Error("fixture fetch should not be called");
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
-    const rendered = harness.footerState.footer.render(80).join('\n');
+    const rendered = harness.footerState.footer.render(80).join("\n");
     assert.doesNotMatch(rendered, /usage (?:unsupported|unavailable|\d)/);
     assert.equal(fetchCalls, 0);
     assert.deepEqual(harness.authCalls, []);
@@ -1175,27 +1175,27 @@ test('minimal-footer does not fetch or render usage for direct OpenAI API-key mo
   }
 });
 
-test('minimal-footer shows Codex usage unavailable without OAuth and does not fetch', async (t) => {
+test("minimal-footer shows Codex usage unavailable without OAuth and does not fetch", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
     oauth: false,
   });
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
   globalThis.fetch = async () => {
     fetchCalls += 1;
-    throw new Error('fixture fetch should not be called without OAuth');
+    throw new Error("fixture fetch should not be called without OAuth");
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
-    const rendered = harness.footerState.footer.render(80).join('\n');
+    const rendered = harness.footerState.footer.render(80).join("\n");
     assert.match(rendered, /usage unavailable/);
     assert.equal(fetchCalls, 0);
     assert.deepEqual(harness.authCalls, []);
@@ -1205,21 +1205,21 @@ test('minimal-footer shows Codex usage unavailable without OAuth and does not fe
   }
 });
 
-test('minimal-footer clears stale usage after HTTP 429 and thrown fetch errors', async (t) => {
+test("minimal-footer clears stale usage after HTTP 429 and thrown fetch errors", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
-  writeJson(path.join(agentDir, 'extensions', 'minimal-footer.json'), {
+  writeJson(path.join(agentDir, "extensions", "minimal-footer.json"), {
     gitStatus: { enabled: false },
   });
-  writeFakeCodexCredential(agentDir, 'fixture-account');
+  writeFakeCodexCredential(agentDir, "fixture-account");
 
   const harness = createFooterHarness({
     projectDir,
-    model: { provider: 'openai-codex', api: 'openai-codex-responses', id: 'gpt-5.5' },
+    model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
   });
   const outcomes = [
     usageResponse(17),
     { ok: false, status: 429 },
-    new Error('fixture network failure'),
+    new Error("fixture network failure"),
   ];
   const originalFetch = globalThis.fetch;
   const fetchCalls = [];
@@ -1231,22 +1231,22 @@ test('minimal-footer clears stale usage after HTTP 429 and thrown fetch errors',
   };
 
   try {
-    await harness.handlers.get('session_start')({}, harness.context);
+    await harness.handlers.get("session_start")({}, harness.context);
     await flushAsync();
     await flushAsync();
-    assert.match(harness.footerState.footer.render(80).join('\n'), /5h 17%/);
+    assert.match(harness.footerState.footer.render(80).join("\n"), /5h 17%/);
 
-    await harness.handlers.get('model_select')({}, harness.context);
+    await harness.handlers.get("model_select")({}, harness.context);
     await flushAsync();
     await flushAsync();
-    const rateLimited = harness.footerState.footer.render(80).join('\n');
+    const rateLimited = harness.footerState.footer.render(80).join("\n");
     assert.match(rateLimited, /usage unavailable/);
     assert.doesNotMatch(rateLimited, /5h 17%/);
 
-    await harness.handlers.get('model_select')({}, harness.context);
+    await harness.handlers.get("model_select")({}, harness.context);
     await flushAsync();
     await flushAsync();
-    const failed = harness.footerState.footer.render(80).join('\n');
+    const failed = harness.footerState.footer.render(80).join("\n");
     assert.match(failed, /usage unavailable/);
     assert.doesNotMatch(failed, /5h 17%/);
     assert.equal(fetchCalls.length, 3);
@@ -1256,8 +1256,8 @@ test('minimal-footer clears stale usage after HTTP 429 and thrown fetch errors',
   }
 });
 
-test('minimal-footer renderFooterLines renders branch, repo, context, thinking, dumb-zone, usage, and experimental marker from fake data', (t) => {
-  setEnv(t, 'PI_EXPERIMENTAL', '1');
+test("minimal-footer renderFooterLines renders branch, repo, context, thinking, dumb-zone, usage, and experimental marker from fake data", (t) => {
+  setEnv(t, "PI_EXPERIMENTAL", "1");
 
   const config = {
     context: {
@@ -1265,8 +1265,8 @@ test('minimal-footer renderFooterLines renders branch, repo, context, thinking, 
       dumbZone: {
         enabled: true,
         thresholdTokens: 200000,
-        label: 'DUMB ZONE',
-        color: 'error',
+        label: "DUMB ZONE",
+        color: "error",
       },
     },
     codexUsage: {
@@ -1276,18 +1276,18 @@ test('minimal-footer renderFooterLines renders branch, repo, context, thinking, 
       windows: {
         primary: {
           enabled: true,
-          label: 'auto',
+          label: "auto",
         },
         secondary: {
           enabled: true,
-          label: 'auto',
+          label: "auto",
         },
       },
     },
     experimentalMarker: {
       enabled: true,
-      label: 'xp',
-      color: 'warning',
+      label: "xp",
+      color: "warning",
     },
     gitStatus: {
       enabled: true,
@@ -1300,17 +1300,17 @@ test('minimal-footer renderFooterLines renders branch, repo, context, thinking, 
   assert.deepEqual(
     renderFooterLines({
       width: 40,
-      cwd: '/tmp/workspace/sample-repo',
+      cwd: "/tmp/workspace/sample-repo",
       config,
-      branch: 'feature/footer-tests',
-      gitStatus: '!1 +2 ↑3 • PR #44',
+      branch: "feature/footer-tests",
+      gitStatus: "!1 +2 ↑3 • PR #44",
       contextUsage: {
         percent: 87.4,
         tokens: 250000,
       },
-      modelId: 'gpt-5.5',
-      modelProvider: 'openai-codex',
-      thinkingLevel: 'high',
+      modelId: "gpt-5.5",
+      modelProvider: "openai-codex",
+      thinkingLevel: "high",
       theme: plainTheme,
       usageSnapshot: {
         primary: { usedPercent: 12.4, windowSeconds: 18_000 },
@@ -1319,23 +1319,23 @@ test('minimal-footer renderFooterLines renders branch, repo, context, thinking, 
       },
     }),
     [
-      'feature/footer-tests · !1 +2 ↑3 • PR #44',
-      'sample-repo',
-      '87.4% · DUMB ZONE · 5h 12% · 7d 68% · xp',
-      'gpt-5.5 high',
+      "feature/footer-tests · !1 +2 ↑3 • PR #44",
+      "sample-repo",
+      "87.4% · DUMB ZONE · 5h 12% · 7d 68% · xp",
+      "gpt-5.5 high",
     ],
   );
 
   const themedCalls = [];
   const themedLines = renderFooterLines({
     width: 80,
-    cwd: '/tmp/workspace/sample-repo',
+    cwd: "/tmp/workspace/sample-repo",
     config,
-    branch: 'main',
+    branch: "main",
     contextUsage: { percent: 10, tokens: 1 },
-    modelId: 'gpt-6-astra',
-    modelProvider: 'openai',
-    thinkingLevel: 'off',
+    modelId: "gpt-6-astra",
+    modelProvider: "openai",
+    thinkingLevel: "off",
     theme: {
       fg(color, text) {
         themedCalls.push(color);
@@ -1347,21 +1347,21 @@ test('minimal-footer renderFooterLines renders branch, repo, context, thinking, 
       primary: { usedPercent: 99 },
       fetchedAt: 123,
     },
-    usageStatus: 'unsupported',
+    usageStatus: "unsupported",
   });
-  assert.match(themedLines.join('\n'), /usage unsupported/);
-  assert.ok(themedCalls.includes('dim'));
+  assert.match(themedLines.join("\n"), /usage unsupported/);
+  assert.ok(themedCalls.includes("dim"));
 
   const narrowLines = renderFooterLines({
     width: 1,
-    cwd: '/tmp/workspace/sample-repo',
+    cwd: "/tmp/workspace/sample-repo",
     config,
-    branch: '',
+    branch: "",
     modelId: undefined,
-    modelProvider: 'openai',
-    thinkingLevel: 'off',
+    modelProvider: "openai",
+    thinkingLevel: "off",
     theme: plainTheme,
-    usageStatus: 'unsupported',
+    usageStatus: "unsupported",
   });
   assert.equal(narrowLines.length, 4);
 });

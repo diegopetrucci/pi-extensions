@@ -1,5 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
-import { gunzipSync } from 'node:zlib';
+import { readFile, stat } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 
 const MAX_TARBALL_BYTES = 8 * 1024 * 1024;
 const MAX_TAR_PAYLOAD_BYTES = 16 * 1024 * 1024;
