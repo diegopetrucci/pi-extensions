@@ -37,6 +37,7 @@ test("agent-workflow-audit builds execution and plan-only prompts with git-statu
     executePrompt,
     /runtime guard blocks deploy\/publish\/VCS-mutating\/destructive commands/,
   );
+  assert.doesNotMatch(executePrompt, /The Last Harness/);
 
   const executeUserPrompt = buildUserPrompt({
     cwd: "/repo",
@@ -71,6 +72,53 @@ test("agent-workflow-audit builds execution and plan-only prompts with git-statu
     report,
     /Git status check: changed \(1 dirty item\(s\) before, 2 dirty item\(s\) after\)\./,
   );
+});
+
+test("agent-workflow-audit classifies timeout cleanup separately from caller cancellation", async () => {
+  const { classifyRunFailure, createAuditAbortController } = await loadAuditTestUtils();
+  let childAborts = 0;
+  let callerNotifications = 0;
+  const controller = createAuditAbortController(
+    () => {
+      childAborts += 1;
+    },
+    () => {
+      callerNotifications += 1;
+    },
+  );
+
+  controller.abortForCleanup();
+  assert.equal(childAborts, 1);
+  assert.equal(callerNotifications, 0);
+  assert.equal(controller.callerAborted, false);
+  assert.deepEqual(
+    classifyRunFailure(
+      new Error("/agent-workflow-audit timed out after 720 seconds."),
+      controller.callerAborted,
+    ),
+    {
+      status: "error",
+      message: "/agent-workflow-audit timed out after 720 seconds.",
+      error: "/agent-workflow-audit timed out after 720 seconds.",
+    },
+  );
+
+  const abortError = Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+  assert.deepEqual(classifyRunFailure(abortError, false), {
+    status: "error",
+    message: "The operation was aborted",
+    error: "The operation was aborted",
+  });
+
+  controller.abortFromCaller();
+  assert.equal(childAborts, 2);
+  assert.equal(callerNotifications, 1);
+  assert.equal(controller.callerAborted, true);
+  assert.deepEqual(classifyRunFailure(abortError, controller.callerAborted), {
+    status: "aborted",
+    message: "Aborted",
+    error: undefined,
+  });
 });
 
 test("agent-workflow-audit rejects provider errors, tool-only final turns, and missing final reports", async () => {
