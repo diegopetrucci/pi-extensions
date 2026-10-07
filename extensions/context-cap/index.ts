@@ -283,6 +283,27 @@ export default function contextCapExtension(pi: ExtensionAPI) {
 		restoreTouchedModels(holderToken, heldModels);
 	});
 
+	function enableContextCap(ctx: ExtensionContext): void {
+		enabled = true;
+		const result = applyContextCap(pi, ctx.model, holderToken, heldModels);
+		const changed = result?.changed ? 1 : 0;
+		const unavailable = unavailableReason(result);
+		ctx.ui.setStatus("context-cap", unavailable ? "ctx cap unavailable" : `ctx cap ${formatTokens(DEFAULT_MAX_CONTEXT_WINDOW)}`);
+		ctx.ui.notify(
+			unavailable
+				? `Context cap enabled, but unavailable: ${unavailable}.`
+				: `Context cap enabled (${changed} active model window(s) capped/restored).`,
+			"info",
+		);
+	}
+
+	function disableContextCap(ctx: ExtensionContext): void {
+		enabled = false;
+		const changed = restoreTouchedModels(holderToken, heldModels);
+		ctx.ui.setStatus("context-cap", undefined);
+		ctx.ui.notify(`Context cap disabled for this extension session (${changed} active model window(s) restored).`, "info");
+	}
+
 	pi.registerCommand("context-cap", {
 		description: "Toggle the 200k effective context-window cap for auto-compaction",
 		getArgumentCompletions: (prefix) => {
@@ -294,47 +315,18 @@ export default function contextCapExtension(pi: ExtensionAPI) {
 			const action = args.trim().toLowerCase() || "toggle";
 
 			if (action === "on" || action === "enable") {
-				enabled = true;
-				const result = applyContextCap(pi, ctx.model, holderToken, heldModels);
-				const changed = result?.changed ? 1 : 0;
-				const unavailable = unavailableReason(result);
-				ctx.ui.setStatus("context-cap", unavailable ? "ctx cap unavailable" : `ctx cap ${formatTokens(DEFAULT_MAX_CONTEXT_WINDOW)}`);
-				ctx.ui.notify(
-					unavailable
-						? `Context cap enabled, but unavailable: ${unavailable}.`
-						: `Context cap enabled (${changed} active model window(s) capped/restored).`,
-					"info",
-				);
+				enableContextCap(ctx);
 				return;
 			}
 
 			if (action === "off" || action === "disable") {
-				enabled = false;
-				const changed = restoreTouchedModels(holderToken, heldModels);
-				ctx.ui.setStatus("context-cap", undefined);
-				ctx.ui.notify(`Context cap disabled for this extension session (${changed} active model window(s) restored).`, "info");
+				disableContextCap(ctx);
 				return;
 			}
 
 			if (action === "toggle") {
-				if (enabled) {
-					enabled = false;
-					const changed = restoreTouchedModels(holderToken, heldModels);
-					ctx.ui.setStatus("context-cap", undefined);
-					ctx.ui.notify(`Context cap disabled for this extension session (${changed} active model window(s) restored).`, "info");
-				} else {
-					enabled = true;
-					const result = applyContextCap(pi, ctx.model, holderToken, heldModels);
-					const changed = result?.changed ? 1 : 0;
-					const unavailable = unavailableReason(result);
-					ctx.ui.setStatus("context-cap", unavailable ? "ctx cap unavailable" : `ctx cap ${formatTokens(DEFAULT_MAX_CONTEXT_WINDOW)}`);
-					ctx.ui.notify(
-						unavailable
-							? `Context cap enabled, but unavailable: ${unavailable}.`
-							: `Context cap enabled (${changed} active model window(s) capped/restored).`,
-						"info",
-					);
-				}
+				if (enabled) disableContextCap(ctx);
+				else enableContextCap(ctx);
 				return;
 			}
 
