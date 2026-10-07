@@ -256,9 +256,9 @@ Notes:
   survives this floor.
 - `gate.breakEvenThresholdByState` lets `idle` vs `mid_loop` agent states use
   different thresholds; `idle` defaults to `22` and
-  `mid_loop` defaults to `1`. Real
-  mid-loop/idle detection is wired through the `context` event handler
-  (pe-zy4s): the state is classified straight from the message payload —
+  `mid_loop` defaults to `1`. Real mid-loop/idle detection is wired through
+  the `context` event handler: the state is classified straight from the
+  message payload —
   `idle` if the most recent relevant message is a user message (this is the
   first LLM call of the turn), `mid_loop` if it's an assistant message or a
   tool result (the agent is iterating mid-turn). The representative-corpus
@@ -396,7 +396,7 @@ candidates, both overall and split by idle/mid-loop agent state.
 
 ## Comparison
 
-- **[opencode-dynamic-context-pruning](https://github.com/sculptdotfun/opencode-dynamic-context-pruning) ("pi-dcp" upstream)**:
+- **[opencode-dynamic-context-pruning](https://github.com/Tarquinen/opencode-dynamic-context-pruning) ("pi-dcp" upstream)**:
   the OpenCode plugin this extension takes its name and general problem space
   from. It ships a model-invoked `compress` tool (agentic, nested-summary
   compression), autonomous nudges, manual mode, and a full `/dcp` command
@@ -428,7 +428,7 @@ net benefit, at sufficient candidate volume, with enough remaining-calls
 runway per session to plausibly amortize a compression summary's own token
 cost — see `docs/v2-design.md` §4 for the exact go/no-go bar.
 
-The representative-corpus run of the benchmark harness (`pe-c5n9`, over
+The representative-corpus run of the benchmark harness (over
 `~/.the-last-harness/agent/sessions`: 1,390+ session files, 556 gate-eligible
 candidates — see the corpus-choice note above) produced:
 

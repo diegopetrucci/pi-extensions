@@ -2,7 +2,7 @@
 
 Status: design-only, not implemented. This document is the pre-descope plan for v2
 (agentic, model-driven compression). It exists so that if the v1 benchmark evidence
-(pe-e9pv) supports building v2, we can cut implementation tickets directly from it
+supports building v2, we can cut implementation tickets directly from it
 without re-researching OpenCode DCP or re-deriving the Pi extension mapping.
 
 Scope of v1 (already shipped, for contrast): automatic, non-agentic strategies only
@@ -19,9 +19,9 @@ so most of this document is about *how to build it safely on Pi*, not just *what
 OpenCode DCP does*.
 
 Primary sources:
-- OpenCode DCP local checkout: `/Users/diegopetrucci/Developer/misc/opencode-dynamic-context-pruning`
+- OpenCode DCP: [opencode-dynamic-context-pruning](https://github.com/Tarquinen/opencode-dynamic-context-pruning)
   (README.md, `lib/compress/`, `lib/messages/`, `lib/prompts/`, `lib/strategies/`, `lib/hooks.ts`).
-  All bare paths like `lib/compress/range.ts` below refer to this checkout.
+  All bare paths like `lib/compress/range.ts` below refer to that repository.
 - Pi extension API: `packages/coding-agent/docs/extensions.md`, `session-format.md`,
   `compaction.md`, `src/core/extensions/types.ts` in the local Pi checkout.
 - Pi provider serialization: `packages/ai/src/types.ts`, `packages/ai/src/api/*.ts`
@@ -474,7 +474,7 @@ model's own summary text. v2 must ship with:
 ## 4. Benchmark decision gate
 
 v2 (agentic compression, nudges, manual mode, the full command surface) is
-**only** authorized to proceed once `pe-e9pv` benchmark evidence, run against
+**only** authorized to proceed once benchmark evidence, run against
 a representative corpus of real sessions, shows a *favorable* realized net
 benefit at a viable recommended threshold. Concrete go/no-go bar:
 
@@ -509,21 +509,21 @@ benefit at a viable recommended threshold. Concrete go/no-go bar:
 net benefit at every viable threshold, or candidate volume/p90 remaining-calls
 stay too low across a broader corpus to plausibly amortize summary overhead —
 in that world, v1's mechanical strategies plus a better-tuned gate threshold
-(`pe-s2ho`) are the right stopping point, and v2 should not be built.
+are the right stopping point, and v2 should not be built.
 
-### 4.1 Current baseline (representative-corpus run, pe-c5n9)
+### 4.1 Current baseline (representative-corpus run)
 
 The superseded first real-corpus run (19 candidates/32 sessions, all
 gate-rejected, p50=1/p90=5 remaining calls, recommended T=1) was recorded
 here for continuity but is now stale: it was affected by a sweep-cap bug
-(`pe-7oej`, fixed) and, more importantly, used a corpus dominated by short
+(since fixed) and, more importantly, used a corpus dominated by short
 orchestrator/subagent-delegated sessions rather than the long, tool-heavy
 agent sessions DCP is designed for. See the corpus-choice note in the
 extension README's benchmark-harness section: `~/.pi/agent/sessions` (the
 default) structurally under-reports candidates and skews remaining-calls low
 compared to a representative corpus of long agent sessions.
 
-The `pe-c5n9` run against the representative corpus
+The representative-corpus run
 (`~/.the-last-harness/agent/sessions`: 1,390+ session files) produced:
 
 - **556 gate-eligible candidates** across strategies:
@@ -555,7 +555,7 @@ Anthropic case — total realized benefit across the whole 1,390-session corpus
 is only ~20.6k token-units: economically marginal, on the order of pennies.
 Savings only become material at weaker caching, r>=0.25.
 
-**pe-zy4s update (2026-07-08)**: the `mid_loop`/`idle` split above was
+**Update (2026-07-08)**: the `mid_loop`/`idle` split above was
 measured under a turn-END definition of "idle" (this call IS the turn's
 final assistant message, only knowable in hindsight via replay), which is not
 something the live runtime can observe in advance. Once real runtime
@@ -583,7 +583,7 @@ the §3 hardening prerequisites (summary quality, provider-serialization
 safety, prompt-injection audit surface) actually landing first; the benchmark
 evidence alone does not waive those correctness requirements.
 
-**Action**: treat `pe-c5n9`'s numbers as the current baseline for any future
+**Action**: treat the representative-corpus numbers as the current baseline for any future
 re-run; re-derive via `scripts/benchmark.mjs ~/.the-last-harness/agent/sessions
 --ratio 0.1,0.25,0.5,0.9` if the representative corpus changes meaningfully
 (e.g. materially different session-length mix).
