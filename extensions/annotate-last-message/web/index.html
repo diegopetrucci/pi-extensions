@@ -10,8 +10,8 @@
    * overrides semantic and Markdown colours from ctx.ui.theme. When Pi's theme
    * cannot provide a token, the matching dark/light fallback remains readable.
    *
-   * The --md* fallback values below are kept in sync with the FALLBACK
-   * object in theme.ts so this template renders correctly when the injected
+   * The --md* fallback values below are kept in sync with DARK_FALLBACK
+   * in theme.ts so this template renders correctly when the injected
    * theme block is absent (e.g. opened standalone in a browser for debugging).
    */
   :root {
@@ -31,7 +31,7 @@
     --error: #ffb3b3;
     --warning: #f4c95d;
 
-    /* Markdown token colours — kept in sync with FALLBACK in theme.ts */
+    /* Markdown token colours — kept in sync with DARK_FALLBACK in theme.ts */
     --mdHeading: #f4c95d;
     --mdLink: #7dd3fc;
     --mdLinkUrl: #8a8a8a;
