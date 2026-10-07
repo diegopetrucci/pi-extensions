@@ -83,4 +83,4 @@ Example:
 
 - Hooks the `agent_settled` event so automatic retries, compaction retries, and queued follow-ups do not trigger intermediate notifications.
 - The extension sends directly to the brrr webhook; it does not require the `brrr` CLI at runtime.
-- By default, notifications are skipped unless the Mac has been idle for at least 20 seconds.
+- Idle skip is macOS-only. By default, notifications are skipped unless the Mac has been idle for at least 20 seconds. Non-macOS always notifies.

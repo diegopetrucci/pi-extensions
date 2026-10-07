@@ -87,7 +87,7 @@ export const POWERSHELL_AST_MARKER = "PI_PERMISSION_GATE_AST:";
  * It parses but never invokes the candidate command and returns only the
  * bounded command metadata needed by the guard.
  */
-export const POWERSHELL_AST_SCRIPT = String.raw`
+const POWERSHELL_AST_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
@@ -182,7 +182,7 @@ export function buildPowerShellAstCommand(command: string): string {
 	return `$encodedSource = '${encodedCommand}'\n${POWERSHELL_AST_SCRIPT}`;
 }
 
-export type PowerShellSafetyAnalysis = {
+type PowerShellSafetyAnalysis = {
 	risky: boolean;
 	reason?: string;
 };

@@ -43,13 +43,13 @@ type McpHttpServerConfig = McpServerConfigBase & {
   oauth?: McpOAuthConfig;
 };
 
-export type ParsedServer = {
+type ParsedServer = {
   name: string;
   // Cast to McpServerConfig (the public Pi type) for use with pi.registerMcpServer.
   config: McpServerConfig;
 };
 
-export type ParseResult = {
+type ParseResult = {
   servers: ParsedServer[];
   warnings: string[];
 };
