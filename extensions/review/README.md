@@ -1,6 +1,6 @@
 # review
 
-A standalone tlh/pi review extension that adds `/review` and `/end-review`, adapted from the upstream [`mitsuhiko/agent-stuff`](https://github.com/mitsuhiko/agent-stuff/blob/main/extensions/review.ts) implementation.
+A standalone pi review extension that adds `/review` and `/end-review`, adapted from the upstream [`mitsuhiko/agent-stuff`](https://github.com/mitsuhiko/agent-stuff/blob/main/extensions/review.ts) implementation.
 
 ## Install
 
