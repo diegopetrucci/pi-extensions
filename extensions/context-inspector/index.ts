@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-const EXTENSION_ID = "context-inspector";
 const IMAGE_TOKEN_ESTIMATE = 1200;
 const DETAIL_TEXT_LIMIT = 16_000;
 const PREVIEW_TEXT_LIMIT = 700;
@@ -883,16 +882,6 @@ function analyzeProjection(projection: MinimalSessionProjection, redact: boolean
 	return { segments: state.segments, messageCount };
 }
 
-function resolveCurrentContextAnalysis(
-	ctx: ExtensionCommandContext,
-	branchEntries: MinimalEntry[],
-	redact: boolean,
-): AnalysisResult {
-	const projection = resolveSessionProjection(ctx);
-	if (projection) return analyzeProjection(projection, redact);
-	return analyzeEntries(resolveCurrentContextEntries(ctx, branchEntries), redact);
-}
-
 function collectToolSchemaText(pi: ExtensionAPI): string {
 	try {
 		const activeToolNames = new Set(pi.getActiveTools());
@@ -1040,7 +1029,7 @@ function finalizeDataset(
 }
 
 function getSessionName(ctx: ExtensionCommandContext): string | undefined {
-	return safeCall(() => ctx.sessionManager.getSessionName()) ?? safeCall(() => (ctx as unknown as { getSessionName?: () => string | undefined }).getSessionName?.());
+	return safeCall(() => ctx.sessionManager.getSessionName());
 }
 
 function latestRoutedModel(messages: MinimalMessage[]): RoutedModel | undefined {
