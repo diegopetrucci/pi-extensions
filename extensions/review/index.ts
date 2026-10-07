@@ -554,7 +554,6 @@ async function loadProjectReviewGuidelines(cwd: string): Promise<string | null> 
 
 async function getMergeBase(pi: ExtensionAPI, branch: string): Promise<string | null> {
   try {
-    // First try to get the upstream tracking branch
     const { stdout: upstream, code: upstreamCode } = await pi.exec("git", [
       "rev-parse",
       "--abbrev-ref",
@@ -572,7 +571,6 @@ async function getMergeBase(pi: ExtensionAPI, branch: string): Promise<string | 
       }
     }
 
-    // Fall back to using the branch directly
     const { stdout: mergeBase, code } = await pi.exec("git", ["merge-base", "HEAD", branch]);
     if (code === 0 && mergeBase.trim()) {
       return mergeBase.trim();
@@ -732,7 +730,6 @@ async function getCurrentBranch(pi: ExtensionAPI): Promise<string | null> {
 }
 
 async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
-  // Try to get from remote HEAD
   const { stdout, code } = await pi.exec("git", [
     "symbolic-ref",
     "refs/remotes/origin/HEAD",
@@ -742,12 +739,11 @@ async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
     return stdout.trim().replace("origin/", "");
   }
 
-  // Fall back to checking if main or master exists
   const branches = await getLocalBranches(pi);
   if (branches.includes("main")) return "main";
   if (branches.includes("master")) return "master";
 
-  return "main"; // Default fallback
+  return "main";
 }
 
 async function buildReviewPrompt(
@@ -1153,19 +1149,16 @@ export default function reviewExtension(pi: ExtensionAPI) {
   });
 
   async function getSmartDefault(): Promise<"uncommitted" | "baseBranch" | "commit"> {
-    // Priority 1: If there are uncommitted changes, default to reviewing them
     if (await hasUncommittedChanges(pi)) {
       return "uncommitted";
     }
 
-    // Priority 2: If on a feature branch (not the default branch), default to PR-style review
     const currentBranch = await getCurrentBranch(pi);
     const defaultBranch = await getDefaultBranch(pi);
     if (currentBranch && currentBranch !== defaultBranch) {
       return "baseBranch";
     }
 
-    // Priority 3: Default to reviewing a specific commit
     return "commit";
   }
 
@@ -1312,43 +1305,20 @@ export default function reviewExtension(pi: ExtensionAPI) {
     }
   }
 
-  async function showBranchSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
-    const branches = await getLocalBranches(pi);
-    const currentBranch = await getCurrentBranch(pi);
-    const defaultBranch = await getDefaultBranch(pi);
-
-    // Never offer the current branch as a base branch (reviewing against itself is meaningless).
-    const candidateBranches = currentBranch
-      ? branches.filter((b) => b !== currentBranch)
-      : branches;
-
-    if (candidateBranches.length === 0) {
-      ctx.ui.notify(
-        currentBranch
-          ? `No other branches found (current branch: ${currentBranch})`
-          : "No branches found",
-        "error",
-      );
-      return null;
-    }
-
-    // Sort branches with default branch first
-    const sortedBranches = candidateBranches.sort((a, b) => {
-      if (a === defaultBranch) return -1;
-      if (b === defaultBranch) return 1;
-      return a.localeCompare(b);
-    });
-
-    const items: SelectItem[] = sortedBranches.map((branch) => ({
-      value: branch,
-      label: branch,
-      description: branch === defaultBranch ? "(default)" : "",
-    }));
-
-    const result = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) => {
+  async function showSearchableSelect<T>(
+    ctx: ExtensionContext,
+    options: {
+      title: string;
+      items: SelectItem[];
+      emptyCopy: string;
+      mapResult: (item: SelectItem) => T | null;
+    },
+  ): Promise<T | null> {
+    const { title, items, emptyCopy, mapResult } = options;
+    return ctx.ui.custom<T | null>((tui, theme, keybindings, done) => {
       const container = new Container();
       container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-      container.addChild(new Text(theme.fg("accent", theme.bold("Select base branch"))));
+      container.addChild(new Text(theme.fg("accent", theme.bold(title))));
 
       const searchInput = new Input();
       container.addChild(searchInput);
@@ -1367,7 +1337,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
       const updateList = () => {
         listContainer.clear();
         if (filteredItems.length === 0) {
-          listContainer.addChild(new Text(theme.fg("warning", "  No matching branches")));
+          listContainer.addChild(new Text(theme.fg("warning", emptyCopy)));
           selectList = null;
           return;
         }
@@ -1380,7 +1350,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
           noMatch: (text) => theme.fg("warning", text),
         });
 
-        selectList.onSelect = (item) => done(item.value);
+        selectList.onSelect = (item) => done(mapResult(item));
         selectList.onCancel = () => done(null);
         listContainer.addChild(selectList);
       };
@@ -1428,9 +1398,49 @@ export default function reviewExtension(pi: ExtensionAPI) {
         },
       };
     });
+  }
 
-    if (!result) return null;
-    return { type: "baseBranch", branch: result };
+  async function showBranchSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
+    const branches = await getLocalBranches(pi);
+    const currentBranch = await getCurrentBranch(pi);
+    const defaultBranch = await getDefaultBranch(pi);
+
+    // Never offer the current branch as a base branch (reviewing against itself is meaningless).
+    const candidateBranches = currentBranch
+      ? branches.filter((b) => b !== currentBranch)
+      : branches;
+
+    if (candidateBranches.length === 0) {
+      ctx.ui.notify(
+        currentBranch
+          ? `No other branches found (current branch: ${currentBranch})`
+          : "No branches found",
+        "error",
+      );
+      return null;
+    }
+
+    // Sort branches with default branch first
+    const sortedBranches = candidateBranches.sort((a, b) => {
+      if (a === defaultBranch) return -1;
+      if (b === defaultBranch) return 1;
+      return a.localeCompare(b);
+    });
+
+    const items: SelectItem[] = sortedBranches.map((branch) => ({
+      value: branch,
+      label: branch,
+      description: branch === defaultBranch ? "(default)" : "",
+    }));
+
+    const branch = await showSearchableSelect(ctx, {
+      title: "Select base branch",
+      items,
+      emptyCopy: "  No matching branches",
+      mapResult: (item) => item.value,
+    });
+    if (!branch) return null;
+    return { type: "baseBranch", branch };
   }
 
   async function showCommitSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
@@ -1447,101 +1457,14 @@ export default function reviewExtension(pi: ExtensionAPI) {
       description: "",
     }));
 
-    const result = await ctx.ui.custom<{ sha: string; title: string } | null>(
-      (tui, theme, keybindings, done) => {
-        const container = new Container();
-        container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-        container.addChild(new Text(theme.fg("accent", theme.bold("Select commit to review"))));
-
-        const searchInput = new Input();
-        container.addChild(searchInput);
-        container.addChild(new Spacer(1));
-
-        const listContainer = new Container();
-        container.addChild(listContainer);
-        container.addChild(
-          new Text(theme.fg("dim", "Type to filter • enter to select • esc to cancel")),
-        );
-        container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-
-        let filteredItems = items;
-        let selectList: SelectList | null = null;
-
-        const updateList = () => {
-          listContainer.clear();
-          if (filteredItems.length === 0) {
-            listContainer.addChild(new Text(theme.fg("warning", "  No matching commits")));
-            selectList = null;
-            return;
-          }
-
-          selectList = new SelectList(filteredItems, Math.min(filteredItems.length, 10), {
-            selectedPrefix: (text) => theme.fg("accent", text),
-            selectedText: (text) => theme.fg("accent", text),
-            description: (text) => theme.fg("muted", text),
-            scrollInfo: (text) => theme.fg("dim", text),
-            noMatch: (text) => theme.fg("warning", text),
-          });
-
-          selectList.onSelect = (item) => {
-            const commit = commits.find((c) => c.sha === item.value);
-            if (commit) {
-              done(commit);
-            } else {
-              done(null);
-            }
-          };
-          selectList.onCancel = () => done(null);
-          listContainer.addChild(selectList);
-        };
-
-        const applyFilter = () => {
-          const query = searchInput.getValue();
-          filteredItems = query
-            ? fuzzyFilter(
-                items,
-                query,
-                (item) => `${item.label} ${item.value} ${item.description ?? ""}`,
-              )
-            : items;
-          updateList();
-        };
-
-        applyFilter();
-
-        return {
-          render(width: number) {
-            return container.render(width);
-          },
-          invalidate() {
-            container.invalidate();
-          },
-          handleInput(data: string) {
-            if (
-              keybindings.matches(data, "tui.select.up") ||
-              keybindings.matches(data, "tui.select.down") ||
-              keybindings.matches(data, "tui.select.confirm") ||
-              keybindings.matches(data, "tui.select.cancel")
-            ) {
-              if (selectList) {
-                selectList.handleInput(data);
-              } else if (keybindings.matches(data, "tui.select.cancel")) {
-                done(null);
-              }
-              tui.requestRender();
-              return;
-            }
-
-            searchInput.handleInput(data);
-            applyFilter();
-            tui.requestRender();
-          },
-        };
-      },
-    );
-
-    if (!result) return null;
-    return { type: "commit", sha: result.sha, title: result.title };
+    const commit = await showSearchableSelect(ctx, {
+      title: "Select commit to review",
+      items,
+      emptyCopy: "  No matching commits",
+      mapResult: (item) => commits.find((candidate) => candidate.sha === item.value) ?? null,
+    });
+    if (!commit) return null;
+    return { type: "commit", sha: commit.sha, title: commit.title };
   }
 
   async function showFolderInput(ctx: ExtensionContext): Promise<ReviewTarget | null> {
@@ -1652,21 +1575,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
     pi.sendUserMessage(fullPrompt);
     return true;
-  }
-
-  async function handlePrCheckout(
-    ctx: ExtensionContext,
-    ref: string,
-  ): Promise<ReviewTarget | null> {
-    return checkoutPullRequest(pi, ctx, ref);
-  }
-
-  function isLoopCompatibleTarget(target: ReviewTarget): boolean {
-    if (target.type !== "commit") {
-      return true;
-    }
-
-    return false;
   }
 
   async function runLoopFixingReview(
@@ -1833,7 +1741,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
       if (parsed.target) {
         if (parsed.target.type === "pr") {
-          target = await handlePrCheckout(ctx, parsed.target.ref);
+          target = await checkoutPullRequest(pi, ctx, parsed.target.ref);
           if (!target) {
             ctx.ui.notify("PR review failed. Returning to review menu.", "warning");
           }
@@ -1856,7 +1764,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
           return;
         }
 
-        if (reviewLoopFixingEnabled && !isLoopCompatibleTarget(target)) {
+        if (reviewLoopFixingEnabled && target.type === "commit") {
           ctx.ui.notify("Loop mode does not work with commit review.", "error");
           if (fromSelector) {
             target = null;

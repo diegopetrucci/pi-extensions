@@ -1618,8 +1618,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
       let abortListenerAdded = false;
       const usage = createEmptyUsage();
 
-      const emit = (force = false) => {
-        void force;
+      const emit = () => {
         onUpdate?.({ content: [{ type: "text", text: lastContent }], details });
       };
 
@@ -1629,7 +1628,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
           details.status = "aborted";
           details.endedAt = Date.now();
           lastContent = "Aborted";
-          emit(true);
+          emit();
         },
       );
       const abortFromCaller = () => abortController.abortFromCaller();
@@ -1641,7 +1640,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
       }
 
       try {
-        emit(true);
+        emit();
 
         const systemPrompt = buildSystemPrompt({
           workspace,
@@ -1684,7 +1683,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
           details.model = candidate.details;
           details.turns = 0;
           details.toolCalls = [];
-          emit(true);
+          emit();
 
           const created = await createAgentSession({
             cwd: workspace,
@@ -1716,7 +1715,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
                 if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
                   details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
                 }
-                emit(true);
+                emit();
                 break;
               case "tool_execution_end": {
                 const call = details.toolCalls.find((item) => item.id === event.toolCallId);
@@ -1724,7 +1723,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
                   call.endedAt = Date.now();
                   call.isError = event.isError;
                 }
-                emit(true);
+                emit();
                 break;
               }
             }
@@ -1817,7 +1816,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
           lastContent = terminal.content;
         }
         details.endedAt = Date.now();
-        emit(true);
+        emit();
 
         return {
           content: [{ type: "text", text: lastContent }],
@@ -1831,7 +1830,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
         details.error = failure.error;
         details.endedAt = Date.now();
         lastContent = message;
-        emit(true);
+        emit();
 
         return {
           content: [{ type: "text", text: message }],

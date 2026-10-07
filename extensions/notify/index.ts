@@ -148,26 +148,7 @@ function windowsToastScript(title: string, body: string): string {
   ].join("; ");
 }
 
-/**
- * Inside tmux, terminal notifications are written to tmux, not to the terminal
- * that can act on them: tmux is the pane's emulator and parses the sequence
- * itself. tmux has no OSC 777 or OSC 99 handler (checked in 3.7b, whose OSC
- * dispatch covers 4/7/8/9;4/10/11/12/52/104/133) and does not forward OSC codes
- * it does not recognise, so both backends are silently dropped.
- *
- * tmux's DCS passthrough asks it to write a payload to the outer terminal
- * verbatim. Every ESC inside the payload must be doubled.
- *
- * Users must also allow passthrough in tmux.conf:
- *
- *   set -g allow-passthrough all
- *
- * `all` rather than `on`, because `on` only honours passthrough from panes that
- * are currently visible - which drops exactly the notification that matters,
- * the one fired while the user is looking at a different window. When
- * passthrough is disabled entirely, the wrapped sequence is dropped just like
- * the bare one, so wrapping is never a regression.
- */
+/** tmux drops unrecognized OSC, so wrap in DCS passthrough with doubled ESC. */
 function wrapForTmux(sequence: string): string {
   return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
 }

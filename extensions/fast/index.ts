@@ -143,11 +143,6 @@ function isPayloadRecord(payload: unknown): payload is PayloadRecord {
   return typeof payload === "object" && payload !== null && !Array.isArray(payload);
 }
 
-function modelKey(ctx: ExtensionContext): string {
-  const model = ctx.model;
-  return model ? `${model.provider}/${model.id}` : "no-model";
-}
-
 function isFastEnabled(state: SessionState): boolean {
   if (state.override === "on") return true;
   if (state.override === "off") return false;
