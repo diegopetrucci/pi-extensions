@@ -274,6 +274,12 @@ test("triage-comments parses paste, PR, URL, and help command forms", async () =
     target: "https://github.com/acme/widgets/pull/7",
   });
   assert.match(parseTriageCommandArgs("bogus").error, /Unknown \/triage-comments option: bogus/);
+  assert.match(parseTriageCommandArgs("manual").error, /Unknown \/triage-comments option: manual/);
+  assert.match(parseTriageCommandArgs("pull #42").error, /Unknown \/triage-comments option: pull/);
+  assert.match(
+    parseTriageCommandArgs("pull-request 7").error,
+    /Unknown \/triage-comments option: pull-request/,
+  );
 });
 
 test("triage-comments prepares aliases and normalizes GitHub-like comment input", async () => {
@@ -372,6 +378,7 @@ test("triage-comments bash guard allows read-only inspection commands and blocks
   for (const command of [
     "git status --short",
     "git branch --show-current",
+    "git branch --contains abc123def",
     "gh pr view 18",
     "gh api repos/acme/widgets/pulls/18",
     "pwd -P",
@@ -396,6 +403,62 @@ test("triage-comments bash guard allows read-only inspection commands and blocks
   for (const [command, pattern] of blockedCases) {
     assert.match(getBlockedBashReason(command), pattern, command);
   }
+});
+
+test("triage-comments bash guard blocks helper-executing git flags and local-file options", async () => {
+  const { getBlockedBashReason } = await loadTriageTestUtils();
+  const blockedCases = [
+    ["git blame --contents=.git/config src/index.ts", /--contents/],
+    ["git blame --con=.git/config src/index.ts", /--contents/],
+    ["git show --pathspec-from-file=.gitmodules HEAD", /--pathspec-from-file/],
+    ["git show --pathspec-from-f=.gitmodules HEAD", /--pathspec-from-file/],
+    ["git blame --ignore-revs-file=.git-blame-ignore-revs src/index.ts", /--ignore-revs-file/],
+    ["git blame --ignore-rev=.git-blame-ignore-revs src/index.ts", /--ignore-revs-file/],
+    ["git blame -S .git-blame-ignore-revs src/index.ts", /git blame -S/],
+    ["git blame -S.git-blame-ignore-revs src/index.ts", /git blame -S/],
+    ["git ls-files -X .git/info/exclude", /git ls-files -X\/--exclude-from/],
+    ["git ls-files --exclude-from=.git/info/exclude", /git ls-files -X\/--exclude-from/],
+    ["git ls-files --exclude-f=.git/info/exclude", /git ls-files -X\/--exclude-from/],
+    ["git cat-file --filters HEAD:README.md", /--filters/],
+    ["git diff --ext-diff", /--ext-diff/],
+    ["git show --show-signature HEAD", /signature verification flags/],
+    ["git log --show-signat HEAD", /signature verification flags/],
+    ["git log '--pretty=format:%G?' HEAD", /signature format atoms/],
+    ["git for-each-ref '--format=%(signature)' refs/heads", /signature format atoms/],
+    ["git show --help", /git help output/],
+    ["git help show", /git help/],
+  ];
+
+  for (const [command, pattern] of blockedCases) {
+    assert.match(getBlockedBashReason(command) ?? "", pattern, command);
+  }
+});
+
+test("triage-comments rewrites allowed git commands with safe pager and config overrides", async () => {
+  const { buildSafeGitCommand, getBlockedBashReason } = await loadTriageTestUtils();
+  const safePrefix =
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false'";
+
+  assert.equal(getBlockedBashReason("git diff HEAD~1 -- README.md"), undefined);
+  assert.equal(getBlockedBashReason("git branch --contains abc123def"), undefined);
+  assert.equal(
+    buildSafeGitCommand(["git", "diff", "HEAD~1", "--", "README.md"]),
+    `${safePrefix} 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'`,
+  );
+  assert.equal(
+    buildSafeGitCommand(["git", "show", "--stat", "foo bar.ts"]),
+    `${safePrefix} 'show' '--no-ext-diff' '--no-textconv' '--stat' 'foo bar.ts'`,
+  );
+  assert.equal(buildSafeGitCommand(["git", "status", "a'b"]), `${safePrefix} 'status' 'a'"'"'b'`);
+  assert.equal(
+    buildSafeGitCommand(["git", "blame", "README.md"]),
+    `${safePrefix} 'blame' '--no-textconv' 'README.md'`,
+  );
+  assert.match(buildSafeGitCommand(["git", "log", "HEAD"]), /'-c' 'log.showSignature=false' 'log'/);
+  assert.match(
+    buildSafeGitCommand(["git", "whatchanged", "HEAD"]),
+    /'-c' 'log.showSignature=false' 'whatchanged'/,
+  );
 });
 
 test("triage-comments runtime guard enforces read-only tools, default timeout, and final-turn blocking", async (t) => {
@@ -425,6 +488,13 @@ test("triage-comments runtime guard enforces read-only tools, default timeout, a
   const bashInput = { command: "gh pr view 18", timeout: "bad" };
   assert.equal(await toolCall({ toolName: "bash", input: bashInput }), undefined);
   assert.equal(bashInput.timeout, 30);
+
+  const gitInput = { command: "git diff HEAD~1 -- README.md" };
+  assert.equal(await toolCall({ toolName: "bash", input: gitInput }), undefined);
+  assert.equal(
+    gitInput.command,
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'",
+  );
 
   assert.deepEqual(await toolResult({ content: [{ type: "text", text: "ok" }] }), {
     content: [

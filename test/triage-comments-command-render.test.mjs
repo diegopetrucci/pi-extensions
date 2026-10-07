@@ -119,6 +119,9 @@ test("triage-comments command completes arguments and handles help, no-UI, and c
   assert.deepEqual(completionValues(command.getArgumentCompletions("")), ["paste", "pr", "help"]);
   assert.deepEqual(completionValues(command.getArgumentCompletions("P")), ["paste", "pr"]);
   assert.deepEqual(completionValues(command.getArgumentCompletions("pr")), ["pr"]);
+  assert.equal(command.getArgumentCompletions("manual"), null);
+  assert.equal(command.getArgumentCompletions("pull"), null);
+  assert.equal(command.getArgumentCompletions("pull-request"), null);
   assert.deepEqual(completionValues(command.getArgumentCompletions("he")), ["help"]);
   assert.equal(command.getArgumentCompletions("paste feedback"), null);
 
