@@ -60,7 +60,7 @@ Options:
 
 - Runs a child `createAgentSession` with an in-memory session manager.
 - Disables inherited extensions, skills, prompt templates, themes, and context files in the child.
-- Gives the child `read`, `grep`, `find`, `ls`, and guarded `bash` tools.
+- Gives the child `read`, `grep`, `find`, `ls`, and guarded `bash` tools, plus any configured MCP tools (run without confirmation; may have side effects; requires host Pi >=1.0.4; older hosts degrade to no MCP, no error); the global `mcp.json` always applies; a project `.pi/mcp.json` is loaded only when the host session has already trusted the project.
 - Returns a single final `agent-workflow-audit` custom message to the parent session.
 - Includes a short run-boundary footer noting that intermediate command output, errors, retries, and search path stayed in the child session.
 

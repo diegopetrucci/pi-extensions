@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 
+// Provider keys present in PROVIDER_MODEL_PREFERENCES for backwards-compat with Pi 1.0.0-1.0.2
+// hosts but absent from the built-in catalog (renamed in Pi 1.0.3+).
+const LEGACY_PROVIDER_ALIAS_KEYS = new Set(["azure-openai-responses"]);
+
 import {
   PROVIDER_POLICY_CONTRACT,
   createModelSelectionContext,
@@ -49,10 +53,28 @@ test("oracle and contrarian hardcoded provider coverage matches the built-in pro
   const builtinProviders = getBuiltinProviders().sort();
   for (const fixture of PROVIDER_POLICY_CONTRACT.catalogParity.providerPreferenceConstants) {
     const preferences = extractConst(fixture.source.file, fixture.source.constName);
+    const catalogKeys = Object.keys(preferences)
+      .filter((k) => !LEGACY_PROVIDER_ALIAS_KEYS.has(k))
+      .sort();
     assert.deepEqual(
-      Object.keys(preferences).sort(),
+      catalogKeys,
       builtinProviders,
       `${fixture.source.file} provider coverage drifted from the built-in catalog`,
+    );
+    // Exactly the approved legacy alias keys must be present — no more, no fewer.
+    const legacyKeys = Object.keys(preferences)
+      .filter((k) => LEGACY_PROVIDER_ALIAS_KEYS.has(k))
+      .sort();
+    assert.deepEqual(
+      legacyKeys,
+      [...LEGACY_PROVIDER_ALIAS_KEYS].sort(),
+      `${fixture.source.file} has unexpected or missing legacy alias keys`,
+    );
+    // Each legacy alias must carry the same patterns as its canonical replacement.
+    assert.deepEqual(
+      preferences["azure-openai-responses"],
+      preferences["azure"],
+      "azure-openai-responses must be identical to azure",
     );
 
     for (const parityTarget of fixture.parity) {
@@ -72,24 +94,34 @@ test("hardcoded provider preference patterns still match the pinned built-in cat
     ["extensions/code-reviewer/index.ts", "PROVIDER_MODEL_PREFERENCES"],
   ];
 
+  // Collect all stale patterns across every file/provider before asserting, so a
+  // single failure message lists every offending combination at once.
+  const violations = [];
   for (const [file, constName] of cases) {
     const preferences = extractConst(file, constName);
     for (const [provider, patterns] of Object.entries(preferences)) {
+      if (LEGACY_PROVIDER_ALIAS_KEYS.has(provider)) continue; // legacy key has no catalog entry; patterns checked via parity
       const texts = catalogTexts(provider);
       const missing = patterns.filter(
         (pattern) => !texts.some((text) => text.includes(pattern.toLowerCase())),
       );
-      assert.deepEqual(
-        missing,
-        [],
-        `${file} has stale ${provider} preference pattern(s): ${missing.join(", ")}`,
-      );
+      for (const pattern of missing) {
+        violations.push(`${file} / ${provider}: ${pattern}`);
+      }
     }
   }
+  assert.deepEqual(
+    violations,
+    [],
+    `Stale provider preference patterns found:\n  ${violations.join("\n  ")}`,
+  );
 });
 
 test("cross-provider frontier preference patterns still match the pinned built-in catalog", () => {
   const catalog = getBuiltinProviders().flatMap((provider) => catalogTexts(provider));
+  // Collect all stale patterns across every file before asserting, so a single
+  // failure message lists every offending file/pattern at once.
+  const violations = [];
   for (const [file, constName] of [
     ["extensions/contrarian/index.ts", "CONTRARIAN_MODEL_PREFERENCES"],
     ["extensions/code-reviewer/index.ts", "CODE_REVIEWER_MODEL_PREFERENCES"],
@@ -98,12 +130,15 @@ test("cross-provider frontier preference patterns still match the pinned built-i
     const missing = patterns.filter(
       (pattern) => !catalog.some((text) => text.includes(pattern.toLowerCase())),
     );
-    assert.deepEqual(
-      missing,
-      [],
-      `${file} has stale cross-provider preference pattern(s): ${missing.join(", ")}`,
-    );
+    for (const pattern of missing) {
+      violations.push(`${file}: ${pattern}`);
+    }
   }
+  assert.deepEqual(
+    violations,
+    [],
+    `Stale cross-provider preference patterns found:\n  ${violations.join("\n  ")}`,
+  );
 });
 
 test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curated preferences", () => {
@@ -149,7 +184,11 @@ test("oracle provider matrix top picks stay aligned with the implementation", ()
   const preferences = extractConst("extensions/oracle/index.ts", "PROVIDER_MODEL_PREFERENCES");
   const matrixRows = parseOracleProviderMatrix();
 
-  assert.equal(matrixRows.length, Object.keys(preferences).length);
+  // Matrix rows cover catalog providers only; legacy alias keys in preferences are excluded from the count.
+  assert.equal(
+    matrixRows.length,
+    Object.keys(preferences).length - LEGACY_PROVIDER_ALIAS_KEYS.size,
+  );
   for (const { provider, topPick } of matrixRows) {
     const patterns = preferences[provider];
     assert.ok(patterns, `extensions/oracle/index.ts is missing ${provider}`);
@@ -247,9 +286,7 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
       "MiniMaxAI/MiniMax-M3",
       "MiniMaxAI/MiniMax-M2.7",
       "openai/gpt-oss-120b",
-      "openai/gpt-oss-20b",
       "nvidia/nemotron-3-ultra-550b-a55b",
-      "google/gemma-4-31B-it",
     ],
   };
   for (const role of ["oracle", "contrarian"]) {
@@ -300,7 +337,7 @@ const FRONTIER_CATALOG_CASES = [
     kind: "gpt-6-astra",
     providers: [
       "amazon-bedrock",
-      "azure-openai-responses",
+      "azure",
       "cloudflare-ai-gateway",
       "github-copilot",
       "openai",
@@ -313,7 +350,7 @@ const FRONTIER_CATALOG_CASES = [
     catalogPattern: /gpt-(?:6-(?:astra|sol|luna)|5\.6-(?:sol|terra|luna))/i,
     expected: {
       "amazon-bedrock": /^(?:(?:global|us)\.)?openai\.gpt-6-astra$/,
-      "azure-openai-responses": "gpt-6-astra",
+      azure: "gpt-6-astra",
       "cloudflare-ai-gateway": "gpt-6-astra",
       "github-copilot": "gpt-6-astra",
       openai: "gpt-6-astra",
@@ -325,7 +362,7 @@ const FRONTIER_CATALOG_CASES = [
     },
     codeReviewerProviders: [
       "amazon-bedrock",
-      "azure-openai-responses",
+      "azure",
       "cloudflare-ai-gateway",
       "github-copilot",
       "openai",
@@ -427,7 +464,7 @@ for (const frontierCase of FRONTIER_CATALOG_CASES) {
 
 const CODE_REVIEWER_GPT6_CATALOG_CASES = [
   {
-    provider: "azure-openai-responses",
+    provider: "azure",
     modelIds: [
       "gpt-5.6-luna",
       "gpt-6-luna",
@@ -546,14 +583,12 @@ const GPT61_SOL_CATALOG_CASES = [
     olderId: "global.openai.gpt-5.6-sol",
     expected: "global.openai.gpt-6.1-sol",
   },
-  ...["azure-openai-responses", "github-copilot", "openai", "openai-codex", "opencode"].map(
-    (provider) => ({
-      provider,
-      normalIds: ["gpt-6.1-sol"],
-      olderId: "gpt-6-sol",
-      expected: "gpt-6.1-sol",
-    }),
-  ),
+  ...["azure", "github-copilot", "openai", "openai-codex", "opencode"].map((provider) => ({
+    provider,
+    normalIds: ["gpt-6.1-sol"],
+    olderId: "gpt-6-sol",
+    expected: "gpt-6.1-sol",
+  })),
   {
     provider: "openrouter",
     normalIds: ["openai/gpt-6.1-sol"],
@@ -756,7 +791,7 @@ for (const { kind, provider, pattern, expected } of CROSS_PROVIDER_ALIAS_CATALOG
 test("direct, Copilot, and Radius ladders keep Astra above Sol/Luna with GPT-5.6 fallbacks", () => {
   const directCases = [
     {
-      provider: "azure-openai-responses",
+      provider: "azure",
       astra: "gpt-6-astra",
       sol: "gpt-6-sol",
       luna: "gpt-6-luna",

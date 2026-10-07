@@ -151,7 +151,7 @@ test("Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 re
 
 test("Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupported off reasoning", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
-  for (const provider of ["openai", "azure-openai-responses", "openai-codex"]) {
+  for (const provider of ["openai", "azure", "openai-codex"]) {
     const sol = getBuiltinModels(provider).find((model) => model.id === "gpt-6.1-sol");
     assert.ok(sol, `expected Pi 1.0 GPT-6.1 Sol in the pinned ${provider} catalog`);
     assert.equal(sol.thinkingLevelMap?.off, null);
@@ -245,7 +245,7 @@ const WEAKER_SIBLING_CASES = [
   ["moonshotai-cn", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
   ["vercel-ai-gateway", "moonshotai/kimi-k2.7-code", "moonshotai/kimi-k2.7-code-highspeed"],
   ["openai", "gpt-5.4", "gpt-5.4-mini"],
-  ["azure-openai-responses", "gpt-5.4", "gpt-5.4-mini"],
+  ["azure", "gpt-5.4", "gpt-5.4-mini"],
   ["radius", "gpt-5.4", "gpt-5.4-mini"],
   ["radius", "glm-5.3", "glm-5.3-flash"],
   ["zai-coding-cn", "glm-5.3", "glm-5.3-flash"],

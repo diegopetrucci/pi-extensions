@@ -14,6 +14,7 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
+  const toolRendererResolvers = [];
   const execCalls = [];
   const sentUserMessages = [];
   const pi = {
@@ -25,6 +26,9 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
     },
     registerCommand(name, definition) {
       commands.set(name, definition);
+    },
+    registerToolRenderer(resolver) {
+      toolRendererResolvers.push(resolver);
     },
     sendUserMessage(message, options) {
       sentUserMessages.push({ message, options });
@@ -44,6 +48,7 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
     handlers,
     tools,
     commands,
+    toolRendererResolvers,
     execCalls,
     sentUserMessages,
   };

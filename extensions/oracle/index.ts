@@ -102,8 +102,15 @@ interface OraclePreferences {
   thinkingLevel?: ThinkingLevel;
 }
 
-const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
-const READ_ONLY_PLUS_BASH_TOOLS = [...READ_ONLY_TOOLS, "bash"];
+const SUBAGENT_MCP_TOOLS = [
+  "mcp__*",
+  "tool_search",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+];
+const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ...SUBAGENT_MCP_TOOLS];
+const READ_ONLY_PLUS_BASH_TOOLS = ["read", "grep", "find", "ls", "bash", ...SUBAGENT_MCP_TOOLS];
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "xhigh";
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const COLLAPSED_LINE_LIMIT = 8;
@@ -163,6 +170,33 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-sonnet-4-5",
   ],
   "ant-ling": ["Ling-2.6-1T", "Ling-2.6-flash"],
+  azure: [
+    "gpt-6-astra ",
+    "gpt-6-astra",
+    "gpt-6.1-sol ",
+    "gpt-6-sol ",
+    "gpt-6-sol",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-luna ",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "gpt-5.5-pro",
+    "gpt-5.5",
+    "gpt-5.4-pro",
+    "gpt-5.4 ",
+    "gpt-5.3-codex",
+    "gpt-5-pro",
+    "gpt-5-chat-latest",
+    "gpt-5.2-pro",
+    "gpt-5.2",
+    "gpt-5.1",
+    "o3-pro",
+    "o1-pro",
+    "gpt-5.4-mini",
+    "gpt-5-mini",
+  ],
+  // Legacy alias for Pi 1.0.0–1.0.2 hosts (renamed to `azure` in Pi 1.0.3).
   "azure-openai-responses": [
     "gpt-6-astra ",
     "gpt-6-astra",
@@ -213,10 +247,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   "cloudflare-ai-gateway": [
     "claude-fable-5",
     "claude-opus-5",
-    "claude-opus-4.8",
-    "claude-opus-4.7",
-    "claude-opus-4.6",
-    "claude-opus-4.5",
     "gpt-6-astra ",
     "gpt-6-astra",
     "gpt-5.5",
@@ -553,9 +583,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "MiniMaxAI/MiniMax-M3",
     "MiniMaxAI/MiniMax-M2.7",
     "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
     "nvidia/nemotron-3-ultra-550b-a55b",
-    "google/gemma-4-31B-it",
   ],
   typesafe: [],
   "vercel-ai-gateway": [
@@ -631,11 +659,12 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
 };
 
 const ORACLE_SYSTEM_PROMPT = [
-  "You are Oracle, a read-only high-reasoning coding assistant.",
+  "You are Oracle, a high-reasoning coding assistant with access to read-only built-in tools and any configured MCP tools.",
   "Your job is analysis, debugging, planning, review, and second opinions.",
   "Use the available tools to inspect the repository and gather evidence.",
   "Never claim to have changed files or run mutating actions.",
   "If bash is available, use it only for non-mutating inspection commands.",
+  "Configured MCP tools are available and run without confirmation inside this subagent. Use them only to gather evidence or context. Avoid side-effecting MCP actions unless the task explicitly asks for them.",
   "Be concrete. Reference file paths, symbols, commands, and risks when helpful.",
   "Prefer short sections and finish with a concise 'Bottom line' summary.",
 ].join("\n");
@@ -1681,14 +1710,15 @@ function createOracleExtension(pi: ExtensionAPI, deps: OracleExtensionDeps = {})
     name: "oracle",
     label: "Oracle",
     description:
-      "Consult a separate read-only oracle subprocess for deep analysis, code review, debugging, planning, and second opinions.",
+      "Consult a separate oracle subprocess with read-only built-in tools and configured MCP tools for deep analysis, code review, debugging, planning, and second opinions.",
     promptSnippet:
-      "Consult a read-only oracle that auto-selects the strongest reasoning model on the current provider/subscription.",
+      "Consult an oracle subprocess that auto-selects the strongest reasoning model on the current provider/subscription; exposes read-only built-in tools plus any configured MCP tools.",
     promptGuidelines: [
       "Use oracle sparingly when you want a second opinion, deeper analysis, code review, debugging help, or a higher-reasoning pass.",
       "Do not use oracle for routine low-value work; oracle is slower than the main agent.",
-      "The oracle tool is read-only by default and only exposes read, grep, find, and ls unless oracle includeBash is enabled.",
+      "The oracle tool exposes read-only built-in tools (read, grep, find, and ls) plus any configured MCP tools; oracle includeBash adds the bash inspection tool.",
       "Set oracle includeBash only when the extra bash inspection tool is genuinely useful; keep oracle relying on read, grep, find, and ls otherwise.",
+      "Configured MCP tools are available to oracle and run without confirmation inside the subagent; they may have side effects — use them only for gathering evidence, not for state-changing actions unless the task explicitly asks. MCP access requires host Pi >=1.0.4; older hosts degrade to no MCP, no error.",
       "The oracle tool requests xhigh by default for reasoning models; oracle defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
     ],
     parameters: OracleParams,

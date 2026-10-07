@@ -35,7 +35,7 @@ Then reload pi:
 ## Behavior
 
 - Tool name: `librarian`
-- Uses a restricted subagent with `bash` and `read`
+- Uses a restricted subagent with `bash`, `read`, and any configured MCP tools (MCP tools run without confirmation; may have side effects; use for evidence gathering only; requires host Pi >=1.0.4; older hosts degrade to no MCP, no error); the global `mcp.json` always applies; a project `.pi/mcp.json` is never loaded (the librarian subagent runs in a separate temp workspace)
 - Uses `gh` for GitHub search/API access
 - Uses cached local checkouts only when enabled
 - Toggle cache behavior for future calls with `/librarian-cache on | off | toggle | status`

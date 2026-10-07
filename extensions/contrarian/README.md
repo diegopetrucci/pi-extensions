@@ -1,6 +1,6 @@
 # contrarian
 
-A read-only contrarian subagent for [pi](https://github.com/earendil-works/pi).
+A contrarian subagent with read-only built-in tools and configured MCP tools for [pi](https://github.com/earendil-works/pi).
 
 It adds a `contrarian` tool that spins up a separate pi subprocess to stress-test plans, designs, assumptions, bug hypotheses, review conclusions, and product directions by steelmanning the strongest credible opposing case.
 
@@ -8,7 +8,7 @@ This is adapted from the TLH [`contrarian` subagent prompt](https://github.com/d
 
 ## What it does
 
-- creates an isolated read-only subprocess
+- creates an isolated subprocess with read-only built-in tools (read, grep, find, ls) and any configured MCP tools
 - prefers a strong model on the opposite model family/provider when available, then falls back to the best available model
 - requests `high` reasoning by default for reasoning models, then clamps to the model-supported thinking level
 - defaults to `read,grep,find,ls`, with optional non-mutating bash inspection
@@ -81,7 +81,8 @@ When the current Pi session has a non-empty model scope, Contrarian limits autom
 
 ## Notes
 
-- The contrarian is intentionally **read-only**.
+- The contrarian subprocess uses read-only built-in tools (read, grep, find, ls) by default, plus any configured MCP tools. It can optionally include bash for non-mutating inspection.
+- Configured MCP tools run without confirmation inside the subprocess and may have side effects — use them only for gathering evidence. MCP access requires host Pi >=1.0.4; older hosts degrade to no MCP, no error.
 - It never implements fixes or produces patches.
 - Its output separates confirmed objections, plausible concerns, and unresolved unknowns.
 - It is best for adversarial review before committing to a plan, design, or conclusion.

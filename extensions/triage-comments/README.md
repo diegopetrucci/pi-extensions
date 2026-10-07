@@ -1,6 +1,6 @@
 # triage-comments
 
-Adds `/triage-comments` plus a read-only `triage_comments` subagent tool for evidence-based review-comment triage.
+Adds `/triage-comments` plus a `triage_comments` subagent tool with read-only built-in tools and configured MCP tools for evidence-based review-comment triage.
 
 Use it when you want `/triage-comments` to inspect selected PR feedback, classify whether each comment is valid, cite local evidence, draft review-thread responses, and propose handling options. It does **not** implement changes; after triage, the main agent should ask which handling option to take before editing anything.
 
@@ -71,7 +71,8 @@ The tool accepts selected comments and optional PR, base, diff, and caller conte
 When called, it launches an isolated in-memory subagent with:
 
 - no inherited extensions, skills, prompt templates, themes, context files, or agents files;
-- read-only tools only: `read`, `grep`, `find`, `ls`, and guarded `bash`;
+- read-only built-in tools: `read`, `grep`, `find`, `ls`, and guarded `bash`;
+- configured MCP tools (run without confirmation in the subagent; may have side effects; use for evidence gathering only; requires host Pi >=1.0.4; older hosts degrade to no MCP, no error); the global `mcp.json` always applies; a project `.pi/mcp.json` is loaded only when the host session has already trusted the project;
 - a local-checkout path guard for file inspection;
 - a bash guard that allows only direct read-only `git`, `gh`, or `pwd` invocations and blocks write/edit tools, shell pipelines, redirection, destructive git commands, and mutating `gh`/GitHub API calls;
 - a fixed triage output format with verdicts, evidence, reasoning, suggested responses, handling options, and a list of read-only checks performed.
@@ -83,6 +84,7 @@ Verdicts are one of `valid`, `invalid`, `partially valid`, `subjective`, or `nee
 - The slash command only collects/selects comments and asks the main agent to run triage.
 - The subagent is explicitly instructed not to implement changes.
 - Runtime guards block write tools, filesystem mutation through shell syntax, mutating git commands, and mutating GitHub CLI/API calls.
+- Runtime guards apply to built-in tools only; configured MCP tools pass the guard, run without confirmation, and are limited only by prompt guidance.
 - The generated prompt tells the main agent to summarize findings and ask which handling option to take before implementation.
 - Suggested responses are drafts for the user/agent to adapt; the extension does not post them to GitHub.
 

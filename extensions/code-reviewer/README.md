@@ -1,8 +1,8 @@
 # code-reviewer
 
-Adds a read-only `code_reviewer` subagent tool that adapts The Last Harness [`code-reviewer`](https://github.com/diegopetrucci/the-last-harness/blob/main/agents/subagents/code-reviewer.md) prompt into a standalone pi extension.
+Adds a `code_reviewer` subagent tool that adapts The Last Harness [`code-reviewer`](https://github.com/diegopetrucci/the-last-harness/blob/main/agents/subagents/code-reviewer.md) prompt into a standalone pi extension.
 
-Use it when you want an isolated second-pass review of a proposed change against the local checkout. The tool stays read-only, checks ticket fit and scope first, then looks for diff mismatches, correctness bugs, security/safety issues, unnecessary complexity, and missing validation.
+Use it when you want an isolated second-pass review of a proposed change against the local checkout. The subagent uses read-only built-in tools plus any configured MCP tools, checks ticket fit and scope first, then looks for diff mismatches, correctness bugs, security/safety issues, unnecessary complexity, and missing validation.
 
 This package is adapted from the TLH code-reviewer workflow for use as a standalone pi extension.
 
@@ -46,7 +46,8 @@ When called, it launches an isolated in-memory child agent with:
 - an auto-selected review model that prefers contrarian-style opposite-provider and opposite-family candidates before same-provider fallbacks;
 - automatic model candidates constrained to the current Pi session's model scope when that scope is non-empty;
 - requested thinking taken from the active session when available, otherwise defaulting to `high` for reasoning models and `off` for non-reasoning models, then clamped to the selected model's supported level;
-- read-only tools only: `read`, `grep`, `find`, `ls`, and guarded `bash`;
+- read-only built-in tools: `read`, `grep`, `find`, `ls`, and guarded `bash`;
+- configured MCP tools (run without confirmation in the subagent; may have side effects; use for evidence gathering only; requires host Pi >=1.0.4; older hosts degrade to no MCP, no error); the global `mcp.json` always applies; a project `.pi/mcp.json` is loaded only when the host session has already trusted the project;
 - a local-checkout path guard for file inspection;
 - a bash guard that allows only direct read-only `git`, `gh`, or `pwd` invocations.
 
@@ -65,6 +66,7 @@ The model report is concise and includes a verdict, findings, validation notes, 
 
 - The subagent is explicitly instructed not to implement changes.
 - Runtime guards block write/edit tools, shell control operators, pipelines, redirection, path traversal outside the checkout, mutating `git`/`gh` commands, `npm`/publish commands, and other filesystem mutation.
+- Runtime guards apply to built-in tools only; configured MCP tools pass the guard, run without confirmation, and are limited only by prompt guidance.
 - Built-in file-inspection tools are preferred over shell commands for local files.
 
 ## Example
