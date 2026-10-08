@@ -1477,8 +1477,6 @@ export function computeContextSizeSnapshot(
 
 export interface StrategyProposeInput {
   messages: MinimalMessage[];
-  protections: PruneProtections;
-  estimateTokens: TokenEstimator;
   /**
    * Full config, so strategies can read their own enable flag and any
    * strategy-specific settings (e.g. error-purge's `minTurnsOld`).
@@ -2044,8 +2042,6 @@ export function runDynamicContextPruningPipeline(input: PipelineInput): Pipeline
 
   const proposals = collectProposals({
     messages,
-    protections: input.config.protections,
-    estimateTokens: estimateTokensForText,
     config: input.config,
     cwd: input.cwd,
   });
@@ -2271,14 +2267,12 @@ export interface PrunableItem {
  * for manual prune/restore. `activeByToolCallId` should be built from
  * currently-ACTIVE decisions only (kind: "tool_result_content"), keyed by
  * toolCallId; `restoredToolCallIds` from currently-restored keys' underlying
- * toolCallId (see `buildActiveResultDecisionMap`/`extractToolCallIdFromDecisionKey`
- * usage in the extension wiring).
+ * toolCallId (see `buildActiveResultDecisionMap` in the extension wiring).
  */
 export function buildPrunableItems(
   messages: MinimalMessage[],
   activeByToolCallId: Map<string, PruneDecisionRecord>,
   restoredToolCallIds: ReadonlySet<string>,
-  _estimateTokens: TokenEstimator = estimateTokensForText,
 ): PrunableItem[] {
   const items: PrunableItem[] = [];
   for (const occurrence of collectCompletedToolCallOccurrences(messages)) {

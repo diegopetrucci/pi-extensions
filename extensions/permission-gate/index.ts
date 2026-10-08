@@ -48,8 +48,6 @@ type ShellToken = {
   quote?: '"' | "'";
 };
 
-type WriteInput = { path: string; content: string };
-type EditInput = { path: string; edits: Array<{ oldText: string; newText: string }> };
 type ShellInput = { command: string; timeout?: number };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -636,21 +634,20 @@ async function hasDangerousPowerShellCommand(
   }
 }
 
-function validateWriteInput(input: unknown): WriteInput | undefined {
+function validateWriteInput(input: unknown): NormalizedPath | undefined {
   if (!isRecord(input)) return undefined;
   if (typeof input.path !== "string" || typeof input.content !== "string") return undefined;
-  if (!normalizeToolPath(input.path)) return undefined;
-  return { path: input.path, content: input.content };
+  return normalizeToolPath(input.path);
 }
 
-function validateEditInput(input: unknown): EditInput | undefined {
+function validateEditInput(input: unknown): NormalizedPath | undefined {
   if (!isRecord(input)) return undefined;
   if (typeof input.path !== "string" || !Array.isArray(input.edits)) return undefined;
-  if (!normalizeToolPath(input.path)) return undefined;
+  const normalizedPath = normalizeToolPath(input.path);
+  if (!normalizedPath) return undefined;
 
-  const edits = input.edits;
   if (
-    edits.some(
+    input.edits.some(
       (edit) =>
         !isRecord(edit) || typeof edit.oldText !== "string" || typeof edit.newText !== "string",
     )
@@ -658,10 +655,7 @@ function validateEditInput(input: unknown): EditInput | undefined {
     return undefined;
   }
 
-  return {
-    path: input.path,
-    edits: edits as Array<{ oldText: string; newText: string }>,
-  };
+  return normalizedPath;
 }
 
 async function requestConfirmation(
@@ -734,11 +728,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (event.toolName === "write") {
-      const input = validateWriteInput(event.input);
-      if (!input) {
-        return { block: true, reason: "Malformed write input blocked" };
-      }
-      const normalizedPath = normalizeToolPath(input.path);
+      const normalizedPath = validateWriteInput(event.input);
       if (!normalizedPath) {
         return { block: true, reason: "Malformed write input blocked" };
       }
@@ -746,11 +736,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (event.toolName === "edit") {
-      const input = validateEditInput(event.input);
-      if (!input) {
-        return { block: true, reason: "Malformed edit input blocked" };
-      }
-      const normalizedPath = normalizeToolPath(input.path);
+      const normalizedPath = validateEditInput(event.input);
       if (!normalizedPath) {
         return { block: true, reason: "Malformed edit input blocked" };
       }

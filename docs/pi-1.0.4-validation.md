@@ -1,6 +1,6 @@
 # Pi 1.0.4 compatibility record
 
-> **Date: 2026-10-06.** This record covers the bump of `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` devDependencies from `^1.0.0` to `^1.0.4` (lockfile resolves exactly `1.0.4`). Follow-up changes in this branch will append their notes here.
+> **Date: 2026-10-06.** This record covers the bump of `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` devDependencies from `^1.0.0` to `^1.0.4` (lockfile resolves exactly `1.0.4`).
 
 ## Dependency bump
 
@@ -13,7 +13,7 @@
 ### Pi 1.0.1
 - **brace-expansion pinned to 5.0.12:** the `brace-expansion@5.0.9` nested vulnerability documented in `docs/pi-1.0.0-validation.md` is resolved upstream. `npm audit` is now clean (0 vulnerabilities). The audit exception recorded in `docs/pi-1.0.0-validation.md` is superseded by this result and no longer applies.
 - **Shrinkwrap removed:** the upstream `npm-shrinkwrap.json` was removed; no repo-side impact.
-- **`pi.registerToolRenderer` API added:** extension authors can register a renderer for calls to any tool, including tools not yet registered at load time (e.g. MCP tools in resumed sessions). This repo will adopt it in the quiet-tools extension as a follow-up change in this branch.
+- **`pi.registerToolRenderer` API added:** extension authors can register a renderer for calls to any tool, including tools not yet registered at load time (e.g. MCP tools in resumed sessions).
 
 ### Pi 1.0.3
 - **Azure provider key renamed:** `azure-openai-responses` → `azure` in model preferences and provider configuration. Added `azure` entry to `PROVIDER_MODEL_PREFERENCES` in all three role extensions (oracle, contrarian, code-reviewer), kept `azure-openai-responses` as a legacy alias with identical patterns for Pi 1.0.0–1.0.2 hosts, updated `docs/oracle-provider-matrix.md` with the new provider name (noting the legacy alias), and updated catalog/selection tests to use `azure` while the coverage test explicitly permits only `azure-openai-responses` as the one approved extra key.
@@ -50,7 +50,7 @@ Project-mcp-json registers MCP servers during `session_start`. Whether a subagen
 
 **CLI subagents — oracle and contrarian.** Both spawn a pi CLI process via `getPiInvocation()` (oracle `index.ts:1308–1321`, contrarian `index.ts:1437–1451`). The arg arrays contain only `--mode json`, `-p`, `--no-session`, `--model`, `--tools`, `--append-system-prompt`, and the prompt text; there is no `--no-extensions` flag. The spawned pi process therefore loads user extensions from the standard agent directory. If project-mcp-json is installed, it runs inside the subagent session and registers any servers it finds in `.mcp.json`, subject to the same trust and file-existence checks as in the main session. Any server registered this way is reachable by the `mcp__*` allowlist entries already in the subagent `--tools` list.
 
-**SDK-session subagents — code-reviewer, librarian, triage-comments, agent-workflow-audit.** All four create `DefaultResourceLoader` with `noExtensions: true` (code-reviewer `index.ts:1787`, librarian `index.ts:1747`, triage-comments `index.ts:2578`, agent-workflow-audit `index.ts:1475`). They do not load user extensions. MCP server access comes solely from the explicit `createMcpExtension()` factory calls, subject to the Pi >=1.0.4 gate and the trust/cwd conditions already documented above under **`--tools` / SDK tools and MCP isolation**.
+**SDK-session subagents — code-reviewer, librarian, triage-comments, agent-workflow-audit.** All four create `DefaultResourceLoader` with `noExtensions: true`. They do not load user extensions. MCP server access comes solely from the explicit `createMcpExtension()` factory calls, subject to the Pi >=1.0.4 gate and the trust/cwd conditions already documented above under **`--tools` / SDK tools and MCP isolation**.
 
 No behaviour change was made; this section documents the gap for operators.
 

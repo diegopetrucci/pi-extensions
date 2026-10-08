@@ -121,7 +121,6 @@ type UsageSessionState = {
   snapshot?: UsageSnapshot;
   lastFetchedAt?: number;
   loading: boolean;
-  error?: string;
   availability?: UsageAvailability;
   usageIdentity?: UsageIdentity;
   requestVersion: number;
@@ -834,7 +833,6 @@ function clearUsageState(state: UsageSessionState): void {
   state.snapshot = undefined;
   state.lastFetchedAt = undefined;
   state.loading = false;
-  state.error = undefined;
   state.availability = undefined;
 }
 
@@ -909,7 +907,6 @@ function invalidateUsageState(state: UsageSessionState, usageIdentity?: UsageIde
   state.snapshot = undefined;
   state.lastFetchedAt = undefined;
   state.loading = false;
-  state.error = undefined;
   state.availability = undefined;
   state.usageIdentity = usageIdentity;
   // The previous promise may still be resolving. Clearing the reference lets
@@ -961,7 +958,7 @@ async function refreshUsageIfNeeded(
 
   const mode = getUsageMode(ctx, config, resolvedUsageIdentity);
   if (!mode) {
-    if (state.snapshot || state.availability || state.loading || state.error) {
+    if (state.snapshot || state.availability || state.loading) {
       clearUsageState(state);
       state.requestRender?.();
     }
@@ -1006,19 +1003,16 @@ async function refreshUsageIfNeeded(
       if (snapshot) {
         state.snapshot = snapshot;
         state.lastFetchedAt = snapshot.fetchedAt;
-        state.error = undefined;
       } else {
         state.snapshot = undefined;
         state.lastFetchedAt = Date.now();
-        state.error = undefined;
         state.availability = "unavailable";
       }
-    } catch (error) {
+    } catch {
       if (!usageRequestStillCurrent(ctx, state, requestVersion, requestUsageKey)) return;
       state.snapshot = undefined;
       state.lastFetchedAt = Date.now();
       state.availability = "unavailable";
-      state.error = error instanceof Error ? error.message : String(error);
     } finally {
       if (
         state.disposed ||
@@ -1085,7 +1079,6 @@ export default function (pi: ExtensionAPI) {
     state.snapshot = undefined;
     state.lastFetchedAt = undefined;
     state.loading = false;
-    state.error = undefined;
     state.availability = undefined;
     state.usageIdentity = undefined;
     state.inflight = undefined;
