@@ -441,8 +441,7 @@ export function replaySession(
       candidates.push({
         sessionFile,
         strategyId: decision.strategyId,
-        toolCallId:
-          decision.correlation.type === "toolCallId" ? decision.correlation.toolCallId : undefined,
+        toolCallId: decision.correlation.toolCallId,
         reason: decision.reason,
         boundaryMessageIndex: assistantIndex,
         turnState,
