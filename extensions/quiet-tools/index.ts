@@ -268,8 +268,6 @@ function createQuietResolver(getEnabled: () => boolean): ToolRendererResolver {
       renderCall(args, theme, context) {
         if (!getEnabled() || context.expanded) {
           if (!nextRenderers?.renderCall) {
-            // No renderCall from next() — throw so Pi uses createCallFallback
-            // (formatToolCallWithArgs: tool name + args, respects expanded state).
             throw new QuietToolsDelegateToDefault();
           }
           const delegateContext =
@@ -302,8 +300,6 @@ function createQuietResolver(getEnabled: () => boolean): ToolRendererResolver {
       renderResult(result, options, theme, context) {
         if (!getEnabled() || options.expanded) {
           if (!nextRenderers?.renderResult) {
-            // No renderResult from next() — throw so Pi uses createResultFallback
-            // (text output lines, preview/expand). Same sentinel as renderCall above.
             throw new QuietToolsDelegateToDefault();
           }
           const delegateContext =
@@ -348,7 +344,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("quiet-tools", {
-    description: "Toggle one-line collapsed invocations for built-in tool rows",
+    description: "Toggle one-line collapsed invocations for built-in and MCP tool rows",
     getArgumentCompletions: (prefix) => {
       const commands = ["on", "off", "toggle", "status"];
       const query = prefix.trim().toLowerCase();
@@ -361,7 +357,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
       if (action === "on" || action === "enable") {
         enabled = true;
         ctx.ui.notify(
-          "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint.",
+          "Quiet tool previews enabled: collapsed built-in and MCP tool rows show a one-line invocation plus an expand hint.",
           "info",
         );
         return;
@@ -370,7 +366,7 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
       if (action === "off" || action === "disable") {
         enabled = false;
         ctx.ui.notify(
-          "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
+          "Quiet tool previews disabled: restored pi's standard tool renderers.",
           "info",
         );
         return;
@@ -380,8 +376,8 @@ export default function quietToolsExtension(pi: ExtensionAPI) {
         enabled = !enabled;
         ctx.ui.notify(
           enabled
-            ? "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint."
-            : "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
+            ? "Quiet tool previews enabled: collapsed built-in and MCP tool rows show a one-line invocation plus an expand hint."
+            : "Quiet tool previews disabled: restored pi's standard tool renderers.",
           "info",
         );
         return;
