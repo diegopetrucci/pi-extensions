@@ -6,10 +6,10 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### Subagents
 
-- [`code-reviewer`](./extensions/code-reviewer): Adds a read-only `code_reviewer` subagent tool that reviews local changes for ticket fit, diff mismatches, correctness, security, simplicity, and validation gaps without implementing fixes, auto-selects a contrarian-style opposite-provider review model when available, and clamps requested thinking to the chosen model's capabilities.
-- [`contrarian`](./extensions/contrarian): Adds a read-only contrarian tool that spins up an isolated subprocess to stress-test plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.
-- [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, and cached repos expiring after 7 days of non-use.
-- [`oracle`](./extensions/oracle): Adds an Amp-style read-only oracle tool that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.
+- [`code-reviewer`](./extensions/code-reviewer): Adds a `code_reviewer` subagent tool with read-only built-in tools plus configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4) that reviews local changes for ticket fit, diff mismatches, correctness, security, simplicity, and validation gaps without implementing fixes, auto-selects a contrarian-style opposite-provider review model when available, and clamps requested thinking to the chosen model's capabilities.
+- [`contrarian`](./extensions/contrarian): Adds a contrarian tool with read-only built-in tools plus configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4) that spins up an isolated subprocess to stress-test plans, designs, assumptions, bug hypotheses, and conclusions by steelmanning the strongest opposing case.
+- [`librarian`](./extensions/librarian): Adds a GitHub research scout with a local repo checkout cache disabled by default under the OS user cache directory, toggleable with `/librarian-cache`, configurable subagent model/thinking defaults via `/librarian-config`, cached repos expiring after 7 days of non-use, and configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4).
+- [`oracle`](./extensions/oracle): Adds an Amp-style oracle tool with read-only built-in tools plus configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4) that auto-selects the strongest reasoning model on the current provider/subscription, supports persisted `/oracle` model/thinking defaults, requests xhigh reasoning by default and clamps to model capabilities, and shows live status while running.
 
 ### Providers
 
@@ -19,15 +19,15 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 - [`git-footer`](./extensions/git-footer): Adds TLH-style git dirty counts, ahead/behind, and optional PR number to pi's built-in footer status area. This package is standalone-only and is not auto-loaded by the `@diegopetrucci/pi-extensions` collection package.
 - [`minimal-footer`](./extensions/minimal-footer): Replaces pi's built-in footer with a minimal configurable two-line layout: branch plus cached git dirty/ahead/PR status and repo on the first line, context/model on the second, optional `DUMB ZONE`, optional `xp` marker, plus OpenAI Codex usage windows labeled from their reported durations.
-- [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
+- [`quiet-tools`](./extensions/quiet-tools): Renders collapsed built-in tool rows and `mcp__*` rows as a one-line invocation plus an expand hint without changing model-visible tool results; toggle temporarily with `/quiet-tools`.
 
 ### / Slash commands
 
-- [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent and returns only the final distilled report to the main session.
+- [`agent-workflow-audit`](./extensions/agent-workflow-audit): Adds `/agent-workflow-audit`, which runs an isolated repo workflow audit subagent with configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4) and returns only the final distilled report to the main session.
 - [`annotate-git-diff`](./extensions/annotate-git-diff): Adds `/annotate-git-diff`, a native Glimpse UI where explicit Submit sends structured feedback to the agent and close recovery keeps an unsent draft in the editor.
 - [`annotate-last-message`](./extensions/annotate-last-message): Adds `/annotate-last-message`, a native Glimpse UI for annotating the latest assistant reply and sending planning-oriented feedback directly to the agent.
 - [`review`](./extensions/review): Adds `/review` and `/end-review` for interactive code reviews of local changes, commits, PRs, and selected paths.
-- [`triage-comments`](./extensions/triage-comments): Adds `/triage-comments` and a read-only `triage_comments` subagent tool that can auto-detect the current branch's PR, filter resolved/outdated inline comments, classify selected review comments with evidence, and suggest handling options without implementing changes
+- [`triage-comments`](./extensions/triage-comments): Adds `/triage-comments` and a `triage_comments` subagent tool with read-only built-in tools plus configured MCP tools (run without confirmation, may have side effects, Pi >=1.0.4) that can auto-detect the current branch's PR, filter resolved/outdated inline comments, classify selected review comments with evidence, and suggest handling options without implementing changes
 
 ### Context management
 
