@@ -15,7 +15,6 @@ const {
   buildDedupeKey,
   dedupeStrategy,
   errorPurgeStrategy,
-  estimateTokensForText,
 } = dcp;
 
 // ---------------------------------------------------------------------------
@@ -73,8 +72,6 @@ function propose(strategy, messages, configOverrides = {}) {
   const config = { ...defaultConfig(), ...configOverrides };
   return strategy.propose({
     messages,
-    protections: config.protections,
-    estimateTokens: estimateTokensForText,
     config,
   });
 }
@@ -158,8 +155,6 @@ test("dedupeStrategy respects the strategies.dedupe.enabled config toggle", () =
   };
   const proposals = dedupeStrategy.propose({
     messages,
-    protections: config.protections,
-    estimateTokens: estimateTokensForText,
     config,
   });
   assert.deepEqual(proposals, []);
@@ -299,8 +294,6 @@ test("errorPurgeStrategy respects the strategies.errorPurge.enabled config toggl
   };
   const proposals = errorPurgeStrategy.propose({
     messages,
-    protections: config.protections,
-    estimateTokens: estimateTokensForText,
     config,
   });
   assert.deepEqual(proposals, []);
@@ -314,8 +307,6 @@ test("errorPurgeStrategy honors a configured minTurnsOld override", () => {
   };
   const proposals = errorPurgeStrategy.propose({
     messages,
-    protections: config.protections,
-    estimateTokens: estimateTokensForText,
     config,
   });
   assert.equal(proposals.length, 1, "with a lower threshold, 2 elapsed turns is already eligible");

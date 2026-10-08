@@ -16,7 +16,6 @@ const {
   computeFileReadRange,
   isFullFileReadRange,
   readRangeCovers,
-  estimateTokensForText,
 } = dcp;
 
 // ---------------------------------------------------------------------------
@@ -74,8 +73,6 @@ function propose(messages, configOverrides = {}, cwd = undefined) {
   const config = { ...defaultConfig(), ...configOverrides };
   return supersededFileOpsStrategy.propose({
     messages,
-    protections: config.protections,
-    estimateTokens: estimateTokensForText,
     config,
     cwd,
   });
