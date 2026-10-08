@@ -1,15 +1,3 @@
-/**
- * Todo Extension - Demonstrates state management via session entries
- *
- * This extension:
- * - Registers a `todo` tool for the LLM to manage todos
- * - Registers a `/todos` command for users to view the list
- *
- * State is stored in tool result details (not external files), which allows
- * proper branching - when you branch, the todo state is automatically
- * correct for that point in history.
- */
-
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
@@ -36,9 +24,6 @@ const TodoParams = Type.Object({
   id: Type.Optional(Type.Number({ description: "Todo ID (for toggle)" })),
 });
 
-/**
- * UI component for the /todos command
- */
 class TodoListComponent {
   private todos: Todo[];
   private theme: Theme;
@@ -109,7 +94,6 @@ class TodoListComponent {
 }
 
 export default function (pi: ExtensionAPI) {
-  // In-memory state (reconstructed from session on load)
   let todos: Todo[] = [];
   let nextId = 1;
 
@@ -134,11 +118,9 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  // Reconstruct state on session events
   pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
   pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
-  // Register the todo tool for the LLM
   pi.registerTool({
     name: "todo",
     label: "Todo",
@@ -303,7 +285,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Register the /todos command for users
   pi.registerCommand("todos", {
     description: "Show all todos on the current branch",
     handler: async (_args, ctx) => {
