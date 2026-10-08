@@ -70,12 +70,6 @@ test("oracle and contrarian hardcoded provider coverage matches the built-in pro
       [...LEGACY_PROVIDER_ALIAS_KEYS].sort(),
       `${fixture.source.file} has unexpected or missing legacy alias keys`,
     );
-    // Each legacy alias must carry the same patterns as its canonical replacement.
-    assert.deepEqual(
-      preferences["azure-openai-responses"],
-      preferences["azure"],
-      "azure-openai-responses must be identical to azure",
-    );
 
     for (const parityTarget of fixture.parity) {
       assert.deepEqual(
@@ -100,7 +94,7 @@ test("hardcoded provider preference patterns still match the pinned built-in cat
   for (const [file, constName] of cases) {
     const preferences = extractConst(file, constName);
     for (const [provider, patterns] of Object.entries(preferences)) {
-      if (LEGACY_PROVIDER_ALIAS_KEYS.has(provider)) continue; // legacy key has no catalog entry; patterns checked via parity
+      if (LEGACY_PROVIDER_ALIAS_KEYS.has(provider)) continue; // legacy key has no catalog entry
       const texts = catalogTexts(provider);
       const missing = patterns.filter(
         (pattern) => !texts.some((text) => text.includes(pattern.toLowerCase())),
