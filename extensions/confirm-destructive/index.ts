@@ -12,20 +12,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 function hasUnsavedUserWork(entries: SessionEntry[]): boolean {
-  let sawAssistant = false;
-
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry.type !== "message") continue;
-    if (entry.message.role === "assistant") {
-      sawAssistant = true;
-      break;
-    }
+    if (entry.message.role === "assistant") return false;
     if (entry.message.role === "user") return true;
   }
 
-  if (sawAssistant) return false;
-  return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
+  return false;
 }
 
 export default function (pi: ExtensionAPI) {
