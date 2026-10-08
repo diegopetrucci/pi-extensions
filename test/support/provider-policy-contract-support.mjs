@@ -36,6 +36,48 @@ export async function loadRoleTestUtils(role) {
   return extensionModule.__test__;
 }
 
+function localConstInitializers(sourceFile) {
+  const initializers = new Map();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+        initializers.set(declaration.name.text, declaration.initializer);
+      }
+    }
+  }
+  return initializers;
+}
+
+function referencedLocalConsts(node, initializers, sourceFile) {
+  const seen = new Set();
+  const ordered = [];
+  const visit = (current) => {
+    if (!current) return;
+    if (ts.isPropertyAssignment(current)) {
+      if (ts.isComputedPropertyName(current.name)) visit(current.name);
+      visit(current.initializer);
+      return;
+    }
+    if (ts.isPropertyAccessExpression(current)) {
+      visit(current.expression);
+      return;
+    }
+    if (ts.isIdentifier(current)) {
+      const name = current.text;
+      const initializer = initializers.get(name);
+      if (!initializer || seen.has(name)) return;
+      seen.add(name);
+      visit(initializer);
+      ordered.push(name);
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return ordered.map((name) => `const ${name} = ${initializers.get(name).getText(sourceFile)};`);
+}
+
 export function extractConst(relativeFilePath, constName) {
   const filePath = path.join(repoRoot, relativeFilePath);
   const source = fs.readFileSync(filePath, "utf8");
@@ -46,6 +88,7 @@ export function extractConst(relativeFilePath, constName) {
     true,
     ts.ScriptKind.TS,
   );
+  const initializers = localConstInitializers(sourceFile);
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
@@ -55,7 +98,10 @@ export function extractConst(relativeFilePath, constName) {
         !declaration.initializer
       )
         continue;
-      return Function(`return (${declaration.initializer.getText(sourceFile)});`)();
+      const prelude = referencedLocalConsts(declaration.initializer, initializers, sourceFile).join(
+        "\n",
+      );
+      return Function(`${prelude}\nreturn (${declaration.initializer.getText(sourceFile)});`)();
     }
   }
   throw new Error(`Could not find ${constName} in ${filePath}`);
