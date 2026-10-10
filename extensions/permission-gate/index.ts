@@ -7,7 +7,9 @@
  * secret-bearing .env files (excluding example/template variants).
  */
 
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -17,6 +19,12 @@ import {
   MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES,
   parsePowerShellAstOutput,
 } from "./powershell-safety.ts";
+
+/**
+ * Unicode space characters that Pi's path normalizer replaces with an ASCII space.
+ * Mirrors the UNICODE_SPACES constant in dist/utils/paths.js.
+ */
+const UNICODE_SPACES_PATTERN = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 const dangerousPatterns = [/\bsudo\b/i, /\b(chmod|chown)\b.*777/i];
 const protectedPathSegments = new Set([".git", "node_modules"]);
@@ -52,6 +60,90 @@ type ShellInput = { command: string; timeout?: number };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Converts Git Bash / MSYS / Cygwin / WSL drive paths to a form native Windows
+ * APIs accept. Mirrors normalizeWindowsShellPath from
+ * dist/utils/paths.js. No-op on non-win32 paths.
+ */
+function normalizeWindowsShellPathLocal(filePath: string): string {
+  if (!filePath.startsWith("/") || filePath.startsWith("//") || filePath.includes("\\"))
+    return filePath;
+  const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
+  if (!match) return filePath;
+  const suffix = match[2]?.replaceAll("/", "\\");
+  return `${match[1].toUpperCase()}:\\${suffix ?? ""}`;
+}
+
+/**
+ * Mirrors Pi's normalizePath (dist/utils/paths.js).
+ *
+ * Options (all default false/true as noted):
+ *   normalizeUnicodeSpaces — replace Unicode space characters with ASCII space.
+ *   stripAtPrefix         — strip a leading "@" path sigil.
+ *   expandTilde           — expand "~"/"~/" to homedir (default true).
+ *
+ * On win32, Git Bash / WSL drive-path normalisation always runs (not gated
+ * by expandTilde); only the tilde expansion itself is gated by expandTilde.
+ * Always resolves "file://" URLs via fileURLToPath; throws for non-local hosts
+ * (e.g. file://hostname/…) or invalid URLs.
+ */
+function normalizePath(
+  input: string,
+  opts: { normalizeUnicodeSpaces?: boolean; stripAtPrefix?: boolean; expandTilde?: boolean } = {},
+): string {
+  const { normalizeUnicodeSpaces = false, stripAtPrefix = false, expandTilde = true } = opts;
+  let p = input;
+  if (normalizeUnicodeSpaces) p = p.replace(UNICODE_SPACES_PATTERN, " ");
+  if (stripAtPrefix && p.startsWith("@")) p = p.slice(1);
+  if (process.platform === "win32") p = normalizeWindowsShellPathLocal(p);
+  if (expandTilde) {
+    const home = os.homedir();
+    if (p === "~") p = home;
+    else if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\")))
+      p = path.join(home, p.slice(2));
+  }
+  if (/^file:\/\//.test(p)) p = fileURLToPath(p);
+  return p;
+}
+
+/**
+ * Mirrors Pi's resolveToCwd (dist/core/tools/path-utils.js): normalises the
+ * raw path with { normalizeUnicodeSpaces: true, stripAtPrefix: true }, normalises
+ * cwd with default options (expandTilde: true, so win32 shell-path handling
+ * also applies to cwd as Pi does), then resolves absolute paths via
+ * path.resolve and relative paths against cwd.
+ *
+ * Exported for tests that check parity with Pi's resolveToCwd. Note: other
+ * extensions will not import this file; each extension keeps its own local copy.
+ */
+export function resolveToCwd(rawPath: string, cwd: string): string {
+  const normalized = normalizePath(rawPath, { normalizeUnicodeSpaces: true, stripAtPrefix: true });
+  const base = normalizePath(cwd);
+  return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(base, normalized);
+}
+
+type PiCheckResult =
+  | { status: "protected"; resolvedPath: string }
+  | { status: "error" }
+  | { status: "allowed" };
+
+/**
+ * Resolves rawPath via the Pi-mirroring resolveToCwd, then checks whether the
+ * resulting absolute path is a protected path.
+ */
+function checkPiResolvedPath(rawPath: string, cwd: string): PiCheckResult {
+  try {
+    const resolved = resolveToCwd(rawPath, cwd);
+    const normalized = normalizeToolPath(resolved);
+    if (normalized !== undefined && isProtectedPath(normalized)) {
+      return { status: "protected", resolvedPath: resolved };
+    }
+    return { status: "allowed" };
+  } catch {
+    return { status: "error" };
+  }
 }
 
 function normalizeToolPath(rawPath: string): NormalizedPath | undefined {
@@ -685,17 +777,22 @@ async function confirmProtectedPathAction(
   toolName: "write" | "edit",
   normalizedPath: NormalizedPath,
   ctx: ConfirmationContext,
+  alsoProtected = false,
+  displaySuffix?: string,
 ): Promise<GuardDecision> {
-  if (!isProtectedPath(normalizedPath)) return undefined;
+  if (!alsoProtected && !isProtectedPath(normalizedPath)) return undefined;
+  const displayLabel = displaySuffix
+    ? `${normalizedPath.displayPath}${displaySuffix}`
+    : normalizedPath.displayPath;
   if (!ctx.hasUI || !ctx.ui) {
     return {
       block: true,
-      reason: `Protected path blocked (${toolName} without UI confirmation): ${normalizedPath.displayPath}`,
+      reason: `Protected path blocked (${toolName} without UI confirmation): ${displayLabel}`,
     };
   }
 
   return requestConfirmation(
-    `⚠️ Protected path ${toolName} request:\n\n  ${normalizedPath.displayPath}\n\nAllow?`,
+    `⚠️ Protected path ${toolName} request:\n\n  ${displayLabel}\n\nAllow?`,
     ctx,
   );
 }
@@ -732,7 +829,27 @@ export default function (pi: ExtensionAPI) {
       if (!normalizedPath) {
         return { block: true, reason: "Malformed write input blocked" };
       }
-      return confirmProtectedPathAction("write", normalizedPath, ctx);
+      // Monotonic hardening: also check via Pi-style path resolution against ctx.cwd.
+      // OR logic: protected if EITHER the lexical check OR the Pi-resolved check matches.
+      // When only the Pi-resolved check catches a path, show the resolved absolute path in
+      // the reason so the user understands why the plain-looking path is protected.
+      const lexicalProtected = isProtectedPath(normalizedPath);
+      const piResult = checkPiResolvedPath(normalizedPath.original, ctx.cwd ?? process.cwd());
+      const piAlsoProtected = piResult.status === "protected" || piResult.status === "error";
+      const displaySuffix = lexicalProtected
+        ? undefined
+        : piResult.status === "protected"
+          ? ` (resolves to ${piResult.resolvedPath})`
+          : piResult.status === "error"
+            ? " (path could not be resolved)"
+            : undefined;
+      return confirmProtectedPathAction(
+        "write",
+        normalizedPath,
+        ctx,
+        piAlsoProtected,
+        displaySuffix,
+      );
     }
 
     if (event.toolName === "edit") {
@@ -740,7 +857,27 @@ export default function (pi: ExtensionAPI) {
       if (!normalizedPath) {
         return { block: true, reason: "Malformed edit input blocked" };
       }
-      return confirmProtectedPathAction("edit", normalizedPath, ctx);
+      // Monotonic hardening: also check via Pi-style path resolution against ctx.cwd.
+      // OR logic: protected if EITHER the lexical check OR the Pi-resolved check matches.
+      // When only the Pi-resolved check catches a path, show the resolved absolute path in
+      // the reason so the user understands why the plain-looking path is protected.
+      const lexicalProtected = isProtectedPath(normalizedPath);
+      const piResult = checkPiResolvedPath(normalizedPath.original, ctx.cwd ?? process.cwd());
+      const piAlsoProtected = piResult.status === "protected" || piResult.status === "error";
+      const displaySuffix = lexicalProtected
+        ? undefined
+        : piResult.status === "protected"
+          ? ` (resolves to ${piResult.resolvedPath})`
+          : piResult.status === "error"
+            ? " (path could not be resolved)"
+            : undefined;
+      return confirmProtectedPathAction(
+        "edit",
+        normalizedPath,
+        ctx,
+        piAlsoProtected,
+        displaySuffix,
+      );
     }
 
     return undefined;

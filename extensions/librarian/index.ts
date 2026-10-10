@@ -5,6 +5,7 @@ import type { FileHandle } from "node:fs/promises";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   ExtensionAPI,
@@ -981,6 +982,82 @@ async function buildLibrarianCandidates(
   return candidates;
 }
 
+const UNICODE_SPACES_PATTERN = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * Mirrors normalizeWindowsShellPath from dist/utils/paths.js. No-op on
+ * non-win32 paths.
+ */
+function normalizeWindowsShellPathLocal(filePath: string): string {
+  if (!filePath.startsWith("/") || filePath.startsWith("//") || filePath.includes("\\"))
+    return filePath;
+  const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
+  if (!match) return filePath;
+  const suffix = match[2]?.replaceAll("/", "\\");
+  return `${match[1].toUpperCase()}:\\${suffix ?? ""}`;
+}
+
+/**
+ * Mirrors Pi's normalizePath (dist/utils/paths.js). On win32, Git Bash / WSL
+ * drive-path normalisation always runs; only tilde expansion is gated by
+ * expandTilde.
+ */
+function normalizePath(
+  input: string,
+  opts: { normalizeUnicodeSpaces?: boolean; stripAtPrefix?: boolean; expandTilde?: boolean } = {},
+): string {
+  const { normalizeUnicodeSpaces = false, stripAtPrefix = false, expandTilde = true } = opts;
+  let p = input;
+  if (normalizeUnicodeSpaces) p = p.replace(UNICODE_SPACES_PATTERN, " ");
+  if (stripAtPrefix && p.startsWith("@")) p = p.slice(1);
+  if (process.platform === "win32") p = normalizeWindowsShellPathLocal(p);
+  if (expandTilde) {
+    const home = os.homedir();
+    if (p === "~") p = home;
+    else if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\")))
+      p = path.join(home, p.slice(2));
+  }
+  if (/^file:\/\//.test(p)) p = fileURLToPath(p);
+  return p;
+}
+
+/**
+ * Mirrors Pi's resolveToCwd (dist/core/tools/path-utils.js). Exposed via
+ * __test__ for parity tests; not imported by other extensions.
+ */
+function resolveToCwd(rawPath: string, cwd: string): string {
+  const normalized = normalizePath(rawPath, { normalizeUnicodeSpaces: true, stripAtPrefix: true });
+  const base = normalizePath(cwd);
+  return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(base, normalized);
+}
+
+/** Mirrors tryMacOSScreenshotPath from dist/core/tools/path-utils.js */
+function tryMacOSScreenshotPathVariant(filePath: string): string {
+  return filePath.replace(/ (AM|PM)\./gi, " $1.");
+}
+/** Mirrors tryNFDVariant from dist/core/tools/path-utils.js */
+function tryNFDPathVariant(filePath: string): string {
+  return filePath.normalize("NFD");
+}
+/** Mirrors tryCurlyQuoteVariant from dist/core/tools/path-utils.js */
+function tryCurlyQuotePathVariant(filePath: string): string {
+  return filePath.replace(/'/g, "’");
+}
+/**
+ * Returns all read path candidates including Pi's resolveReadPathAsync fallback
+ * variants. Used only for the read tool guard; grep/find/ls use resolveToCwd only.
+ */
+function getReadPathCandidates(resolved: string): string[] {
+  const nfd = tryNFDPathVariant(resolved);
+  return [
+    resolved,
+    tryMacOSScreenshotPathVariant(resolved),
+    nfd,
+    tryCurlyQuotePathVariant(resolved),
+    tryCurlyQuotePathVariant(nfd),
+  ];
+}
+
 function resolveToolPath(cwd: string, rawPath: string): string {
   const normalized = rawPath.startsWith("@") ? rawPath.slice(1) : rawPath;
   return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(cwd, normalized);
@@ -1070,16 +1147,53 @@ function createLibrarianRuntimeGuardExtension(options: {
       if (event.toolName === "read") {
         const input = event.input as { path?: unknown };
         if (typeof input.path !== "string") return undefined;
+        // Canonicalize allowed roots. A path is allowed if it is inside EITHER
+        // the original root (options.workspace / options.cacheRoot) OR its
+        // realpath'd form. This handles both: a realpath'd file under a
+        // symlinked alias workspace (lexical match on original root) and an
+        // existing file canonicalized beyond the alias (match on real root).
+        const realWorkspace = await fs
+          .realpath(options.workspace)
+          .catch(() => path.resolve(options.workspace));
+        const realCacheRoot = await fs
+          .realpath(options.cacheRoot)
+          .catch(() => path.resolve(options.cacheRoot));
+        function isAllowedPath(p: string): boolean {
+          return (
+            isInside(options.workspace, p) ||
+            isInside(realWorkspace, p) ||
+            (options.cacheEnabled && (isInside(options.cacheRoot, p) || isInside(realCacheRoot, p)))
+          );
+        }
         const resolved = resolveToolPath(options.workspace, input.path);
         const realPath = await fs.realpath(resolved).catch(() => resolved);
-        const allowed =
-          isInside(options.workspace, realPath) ||
-          (options.cacheEnabled && isInside(options.cacheRoot, realPath));
-        if (!allowed)
+        if (!isAllowedPath(realPath))
           return {
             block: true,
             reason: `Librarian read is limited to its workspace/cache: ${realPath}`,
           };
+        // Pi-effective path check (monotonic: block if either resolution is
+        // outside). For the read tool, also check Pi's resolveReadPathAsync
+        // fallback variants so a missing file whose variant resolves outside is
+        // not silently allowed.
+        try {
+          const piResolved = resolveToCwd(input.path, options.workspace);
+          const candidates = getReadPathCandidates(piResolved);
+          // Deliberate policy: all candidates are checked regardless of existence (not
+          // Pi's existence-ordered selection) so the guard cannot be raced by creating
+          // a variant between the hook and the read. Trade-off: a read is blocked when
+          // an escaping variant symlink sits next to a safe primary file.
+          for (const candidate of candidates) {
+            const candidateRealPath = await fs.realpath(candidate).catch(() => candidate);
+            if (!isAllowedPath(candidateRealPath))
+              return {
+                block: true,
+                reason: `Librarian read is limited to its workspace/cache: ${candidateRealPath}`,
+              };
+          }
+        } catch {
+          return { block: true, reason: "Librarian read path could not be resolved safely." };
+        }
       }
 
       if (event.toolName === "bash") {
@@ -1361,6 +1475,7 @@ export const __test__ = {
   createMcpSubagentFactories,
   disposeSubagentSession,
   createLibrarianRuntimeGuardExtension,
+  resolveToCwd,
   buildLibrarianCandidates,
   findAvailableModel,
   isModelAvailabilityError,
