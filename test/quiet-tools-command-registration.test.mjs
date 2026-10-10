@@ -127,14 +127,6 @@ test("quiet-tools resolver does not quiet other tools", () => {
   quietToolsExtension(harness.pi);
 
   const nextCall = { type: "next-call", render: () => ["next line"] };
-  const result = simulateExpandedCall(harness, "my_custom_tool", {
-    renderCall() {
-      return nextCall;
-    },
-  });
-  // For non-builtin non-mcp__ tools, next() is returned directly
-  // so the resolver returns next(), and there's nothing to test beyond that the resolver
-  // doesn't intercept it. We verify by testing a non-builtin tool passes through.
   const resolver = harness.toolRendererResolvers[0];
   const nextRenderers = {
     renderCall() {
@@ -203,12 +195,12 @@ test("quiet-tools /quiet-tools off and on toggle quiet rendering at render time"
 
   assert.deepEqual(notifications, [
     {
-      message: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
+      message: "Quiet tool previews disabled: restored pi's standard tool renderers.",
       level: "info",
     },
     {
       message:
-        "Quiet tool previews enabled: collapsed built-in tool rows show a one-line invocation plus an expand hint.",
+        "Quiet tool previews enabled: collapsed built-in and MCP tool rows show a one-line invocation plus an expand hint.",
       level: "info",
     },
   ]);
@@ -232,7 +224,7 @@ test("quiet-tools /quiet-tools toggle and status commands notify the user", asyn
       level: "info",
     },
     {
-      message: "Quiet tool previews disabled: restored pi's standard built-in tool renderers.",
+      message: "Quiet tool previews disabled: restored pi's standard tool renderers.",
       level: "info",
     },
     {
