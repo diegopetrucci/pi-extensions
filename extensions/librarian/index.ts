@@ -1788,41 +1788,41 @@ export default function librarianExtension(pi: ExtensionAPI) {
           // even if binding fails partway through (e.g. a server starts then an
           // extension's session_start throws).
           session = created.session as typeof session;
-          // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
-          await (created.session as any).bindExtensions?.({ mode: "json" });
-          if (abortController.callerAborted) abortController.abortForCleanup();
-          unsubscribe = (created.session as any).subscribe((event: any) => {
-            addSessionEventUsage(usage, event);
-            switch (event.type) {
-              case "turn_end":
-                details.turns += 1;
-                emit();
-                break;
-              case "tool_execution_start":
-                details.toolCalls.push({
-                  id: event.toolCallId,
-                  name: event.toolName,
-                  args: event.args,
-                  startedAt: Date.now(),
-                });
-                if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
-                  details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
-                }
-                emit();
-                break;
-              case "tool_execution_end": {
-                const call = details.toolCalls.find((item) => item.id === event.toolCallId);
-                if (call) {
-                  call.endedAt = Date.now();
-                  call.isError = event.isError;
-                }
-                emit();
-                break;
-              }
-            }
-          });
-
           try {
+            // Connect extensions (MCP servers) before prompting. Feature-detected: Pi >=0.99.0.
+            await (created.session as any).bindExtensions?.({ mode: "json" });
+            if (abortController.callerAborted) abortController.abortForCleanup();
+            unsubscribe = (created.session as any).subscribe((event: any) => {
+              addSessionEventUsage(usage, event);
+              switch (event.type) {
+                case "turn_end":
+                  details.turns += 1;
+                  emit();
+                  break;
+                case "tool_execution_start":
+                  details.toolCalls.push({
+                    id: event.toolCallId,
+                    name: event.toolName,
+                    args: event.args,
+                    startedAt: Date.now(),
+                  });
+                  if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
+                    details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
+                  }
+                  emit();
+                  break;
+                case "tool_execution_end": {
+                  const call = details.toolCalls.find((item) => item.id === event.toolCallId);
+                  if (call) {
+                    call.endedAt = Date.now();
+                    call.isError = event.isError;
+                  }
+                  emit();
+                  break;
+                }
+              }
+            });
+
             if (!abortController.callerAborted) {
               const promptPromise = created.session.prompt(
                 buildUserPrompt(query, repos, owners, maxSearchResults, details.cache),
