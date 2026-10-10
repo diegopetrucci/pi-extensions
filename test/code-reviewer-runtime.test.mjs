@@ -341,6 +341,14 @@ test("blocks git blame --con abbreviation for --contents", async () => {
   );
 });
 
+test("allows git branch --contains and blocks git blame --contents", async () => {
+  const mod = await loadRuntime();
+  const { getBlockedBashReason } = mod.__test__;
+
+  assert.equal(getBlockedBashReason("git branch --contains abc123"), undefined);
+  assert.match(getBlockedBashReason("git blame --contents x f") ?? "", /--contents/);
+});
+
 test("blocks git helpers that can execute local filters", async () => {
   const mod = await loadRuntime();
   const { getBlockedBashReason } = mod.__test__;
@@ -413,23 +421,23 @@ test("injects safe git flags for allowed read-only commands", async () => {
   assert.equal(getBlockedBashReason("git diff HEAD~1 -- README.md"), undefined);
   assert.equal(
     buildSafeGitCommand(["git", "diff", "HEAD~1", "--", "README.md"]),
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'",
   );
   assert.equal(
     buildSafeGitCommand(["git", "show", "--stat", "foo bar.ts"]),
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'show' '--no-ext-diff' '--no-textconv' '--stat' 'foo bar.ts'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'show' '--no-ext-diff' '--no-textconv' '--stat' 'foo bar.ts'",
   );
   assert.equal(
     buildSafeGitCommand(["git", "status", "x>review.out"]),
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'status' 'x>review.out'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'status' 'x>review.out'",
   );
   assert.equal(
     buildSafeGitCommand(["git", "status", "a'b"]),
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'status' 'a'\"'\"'b'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'status' 'a'\"'\"'b'",
   );
   assert.equal(
     buildSafeGitCommand(["git", "show", "HEAD"]),
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'show' '--no-ext-diff' '--no-textconv' 'HEAD'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'show' '--no-ext-diff' '--no-textconv' 'HEAD'",
   );
 });
 
@@ -490,7 +498,7 @@ test("runtime guard blocks unsafe calls, rewrites git bash commands, and enforce
   assert.equal(bashInput.timeout, 30);
   assert.equal(
     bashInput.command,
-    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'",
+    "'git' '--no-pager' '--no-optional-locks' '-c' 'core.pager=cat' '-c' 'core.fsmonitor=false' '-c' 'diff.external=' '-c' 'log.showSignature=false' 'diff' '--no-ext-diff' '--no-textconv' 'HEAD~1' '--' 'README.md'",
   );
 
   assert.deepEqual(await toolResult({ content: [{ type: "text", text: "ok" }] }), {

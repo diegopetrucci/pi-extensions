@@ -340,8 +340,7 @@ function isMcpCompatibleVersion(v: string | undefined): boolean {
   return patch >= 4;
 }
 
-// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
-// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// Gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
 // matches that resolve nothing, so spawning MCP servers provides no benefit.
 function createMcpSubagentFactories(): ExtensionFactory[] {
   const ns = piCodingAgent as Record<string, unknown>;
@@ -410,7 +409,12 @@ const SAFE_GIT_BRANCH_FLAGS = new Set([
   "--no-merged",
 ]);
 const SAFE_GIT_GLOBAL_FLAGS = new Set(["--no-pager", "--no-optional-locks"]);
-const SAFE_GIT_CONFIG_OVERRIDES = ["core.pager=cat", "core.fsmonitor=false", "diff.external="];
+const SAFE_GIT_CONFIG_OVERRIDES = [
+  "core.pager=cat",
+  "core.fsmonitor=false",
+  "diff.external=",
+  "log.showSignature=false",
+];
 const GIT_SUBCOMMAND_SAFE_FLAGS: Partial<Record<string, string[]>> = {
   blame: ["--no-textconv"],
   diff: ["--no-ext-diff", "--no-textconv"],
@@ -419,12 +423,6 @@ const GIT_SUBCOMMAND_SAFE_FLAGS: Partial<Record<string, string[]>> = {
   whatchanged: ["--no-ext-diff", "--no-textconv"],
 };
 const GIT_OPTIONS_REQUIRING_LOCAL_FILE = [
-  {
-    flag: "--contents",
-    blockedPrefixes: ["--con"],
-    reason:
-      "Code Reviewer bash blocks git --contents because it can read local files outside built-in path guards.",
-  },
   {
     flag: "--pathspec-from-file",
     blockedPrefixes: ["--pathspec"],
@@ -442,6 +440,15 @@ const GIT_SUBCOMMAND_OPTIONS_REQUIRING_LOCAL_FILE: Partial<
   Record<string, Array<{ reason: string; matches: (token: string) => boolean }>>
 > = {
   blame: [
+    {
+      reason:
+        "Code Reviewer bash blocks git blame --contents because it can read local files outside built-in path guards.",
+      matches: (token) => {
+        if (!token.startsWith("--")) return false;
+        const option = token.split("=", 1)[0]?.toLowerCase() ?? "";
+        return option === "--contents" || option.startsWith("--con");
+      },
+    },
     {
       reason:
         "Code Reviewer bash blocks git blame -S because it can read local revs files outside built-in path guards.",
@@ -1665,10 +1672,7 @@ export const __test__ = {
   disposeSubagentSession,
   createCodeReviewerRuntimeGuardExtension,
   assertToolPathInsideCwd,
-  buildSystemPrompt,
-  buildUserPrompt,
   buildSafeGitCommand,
-  formatToolCall,
   getBlockedBashReason,
   isModelAvailabilityError,
   normalizeThinkingLevel,
