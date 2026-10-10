@@ -143,13 +143,13 @@ Optional global config:
 ~/<pi-config-dir>/agent/extensions/fast.json
 ```
 
-Optional project config:
+Optional project config, from the nearest ancestor of the working directory (the working directory itself counts):
 
 ```text
 <project>/<pi-config-dir>/fast.json
 ```
 
-Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). Project config overrides global config after Pi reports that the project is trusted.
+Here `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default). The loader uses that nearest ancestor `fast.json`, which overrides global config after Pi reports that the project is trusted.
 
 ```json
 {
