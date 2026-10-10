@@ -74,18 +74,6 @@ Reinvent the metaphor from the current article every time. Do not reuse old imag
 
 ## Anti-copy rules
 
-Do not automatically open or imitate `assets/examples/`. Those images are only for style calibration such as line density, whitespace, color restraint, and Xiaohei attitude.
+Do not copy `assets/examples/`. Those images are only for style calibration such as line density, whitespace, color restraint, and Xiaohei attitude.
 
-Unless the user explicitly says "copy this one," "recreate this composition," or "edit this example," do not directly reuse these old compositions:
-
-- a conveyor belt with two breakpoints
-- Xiaohei pulling a judgment lever inside a content machine
-- Xiaohei as a funnel sorting reach / trust / conversion
-- Xiaohei cutting up a source-material fish
-- Xiaohei pulling a handoff route
-- Xiaohei tugging three layers of information sources
-- three Xiaohei figures holding a megaphone, building a bridge, and opening a door
-- Xiaohei stamping a messaging toolbox
-- Xiaohei holding a warning sign over a trap path
-
-Even when the theme is similar, invent a new metaphor. For example, a handoff path does not have to be a route; it could be Xiaohei connecting the tail of a piece of content to a doorknob. One-input-many-outputs does not have to be a fish; it could be Xiaohei pressing one paper lump into several different shapes.
+Unless the user explicitly says "copy this one," "recreate this composition," or "edit this example," invent a new metaphor for the current article. Choose a fresh action from the Xiaohei action pool and one or two objects from the object pool. Even when the theme is similar to an older illustration, do not replay that scene, object, or label set.
