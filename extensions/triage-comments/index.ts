@@ -114,8 +114,7 @@ function isMcpCompatibleVersion(v: string | undefined): boolean {
   return patch >= 4;
 }
 
-// Safe runtime access to MCP/tool-search factories — feature-detected for Pi >=0.99.0 hosts.
-// Additionally gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
+// Gated on VERSION >=1.0.4: on older hosts mcp__* allowlist entries are exact-name
 // matches that resolve nothing, so spawning MCP servers provides no benefit.
 function createMcpSubagentFactories(): ExtensionFactory[] {
   const ns = piCodingAgent as Record<string, unknown>;
@@ -2651,13 +2650,11 @@ export const __test__ = {
   formatInlineFilterContext,
   formatToolCall,
   getBlockedBashReason,
-  normalizeComment,
   normalizeInput,
   parseSelectionList,
   parseTriageCommandArgs,
   prepareArguments,
   aggregateAssistantUsage,
-  addAssistantMessageUsage,
   addSessionEventUsage,
   inspectFinalAssistant,
   classifyRunFailure,
