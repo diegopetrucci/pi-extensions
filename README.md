@@ -13,7 +13,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### Providers
 
-- [`fast`](./extensions/fast): Adds `/fast` plus the session-only `/ultrafast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models; Ultrafast is limited to API-key `gpt-6-astra` on OpenAI's canonical Responses endpoint.
+- [`fast`](./extensions/fast): Adds `/fast` plus the session-only `/ultrafast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models; honors per-child `fast` preferences from `pi:agent-launch-context` without changing parent-session defaults. Ultrafast is limited to API-key `gpt-6-astra` on OpenAI's canonical Responses endpoint.
 
 ### UI
 

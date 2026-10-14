@@ -48,11 +48,32 @@ function writeConfig(filePath, config) {
   writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
-function createContext({ cwd, model, trusted = true, hasUI = true, oauth = false, authToken }) {
+function createContext({
+  cwd,
+  model,
+  trusted = true,
+  hasUI = true,
+  oauth = false,
+  authToken,
+  launchFast,
+  launchContextEntries,
+}) {
   const statuses = [];
   const notifications = [];
   const oauthCalls = [];
-  const sessionManager = {};
+  const sessionManager = {
+    getBranch() {
+      if (launchContextEntries) return launchContextEntries;
+      if (launchFast === undefined) return [];
+      return [
+        {
+          type: "custom",
+          customType: "pi:agent-launch-context",
+          data: { version: 1, agentType: "general-purpose", metadata: { fast: launchFast } },
+        },
+      ];
+    },
+  };
   const ctx = {
     cwd,
     model,
@@ -181,6 +202,100 @@ test("fast routes one enabled session across supported OpenAI and Anthropic mode
     await beforeRequest({ payload: { model: "gpt-5.6-sol", input: "again" } }, context.ctx),
     { model: "gpt-5.6-sol", input: "again", service_tier: "priority" },
   );
+});
+
+test("fast reads launch-context preferences and selects the provider-specific Fast request", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const cases = [
+    {
+      launchFast: true,
+      model: { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-6-astra" },
+      oauth: true,
+      expected: { model: "gpt-6-astra", service_tier: "priority" },
+    },
+    {
+      launchFast: "fast",
+      model: { provider: "openai", api: "openai-responses", id: "gpt-6-astra" },
+      expected: { model: "gpt-6-astra", service_tier: "fast" },
+    },
+    {
+      launchFast: true,
+      model: { provider: "anthropic", api: "anthropic-messages", id: "claude-opus-5" },
+      expected: { model: "claude-opus-5", speed: "fast" },
+    },
+  ];
+
+  for (const { launchFast, model, oauth, expected } of cases) {
+    const context = createContext({ cwd: projectDir, model, oauth, launchFast });
+    await sessionStart({}, context.ctx);
+    assert.deepEqual(await beforeRequest({ payload: { model: model.id } }, context.ctx), expected);
+    assert.deepEqual(context.statuses.at(-1), { key: "fast", value: "fast" });
+  }
+});
+
+test("fast launch settings override config, and unknown values fail closed", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+  writeConfig(path.join(agentDir, "extensions", "fast.json"), { enabled: true });
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const model = { provider: "openai", api: "openai-responses", id: "gpt-6-astra" };
+
+  for (const launchFast of [false, "future-mode"]) {
+    const context = createContext({ cwd: projectDir, model, launchFast });
+    await sessionStart({}, context.ctx);
+    assert.equal(await beforeRequest({ payload: { model: model.id } }, context.ctx), undefined);
+    assert.deepEqual(context.statuses.at(-1), { key: "fast", value: undefined });
+  }
+});
+
+test("fast ultrafast launch setting is restricted to eligible direct OpenAI sessions", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+  writeConfig(path.join(agentDir, "extensions", "fast.json"), { enabled: true });
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+
+  const eligible = createContext({
+    cwd: projectDir,
+    model: ultrafastModel(),
+    launchFast: "ultrafast",
+  });
+  await sessionStart({}, eligible.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6-astra" } }, eligible.ctx), {
+    model: "gpt-6-astra",
+    service_tier: "ultrafast",
+  });
+
+  for (const model of [
+    { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-6-astra" },
+    { provider: "anthropic", api: "anthropic-messages", id: "claude-opus-5" },
+  ]) {
+    const unsupported = createContext({
+      cwd: projectDir,
+      model,
+      oauth: true,
+      launchFast: "ultrafast",
+    });
+    await sessionStart({}, unsupported.ctx);
+    assert.equal(await beforeRequest({ payload: { model: model.id } }, unsupported.ctx), undefined);
+    assert.deepEqual(unsupported.statuses.at(-1), { key: "fast", value: undefined });
+  }
 });
 
 test("fast supports every legacy allowlisted model and preserves provider-specific auth rules", async (t) => {

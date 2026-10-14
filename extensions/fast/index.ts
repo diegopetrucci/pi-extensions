@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const EXTENSION_ID = "fast";
+const PI_AGENT_LAUNCH_CONTEXT_ENTRY_TYPE = "pi:agent-launch-context";
 const ANTHROPIC_PROVIDER_ID = "anthropic";
 const ANTHROPIC_API_ID = "anthropic-messages";
 const ANTHROPIC_FAST_SPEED = "fast";
@@ -141,6 +142,66 @@ function loadConfig(ctx: ProjectConfigContext): FastConfig {
 
 function isPayloadRecord(payload: unknown): payload is PayloadRecord {
   return typeof payload === "object" && payload !== null && !Array.isArray(payload);
+}
+
+function getAgentLaunchFastSetting(ctx: ExtensionContext): unknown {
+  const entry = [...ctx.sessionManager.getBranch()]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.type === "custom" && candidate.customType === PI_AGENT_LAUNCH_CONTEXT_ENTRY_TYPE,
+    );
+  if (!entry || entry.type !== "custom" || !isPayloadRecord(entry.data)) return undefined;
+  if (entry.data.version !== 1 || !isPayloadRecord(entry.data.metadata)) return undefined;
+  return entry.data.metadata.fast;
+}
+
+function applyAgentLaunchFastSetting(ctx: ExtensionContext, state: SessionState): void {
+  const value = getAgentLaunchFastSetting(ctx);
+  if (value === undefined) return;
+
+  if (value === true) {
+    state.override = "on";
+    return;
+  }
+  if (value === false) {
+    state.override = "off";
+    return;
+  }
+
+  if (typeof value !== "string") {
+    state.override = "off";
+    return;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "true":
+    case "fast":
+      state.override = "on";
+      break;
+    case "false":
+    case "off":
+      state.override = "off";
+      break;
+    case "ultrafast":
+      // Do not fall back to ordinary Fast when the requested mode is ineligible.
+      state.override = "off";
+      if (getUltrafastEligibility(ctx).eligible) state.ultrafast = true;
+      break;
+    default:
+      // Unknown launch modes fail closed instead of inheriting an enabled config default.
+      state.override = "off";
+  }
+}
+
+function createSessionState(ctx: ExtensionContext): SessionState {
+  const state: SessionState = {
+    config: loadConfig(ctx),
+    override: "auto",
+    ultrafast: false,
+  };
+  applyAgentLaunchFastSetting(ctx, state);
+  return state;
 }
 
 function isFastEnabled(state: SessionState): boolean {
@@ -512,22 +573,14 @@ export default function fastExtension(pi: ExtensionAPI) {
   function getState(ctx: ExtensionContext): SessionState {
     let state = states.get(ctx.sessionManager);
     if (!state) {
-      state = {
-        config: loadConfig(ctx),
-        override: "auto",
-        ultrafast: false,
-      };
+      state = createSessionState(ctx);
       states.set(ctx.sessionManager, state);
     }
     return state;
   }
 
   pi.on("session_start", (_event, ctx) => {
-    const state: SessionState = {
-      config: loadConfig(ctx),
-      override: "auto",
-      ultrafast: false,
-    };
+    const state = createSessionState(ctx);
     states.set(ctx.sessionManager, state);
     updateStatus(ctx, state);
   });
