@@ -583,6 +583,9 @@ export default function fastExtension(pi: ExtensionAPI) {
     const state = createSessionState(ctx);
     states.set(ctx.sessionManager, state);
     updateStatus(ctx, state);
+    if (state.ultrafast && ctx.hasUI) {
+      ctx.ui.notify(getStatusMessage(ctx, state), "info");
+    }
   });
 
   pi.on("model_select", (_event, ctx) => {

@@ -53,6 +53,7 @@ function createContext({
   model,
   trusted = true,
   hasUI = true,
+  mode = hasUI ? "tui" : "print",
   oauth = false,
   authToken,
   launchFast,
@@ -77,6 +78,7 @@ function createContext({
   const ctx = {
     cwd,
     model,
+    mode,
     hasUI,
     sessionManager,
     isProjectTrusted() {
@@ -274,10 +276,25 @@ test("fast ultrafast launch setting is restricted to eligible direct OpenAI sess
   const eligible = createContext({
     cwd: projectDir,
     model: ultrafastModel(),
+    mode: "rpc",
     launchFast: "ultrafast",
   });
   await sessionStart({}, eligible.ctx);
+  assert.match(eligible.notifications.at(-1).message, /actual API pricing is 6x Standard/i);
   assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6-astra" } }, eligible.ctx), {
+    model: "gpt-6-astra",
+    service_tier: "ultrafast",
+  });
+
+  const headless = createContext({
+    cwd: projectDir,
+    model: ultrafastModel(),
+    hasUI: false,
+    launchFast: "ultrafast",
+  });
+  await sessionStart({}, headless.ctx);
+  assert.deepEqual(headless.notifications, []);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6-astra" } }, headless.ctx), {
     model: "gpt-6-astra",
     service_tier: "ultrafast",
   });

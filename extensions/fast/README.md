@@ -139,7 +139,7 @@ The extension reads the latest `pi:agent-launch-context` custom entry on the act
 
 `metadata.fast: "ultrafast"` requests the existing Ultrafast mode, still subject to its direct OpenAI API-key, canonical endpoint, and GPT-6 Astra checks. It does not fall back to ordinary Fast when those checks fail. `false` or `"off"` explicitly disables Fast for that child, even when config enables it. Unknown values fail closed. If the entry or `fast` field is absent, normal config and session behavior remain unchanged. These settings do not enable Fast in the parent session.
 
-The launcher passes values opaquely; this extension owns their interpretation. Launch metadata is stored in a custom session entry and is not added to the model prompt.
+The launcher passes values opaquely; this extension owns their interpretation. Launch metadata is stored in a custom session entry and is not added to the model prompt. When launch metadata enables eligible Ultrafast, the extension shows the same pricing warning in TUI and RPC sessions, where `ctx.hasUI` is true.
 
 The extension defaults to off so installing the full collection does not accidentally spend Fast-mode credits. Ultrafast verification is mocked-only: tests use local eligibility checks, fake payloads, and a fake fetch through Pi's `openai-responses` `streamSimple`; they make no live or paid provider requests.
 
