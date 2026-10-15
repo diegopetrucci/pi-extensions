@@ -736,12 +736,6 @@ function getReadPathCandidates(resolved: string): string[] {
   ];
 }
 
-function resolveToolPath(cwd: string, rawPath: string | undefined): string {
-  const input = rawPath?.trim() || ".";
-  const normalized = input.startsWith("@") ? input.slice(1) : input;
-  return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(cwd, normalized);
-}
-
 async function assertToolPathInsideCwd(
   cwd: string,
   rawPath: unknown,
@@ -754,11 +748,6 @@ async function assertToolPathInsideCwd(
   // where realpath fails and the lexical fallback starts with the alias prefix.
   const root = await fs.realpath(cwd).catch(() => path.resolve(cwd));
   const lexicalCwd = path.resolve(cwd);
-  const resolved = resolveToolPath(cwd, rawPath);
-  const realPath = await fs.realpath(resolved).catch(() => resolved);
-  if (!isInside(root, realPath) && !isInside(lexicalCwd, realPath))
-    return `${toolName} is limited to the local checkout: ${realPath}`;
-  // Pi-effective path check (monotonic: block if either resolution is outside).
   // For the read tool, also check Pi's resolveReadPathAsync fallback variants so
   // a missing file whose variant resolves outside is not silently allowed.
   try {

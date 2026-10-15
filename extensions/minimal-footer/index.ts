@@ -148,10 +148,6 @@ type GitStatusSnapshot = {
 
 type PullRequestSnapshot = {
   number?: number | string;
-  state?: string;
-  isDraft?: boolean;
-  url?: string;
-  title?: string;
 };
 
 type CommandResult = {
@@ -200,7 +196,7 @@ const GIT_STATUS_ARGS = [
   "--porcelain=v2",
   "--branch",
 ] as const;
-const GH_PR_VIEW_ARGS = ["pr", "view", "--json", "number,state,isDraft,url,title"] as const;
+const GH_PR_VIEW_ARGS = ["pr", "view", "--json", "number"] as const;
 
 function readConfigFile(path: string): RecursivePartial<MinimalFooterConfig> {
   if (!existsSync(path)) return {};
@@ -468,10 +464,6 @@ function parsePullRequestJson(stdout: string): PullRequestSnapshot | undefined {
   if (typeof record.number === "number" || typeof record.number === "string") {
     snapshot.number = record.number;
   }
-  if (typeof record.state === "string") snapshot.state = record.state;
-  if (typeof record.isDraft === "boolean") snapshot.isDraft = record.isDraft;
-  if (typeof record.url === "string") snapshot.url = record.url;
-  if (typeof record.title === "string") snapshot.title = record.title;
   return snapshot;
 }
 
@@ -494,13 +486,7 @@ function pullRequestSnapshotsEqual(
   left: PullRequestSnapshot | undefined,
   right: PullRequestSnapshot | undefined,
 ): boolean {
-  return (
-    left?.number === right?.number &&
-    left?.state === right?.state &&
-    left?.isDraft === right?.isDraft &&
-    left?.url === right?.url &&
-    left?.title === right?.title
-  );
+  return left?.number === right?.number;
 }
 
 function defaultRunner(

@@ -756,6 +756,43 @@ for (const [extName, assertFn] of Object.entries(assertFns)) {
   });
 }
 
+for (const [extName, assertFn] of Object.entries(assertFns)) {
+  test(`${extName}: escaping directory symlink inside root is blocked`, async (t) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), `${extName}-escape-dir-`));
+    const outside = mkdtempSync(path.join(os.tmpdir(), `${extName}-escape-dir-out-`));
+    t.after(() => {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    });
+    writeFileSync(path.join(outside, "secret.txt"), "OUTSIDE_SECRET");
+    symlinkSync(outside, path.join(root, "escape-dir"), "dir");
+
+    for (const target of ["escape-dir", "escape-dir/secret.txt"]) {
+      const reason = await assertFn(root, target, "read");
+      assert.match(String(reason), /limited to/, `${extName}: ${target} must be blocked`);
+    }
+  });
+}
+
+for (const [extName, assertFn] of Object.entries(assertFns)) {
+  test(`${extName}: leading-space path is not trimmed into an escape; real escapes stay blocked`, async (t) => {
+    const base = mkdtempSync(path.join(os.tmpdir(), `${extName}-nolegacy-`));
+    t.after(() => rmSync(base, { recursive: true, force: true }));
+    const root = path.join(base, "checkout");
+    mkdirSync(root);
+    writeFileSync(path.join(base, "outside-file"), "OUTSIDE");
+    symlinkSync(base, path.join(root, "escape-link"), "dir");
+
+    // Pi does not trim: " ../outside-file" resolves to <root>/" .."/outside-file,
+    // a file in a directory literally named " ..", i.e. inside the checkout.
+    assert.equal(await assertFn(root, " ../outside-file", "read"), undefined);
+    for (const target of ["../outside-file", "escape-link/outside-file"]) {
+      const reason = await assertFn(root, target, "read");
+      assert.match(String(reason), /limited to/, `${extName}: ${target} must be blocked`);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Librarian: missing in-root target through alias workspace is allowed (Fix 3)
 // ---------------------------------------------------------------------------

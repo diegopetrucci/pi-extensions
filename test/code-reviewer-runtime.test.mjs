@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -394,23 +394,22 @@ test("blocks gh side-effecting flags on read-only commands", async () => {
   assert.equal(getBlockedBashReason("gh pr view 123"), undefined);
 });
 
-test("rejects raw dot-dot traversal before path normalization", async (t) => {
+test("blocks parent traversal outside the local checkout", async (t) => {
   const mod = await loadRuntime();
   const { assertToolPathInsideCwd } = mod.__test__;
-  const root = await mkdtemp(path.join(os.tmpdir(), "code-reviewer-path-"));
-  const outside = await mkdtemp(path.join(os.tmpdir(), "code-reviewer-path-outside-"));
+  const parent = await mkdtemp(path.join(os.tmpdir(), "code-reviewer-path-"));
+  const root = path.join(parent, "checkout");
+  await mkdir(root);
 
   t.after(async () => {
-    await rm(root, { recursive: true, force: true });
-    await rm(outside, { recursive: true, force: true });
+    await rm(parent, { recursive: true, force: true });
   });
 
-  await symlink(outside, path.join(root, "link"));
-  await writeFile(path.join(outside, "outside-file"), "secret\n", "utf8");
+  await writeFile(path.join(parent, "outside-file"), "secret\n", "utf8");
 
   assert.match(
-    (await assertToolPathInsideCwd(root, "link/../outside-file", "read")) ?? "",
-    /must not traverse outside the local checkout/,
+    (await assertToolPathInsideCwd(root, "../outside-file", "read")) ?? "",
+    /is limited to the local checkout/,
   );
 });
 

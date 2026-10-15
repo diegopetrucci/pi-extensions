@@ -267,10 +267,6 @@ test("footer status helpers parse PR JSON and ignore invalid payloads", async (t
         ),
         {
           number: 17,
-          state: "OPEN",
-          isDraft: false,
-          url: "https://example.test/pr/17",
-          title: "Add tests",
         },
       );
       assert.deepEqual(testing.parsePullRequestJson('{"number":"44"}'), { number: "44" });
@@ -420,7 +416,6 @@ test("footer status caches use fake runners and clocks without invoking real git
       });
       assert.deepEqual(cache.getPullRequestSnapshot(), {
         number: 7,
-        state: "OPEN",
       });
       assert.equal(changes, 1);
       assert.deepEqual(
@@ -573,7 +568,7 @@ test("footer status caches preserve last good snapshots on transient runner fail
         ahead: 1,
         behind: 0,
       });
-      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: "OPEN" });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7 });
       assert.equal(changes, 1);
 
       await cache.refresh();
@@ -586,7 +581,7 @@ test("footer status caches preserve last good snapshots on transient runner fail
         ahead: 2,
         behind: 0,
       });
-      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: "OPEN" });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7 });
       assert.equal(changes, 2);
 
       await cache.refresh();
@@ -599,7 +594,7 @@ test("footer status caches preserve last good snapshots on transient runner fail
         ahead: 2,
         behind: 0,
       });
-      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: "OPEN" });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7 });
       assert.equal(changes, 2);
       assert.deepEqual(
         calls.map(({ command }) => command),
@@ -692,7 +687,7 @@ test("footer status caches clear stale PR snapshots when gh no longer returns a 
       });
 
       await cache.refresh();
-      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7, state: "OPEN" });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 7 });
       assert.equal(changes, 1);
 
       await cache.refresh();
@@ -900,7 +895,7 @@ test("minimal-footer cache clears stale snapshots on non-repo git exits", async 
     ahead: 1,
     behind: 0,
   });
-  assert.deepEqual(cache.getPullRequestSnapshot(), { number: 23, state: "OPEN" });
+  assert.deepEqual(cache.getPullRequestSnapshot(), { number: 23 });
   assert.equal(changes, 1);
 
   await cache.refresh();
@@ -991,7 +986,7 @@ test(
         ahead: 1,
         behind: 0,
       });
-      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 31, state: "OPEN" });
+      assert.deepEqual(cache.getPullRequestSnapshot(), { number: 31 });
       assert.equal(changes, 1);
 
       const refreshPromise = cache.refresh();

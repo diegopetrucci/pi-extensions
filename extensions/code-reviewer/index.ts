@@ -1033,12 +1033,6 @@ function getReadPathCandidates(resolved: string): string[] {
   ];
 }
 
-function resolveToolPath(cwd: string, rawPath: string | undefined): string {
-  const input = rawPath?.trim() || ".";
-  const normalized = input.startsWith("@") ? input.slice(1) : input;
-  return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(cwd, normalized);
-}
-
 async function assertToolPathInsideCwd(
   cwd: string,
   rawPath: unknown,
@@ -1046,24 +1040,11 @@ async function assertToolPathInsideCwd(
 ): Promise<string | undefined> {
   if (rawPath !== undefined && typeof rawPath !== "string")
     return `${toolName} path must be a string.`;
-  if (typeof rawPath === "string") {
-    const normalizedInput = rawPath.trim().startsWith("@")
-      ? rawPath.trim().slice(1)
-      : rawPath.trim();
-    if (/(^|[/\\])\.\.(?:[/\\]|$)/.test(normalizedInput)) {
-      return `${toolName} path must not traverse outside the local checkout.`;
-    }
-  }
   // A path is allowed if it resolves inside EITHER the realpath'd root (root) OR
   // the lexical cwd (lexicalCwd). This handles missing files in symlinked workspaces
   // where realpath fails and the lexical fallback starts with the alias prefix.
   const root = await fs.realpath(cwd).catch(() => path.resolve(cwd));
   const lexicalCwd = path.resolve(cwd);
-  const resolved = resolveToolPath(cwd, rawPath);
-  const realPath = await fs.realpath(resolved).catch(() => resolved);
-  if (!isInside(root, realPath) && !isInside(lexicalCwd, realPath))
-    return `${toolName} is limited to the local checkout: ${realPath}`;
-  // Pi-effective path check (monotonic: block if either resolution is outside).
   // For the read tool, also check Pi's resolveReadPathAsync fallback variants so
   // a missing file whose variant resolves outside is not silently allowed.
   try {

@@ -243,8 +243,8 @@ test("minimal-footer openai usage adds OAuth account header and normalizes usage
       async () => {
         const snapshot = await fetchOpenAICodexUsage(authStorage, { timeoutMs: 321 });
         assert.deepEqual(snapshot, {
-          primary: { usedPercent: 0, windowSeconds: 604800, resetAt: 123000 },
-          secondary: { usedPercent: 100, windowSeconds: undefined, resetAt: 456789 },
+          primary: { usedPercent: 0, windowSeconds: 604800 },
+          secondary: { usedPercent: 100, windowSeconds: undefined },
           fetchedAt: 987654321,
         });
       },

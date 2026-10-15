@@ -49,25 +49,6 @@ test("agent-workflow-audit parses flags, aliases, and focus text", async () => {
   assert.match(parseArgs("--bogus").error, /Unknown \/agent-workflow-audit option: --bogus/);
 });
 
-test("agent-workflow-audit path sandbox rejects symlink escapes outside the checkout", async (t) => {
-  const { assertToolPathInsideCwd } = await loadAuditTestUtils();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "audit-guard-"));
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), "audit-guard-outside-"));
-  t.after(async () => {
-    await fs.rm(root, { recursive: true, force: true });
-    await fs.rm(outside, { recursive: true, force: true });
-  });
-
-  await fs.writeFile(path.join(root, "README.md"), "ok\n");
-  await fs.symlink(outside, path.join(root, "escape"));
-
-  assert.equal(await assertToolPathInsideCwd(root, "README.md", "read"), undefined);
-  assert.match(
-    await assertToolPathInsideCwd(root, "escape", "read"),
-    /read is limited to the audited checkout:/,
-  );
-});
-
 test("agent-workflow-audit bash guard keeps execution to documented read-only or safe local commands", async () => {
   const { getBlockedBashReason } = await loadAuditTestUtils();
 

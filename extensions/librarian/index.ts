@@ -1045,7 +1045,7 @@ function tryCurlyQuotePathVariant(filePath: string): string {
 }
 /**
  * Returns all read path candidates including Pi's resolveReadPathAsync fallback
- * variants. Used only for the read tool guard; grep/find/ls use resolveToCwd only.
+ * variants.
  */
 function getReadPathCandidates(resolved: string): string[] {
   const nfd = tryNFDPathVariant(resolved);
@@ -1056,11 +1056,6 @@ function getReadPathCandidates(resolved: string): string[] {
     tryCurlyQuotePathVariant(resolved),
     tryCurlyQuotePathVariant(nfd),
   ];
-}
-
-function resolveToolPath(cwd: string, rawPath: string): string {
-  const normalized = rawPath.startsWith("@") ? rawPath.slice(1) : rawPath;
-  return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(cwd, normalized);
 }
 
 function getBlockedBashReason(
@@ -1165,17 +1160,9 @@ function createLibrarianRuntimeGuardExtension(options: {
             (options.cacheEnabled && (isInside(options.cacheRoot, p) || isInside(realCacheRoot, p)))
           );
         }
-        const resolved = resolveToolPath(options.workspace, input.path);
-        const realPath = await fs.realpath(resolved).catch(() => resolved);
-        if (!isAllowedPath(realPath))
-          return {
-            block: true,
-            reason: `Librarian read is limited to its workspace/cache: ${realPath}`,
-          };
-        // Pi-effective path check (monotonic: block if either resolution is
-        // outside). For the read tool, also check Pi's resolveReadPathAsync
-        // fallback variants so a missing file whose variant resolves outside is
-        // not silently allowed.
+        // For the read tool, also check Pi's resolveReadPathAsync fallback
+        // variants so a missing file whose variant resolves outside is not
+        // silently allowed.
         try {
           const piResolved = resolveToCwd(input.path, options.workspace);
           const candidates = getReadPathCandidates(piResolved);

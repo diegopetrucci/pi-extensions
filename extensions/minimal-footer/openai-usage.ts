@@ -15,7 +15,6 @@ export type UsageAvailability = "unsupported" | "unavailable";
 
 interface WhamUsageWindow {
   limit_window_seconds?: number;
-  reset_at?: number;
   used_percent?: number;
 }
 
@@ -29,7 +28,6 @@ interface WhamUsageResponse {
 export interface UsageWindow {
   usedPercent?: number;
   windowSeconds?: number;
-  resetAt?: number;
 }
 
 export interface UsageSnapshot {
@@ -59,19 +57,12 @@ function normalizeWindowSeconds(value?: number): number | undefined {
   return value;
 }
 
-function normalizeResetAt(value?: number): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return value * 1000;
-}
-
 function parseUsageWindow(window?: WhamUsageWindow): UsageWindow | undefined {
   if (!window) return undefined;
   const usedPercent = normalizeUsedPercent(window.used_percent);
   const windowSeconds = normalizeWindowSeconds(window.limit_window_seconds);
-  const resetAt = normalizeResetAt(window.reset_at);
-  if (usedPercent === undefined && windowSeconds === undefined && resetAt === undefined)
-    return undefined;
-  return { usedPercent, windowSeconds, resetAt };
+  if (usedPercent === undefined && windowSeconds === undefined) return undefined;
+  return { usedPercent, windowSeconds };
 }
 
 function parseUsageSnapshot(data: WhamUsageResponse): Omit<UsageSnapshot, "fetchedAt"> {
