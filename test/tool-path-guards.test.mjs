@@ -8,7 +8,6 @@
  */
 
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -156,12 +155,6 @@ for (const [extName, assertFn] of Object.entries(assertFns)) {
     const reason = await assertFn(root, path.join(root, "readme.txt"), "read");
     assert.equal(reason, undefined, `${extName}: absolute in-root read must be allowed`);
   });
-
-  // Note: file:// URLs to in-root files are handled by the Pi-effective check.
-  // The legacy resolveToolPath (restored to origin/main) treats them as relative
-  // strings, producing ${root}/file://... paths that may fail isInside on macOS
-  // (where /var resolves to /private/var). Relative and absolute in-root reads
-  // remain the correct controls.
 }
 
 // ---------------------------------------------------------------------------
@@ -209,16 +202,6 @@ async function loadLibrarianGuard() {
   return mod.createLibrarianRuntimeGuardExtension;
 }
 
-function createLibrarianHandlers(factory) {
-  const handlers = new Map();
-  factory({
-    on(eventName, handler) {
-      handlers.set(eventName, handler);
-    },
-  });
-  return handlers;
-}
-
 test("librarian: file:// URL outside workspace is blocked", async (t) => {
   const createGuard = await loadLibrarianGuard();
   const workspace = mkdtempSync(path.join(os.tmpdir(), "lib-guard-ws-"));
@@ -231,7 +214,7 @@ test("librarian: file:// URL outside workspace is blocked", async (t) => {
   });
   writeFileSync(path.join(outside, "secret.txt"), "SECRET");
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -255,7 +238,7 @@ test("librarian: percent-encoded file URL outside workspace is blocked", async (
   });
   writeFileSync(path.join(outside, ".env"), "SECRET=1");
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -276,7 +259,7 @@ test("librarian: tilde path outside workspace is blocked", async (t) => {
     rmSync(cacheRoot, { recursive: true, force: true });
   });
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -297,7 +280,7 @@ test("librarian: in-workspace read is allowed", async (t) => {
   });
   writeFileSync(path.join(workspace, "evidence.md"), "ok");
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -329,7 +312,7 @@ test("librarian BUG-006: relative in-workspace read allowed when workspace is a 
   symlinkSync(realWorkspace, symlinkWorkspace);
 
   // Guard is created with the symlinked path as workspace
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace: symlinkWorkspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -359,7 +342,7 @@ test("librarian BUG-006: symlink escaping workspace is still blocked", async (t)
   writeFileSync(path.join(outside, "secret.txt"), "SECRET");
   symlinkSync(path.join(outside, "secret.txt"), path.join(workspace, "escape"));
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -386,7 +369,7 @@ test("librarian BUG-006: read allowed from cache root when cache is enabled", as
   symlinkSync(realCacheRoot, symlinkCache);
 
   // Guard created with symlinked cache root
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot: symlinkCache, cacheEnabled: true }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -420,7 +403,7 @@ test("librarian: gate blocks outside read; SDK read succeeds when gate allows", 
   writeFileSync(path.join(outside, "secret.txt"), "OUTSIDE_CONTENT");
   writeFileSync(path.join(workspace, "evidence.md"), "INSIDE_CONTENT");
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
@@ -666,30 +649,6 @@ test("NFD variant: escape symlink blocked when path resolves via NFD fallback", 
 });
 
 // ---------------------------------------------------------------------------
-// P2 monotonicity: legacy-monotonicity reproduction
-// ---------------------------------------------------------------------------
-
-test("legacy-monotonicity: file:// URL to outside path is blocked (Pi-effective check catches it)", async (t) => {
-  // Demonstrates the monotonic two-check design: the original legacy
-  // resolveToolPath does not parse file:// URLs (produces ${root}/file://...
-  // which may lexically pass isInside on Linux where root has no symlinks).
-  // The Pi-effective check catches the actual outside path in all cases.
-  const root = mkdtempSync(path.join(os.tmpdir(), "mono-root-"));
-  const outside = mkdtempSync(path.join(os.tmpdir(), "mono-outside-"));
-  t.after(() => {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(outside, { recursive: true, force: true });
-  });
-  writeFileSync(path.join(outside, "secret.txt"), "OUTSIDE_SECRET");
-  const outsideUrl = pathToFileURL(path.join(outside, "secret.txt")).href;
-
-  for (const [extName, assertFn] of Object.entries(assertFns)) {
-    const reason = await assertFn(root, outsideUrl, "read");
-    assert.ok(reason, `${extName}: file:// URL to outside must be blocked (monotonicity)`);
-  }
-});
-
-// ---------------------------------------------------------------------------
 // In-root read through symlinked-alias workspace (three non-librarian guards)
 // ---------------------------------------------------------------------------
 
@@ -811,7 +770,7 @@ test("librarian BUG-006: missing relative target through alias workspace is allo
   });
   symlinkSync(realWorkspace, symlinkWorkspace);
 
-  const handlers = createLibrarianHandlers(
+  const handlers = createGuardHandlerMap(
     createGuard({ maxTurns: 5, workspace: symlinkWorkspace, cacheRoot, cacheEnabled: false }),
   );
   await handlers.get("turn_start")({ turnIndex: 0 });
