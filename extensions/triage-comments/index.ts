@@ -272,8 +272,6 @@ type ToolCall = {
   id: string;
   name: string;
   args: unknown;
-  startedAt: number;
-  endedAt?: number;
   isError?: boolean;
 };
 
@@ -2830,7 +2828,6 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
                 id: event.toolCallId,
                 name: event.toolName,
                 args: event.args,
-                startedAt: Date.now(),
               });
               if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
                 details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
@@ -2840,7 +2837,6 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
             case "tool_execution_end": {
               const call = details.toolCalls.find((item) => item.id === event.toolCallId);
               if (call) {
-                call.endedAt = Date.now();
                 call.isError = event.isError;
               }
               emit();

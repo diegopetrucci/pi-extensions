@@ -29,7 +29,9 @@ Then reload pi:
 
 ## Notes
 
+- `/review` requires interactive mode (TUI); `/end-review` requires a UI.
 - This fork adds loop fixing, custom review instructions persisted in the session, a blocking-findings parser, and `/end-review` handoff modes (return only, return and summarize, or return and fix findings). Loop fixing cycles until the parser reports no blocking findings: tagged P0–P2 items, or a "needs attention" verdict when no priority tags are present. Commit review is excluded from loop fixing.
+- Loop fixing always uses Empty branch mode and skips the Empty branch / Current session choice.
 - PR review requires `gh` access and a clean working tree for tracked files.
 - If the project is trusted and a `REVIEW_GUIDELINES.md` file exists next to the repo's `<pi-config-dir>` directory, its contents are appended to the review prompt. `<pi-config-dir>` is Pi's runtime config directory name (`CONFIG_DIR_NAME`; `.pi` by default).
 

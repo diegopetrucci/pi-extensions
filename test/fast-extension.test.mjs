@@ -230,7 +230,7 @@ test("fast supports every legacy allowlisted model and preserves provider-specif
   assert.deepEqual(apiKeyOpenAI.statuses.at(-1), { key: "fast", value: undefined });
 });
 
-test("fast preserves direct OpenAI API-key and OAuth payload behavior without live certification", async (t) => {
+test("fast selects direct OpenAI service tier by auth type", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDir(t, agentDir);
   writeConfig(path.join(agentDir, "extensions", "fast.json"), { enabled: true });
@@ -243,7 +243,10 @@ test("fast preserves direct OpenAI API-key and OAuth payload behavior without li
 
   for (const api of ["openai-responses", "openai-completions"]) {
     for (const id of OPENAI_API_MODELS) {
-      for (const oauth of [false, true]) {
+      for (const [oauth, serviceTier] of [
+        [false, "fast"],
+        [true, "priority"],
+      ]) {
         const context = createContext({
           cwd: projectDir,
           model: { provider: "openai", api, id },
@@ -255,15 +258,10 @@ test("fast preserves direct OpenAI API-key and OAuth payload behavior without li
           {
             model: id,
             input: "hello",
-            service_tier: "fast",
+            service_tier: serviceTier,
           },
         );
         assert.deepEqual(context.statuses.at(-1), { key: "fast", value: "fast" });
-        assert.deepEqual(
-          context.oauthCalls,
-          [],
-          "direct OpenAI auth must not be routed through Codex auth checks",
-        );
       }
     }
   }
@@ -339,6 +337,36 @@ test("fast enables direct GPT-6.1 Sol only after toggling", async (t) => {
     await beforeRequest({ payload: { model: "gpt-6.1-sol", input: "enabled" } }, direct.ctx),
     { model: "gpt-6.1-sol", input: "enabled", service_tier: "fast" },
   );
+});
+
+test("fast reports priority for direct OpenAI OAuth after toggling", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const command = getCommand(harness);
+  const context = createContext({
+    cwd: projectDir,
+    model: { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" },
+    oauth: true,
+  });
+
+  await sessionStart({}, context.ctx);
+  assert.equal(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), undefined);
+
+  await command.handler("", context.ctx);
+  assert.match(
+    context.notifications.at(-1).message,
+    /active for openai\/gpt-6\.1-sol; requests will use service_tier=priority\./,
+  );
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), {
+    model: "gpt-6.1-sol",
+    service_tier: "priority",
+  });
 });
 
 test("ultrafast commands toggle through one session-only implementation without Fast fallback", async (t) => {

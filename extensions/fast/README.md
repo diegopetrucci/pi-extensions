@@ -2,11 +2,19 @@
 
 A pi extension that provides `/fast` and `/ultrafast` toggles for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models. It selects the provider-specific Fast-mode request shape from the currently selected model.
 
-For eligible direct OpenAI API models it injects:
+For eligible direct OpenAI API-key models it injects:
 
 ```json
 {
   "service_tier": "fast"
+}
+```
+
+For eligible direct OpenAI ChatGPT OAuth models it injects:
+
+```json
+{
+  "service_tier": "priority"
 }
 ```
 
@@ -39,16 +47,15 @@ Direct OpenAI API Fast mode requires all of the following:
 - Provider `openai`.
 - API `openai-responses` or `openai-completions`.
 - Model `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
-- API-key auth or Pi's `openai` ChatGPT OAuth (`Sign in with ChatGPT`).
+- API-key auth sets `service_tier: "fast"`; Pi's `openai` ChatGPT OAuth sets `priority`.
 - No existing `service_tier` field in the request payload.
 
-The direct OpenAI route stays on OpenAI's direct API contract for both API-key
-auth and Pi's `openai` ChatGPT OAuth. Acceptance of `service_tier: "fast"` by
-Pi's `openai` ChatGPT OAuth sign-in endpoint has not been live-verified.
-This direct route is never forwarded to legacy `openai-codex` or its
-subscription-usage endpoint. The documented request shape is support evidence,
-not live certification; this change was validated only with mocked eligibility
-and request payloads, not live or paid provider calls.
+The direct OpenAI route stays on OpenAI's direct API contract but selects the tier by auth
+type. OAuth uses `priority` because its endpoint rejected `fast`; acceptance or application
+of `priority` on Pi's OAuth endpoint has not been live-verified. This direct route is never
+forwarded to legacy `openai-codex` or its subscription-usage endpoint. The request shape is
+support evidence, not certification; tests use mocked eligibility and payloads only, with
+no live or paid provider calls.
 
 ### Ultrafast support (initial, fail-closed)
 
