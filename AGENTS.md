@@ -10,7 +10,8 @@ Keep the list of extensions in `README.md` alphabetically ordered.
 
 ## Branch and Pull Request Workflow
 
-Do not commit directly to `main` in this repository. For any change, create or switch to a non-`main` branch before committing, push the branch, and open a pull request targeting `main`. If work starts while checked out on `main`, create the branch before staging or committing changes.
+* Do not commit directly to `main` in this repository. For any change, create or switch to a non-`main` branch before committing, push the branch, and open a pull request targeting `main`. If work starts while checked out on `main`, create the branch before staging or committing changes. Prefer git worktrees whenever possible.
+* Once a PR is pushed, if there are conflicts, immediately start investigating how to fix them. If there are no conflicts, check CI and PR comments after four minutes. If CI fails or there are comments, investigate, and ask the user what to do once done.
 
 ## Release Checklist Automation
 
