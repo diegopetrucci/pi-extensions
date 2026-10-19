@@ -1944,8 +1944,7 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
           onUpdate?.(partial);
         };
 
-        let lastErrorResult: { ok: false; error: string; details: ContrarianDetails } | undefined;
-        for (let index = 0; index < attempts.length; index++) {
+        for (let index = 0; ; index++) {
           const previous = index > 0 ? attempts[index - 1] : undefined;
           const attempt = previous
             ? withFallbackReason(attempts[index], previous)
@@ -1969,7 +1968,6 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
             });
           }
 
-          lastErrorResult = result;
           const canFallBack = index < attempts.length - 1 && isModelAvailabilityError(result.error);
           if (!canFallBack) {
             return finalizeResult({
@@ -1978,30 +1976,6 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
             });
           }
         }
-
-        return finalizeResult({
-          content: [
-            {
-              type: "text",
-              text: lastErrorResult?.error ?? "Contrarian could not select an available model.",
-            },
-          ],
-          details: lastErrorResult?.details ?? {
-            modelRef: "",
-            provider: ctx.model?.provider ?? "unknown",
-            modelId: "",
-            modelName: undefined,
-            thinkingLevel: configuredThinkingLevel ?? DEFAULT_THINKING_LEVEL,
-            autoSelected: true,
-            selectionReason: "No authenticated models were available to run the contrarian.",
-            includeBash: params.includeBash ?? false,
-            usage: createEmptyUsage(),
-            stderr: "",
-            exitCode: 1,
-            durationMs: 0,
-            cwd: params.cwd ?? ctx.cwd,
-          },
-        });
       } finally {
         activeRuns.delete(toolCallId);
         updateContrarianUi(ctx, activeRuns);

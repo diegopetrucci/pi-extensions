@@ -155,7 +155,7 @@ function describeMode(state: SessionState): string {
   return state.config.enabled ? "on (config default)" : "off (config default)";
 }
 
-function getEligibility(ctx: ExtensionContext): Eligibility {
+function getEligibility(ctx: ExtensionContext, includeServiceTier = true): Eligibility {
   const model = ctx.model;
   if (!model) {
     return { eligible: false, modelKey: "no-model", reason: "no model is selected" };
@@ -237,7 +237,11 @@ function getEligibility(ctx: ExtensionContext): Eligibility {
       eligible: true,
       modelKey: key,
       provider: "openai",
-      serviceTier: OPENAI_API_FAST_SERVICE_TIER,
+      serviceTier: includeServiceTier
+        ? ctx.modelRegistry.isUsingOAuth(model)
+          ? OPENAI_FAST_SERVICE_TIER
+          : OPENAI_API_FAST_SERVICE_TIER
+        : undefined,
     };
   }
 
@@ -328,7 +332,7 @@ function updateStatus(ctx: ExtensionContext, state: SessionState): void {
     return;
   }
 
-  const eligibility = getEligibility(ctx);
+  const eligibility = getEligibility(ctx, false);
   ctx.ui.setStatus(EXTENSION_ID, isFastEnabled(state) && eligibility.eligible ? "fast" : undefined);
 }
 
@@ -346,7 +350,7 @@ function getStatusMessage(ctx: ExtensionContext, state: SessionState): string {
   }
 
   const enabled = isFastEnabled(state);
-  const eligibility = getEligibility(ctx);
+  const eligibility = getEligibility(ctx, enabled);
   const active = enabled && eligibility.eligible;
 
   if (active) {
@@ -405,7 +409,7 @@ async function injectAnthropicFastHeader(
   hasActiveTools: boolean,
 ): Promise<void> {
   if (state.ultrafast || !isFastEnabled(state)) return;
-  const eligibility = getEligibility(ctx);
+  const eligibility = getEligibility(ctx, false);
   if (!eligibility.eligible || eligibility.provider !== "anthropic") return;
 
   const matchingKeys = Object.keys(headers).filter(
