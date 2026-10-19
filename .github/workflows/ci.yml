@@ -73,21 +73,23 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Setup Dev Drive
-        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+      # node_modules is cached on an exact package-lock.json key only (no
+      # restore-keys); the preflight step below verifies restored modules.
+      - name: Cache node_modules
+        id: node-modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          workspace-copy: true
+          path: node_modules
+          key: ${{ runner.os }}-node24-node-modules-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
-        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        if: steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Check installed package state
-        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
         run: npm run preflight:install-state
 
       - name: Exercise permission gate with the native PowerShell parser
-        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
         run: node --test test/shell-safety.test.mjs
         env:
           PI_REQUIRE_POWERSHELL_7: "1"
