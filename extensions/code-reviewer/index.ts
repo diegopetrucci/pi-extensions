@@ -503,12 +503,8 @@ const CodeReviewerParams = Type.Object({
 });
 
 type ToolCall = {
-  id: string;
   name: string;
   args: unknown;
-  startedAt: number;
-  endedAt?: number;
-  isError?: boolean;
 };
 
 type ReviewStatus = "running" | "done" | "error" | "aborted";
@@ -1910,25 +1906,14 @@ export default function codeReviewerExtension(pi: ExtensionAPI) {
                   break;
                 case "tool_execution_start":
                   details.toolCalls.push({
-                    id: event.toolCallId,
                     name: event.toolName,
                     args: event.args,
-                    startedAt: Date.now(),
                   });
                   if (details.toolCalls.length > MAX_TOOL_CALLS_TO_KEEP) {
                     details.toolCalls.splice(0, details.toolCalls.length - MAX_TOOL_CALLS_TO_KEEP);
                   }
                   emit();
                   break;
-                case "tool_execution_end": {
-                  const call = details.toolCalls.find((item) => item.id === event.toolCallId);
-                  if (call) {
-                    call.endedAt = Date.now();
-                    call.isError = event.isError;
-                  }
-                  emit();
-                  break;
-                }
                 case "message_update":
                   if (event.assistantMessageEvent?.type === "text_delta") {
                     lastContent += event.assistantMessageEvent.delta ?? "";
