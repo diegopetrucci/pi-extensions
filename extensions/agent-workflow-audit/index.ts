@@ -63,10 +63,8 @@ type AuditDetails = {
   toolCalls: ToolCall[];
   startedAt: number;
   endedAt?: number;
-  error?: string;
   initialGitStatus?: string;
   finalGitStatus?: string;
-  reportLength?: number;
   toolCallCount?: number;
 };
 
@@ -250,14 +248,14 @@ function renderCollapsedReport(report: string, lineLimit = COLLAPSED_REPORT_LINE
   ].join("\n");
 }
 
-function summarizeGitStatus(status: string | undefined): { lineCount: number; dirtyCount: number } {
+function summarizeGitStatus(status: string | undefined): { dirtyCount: number } {
   const lines =
     status
       ?.split("\n")
       .map((line) => line.trim())
       .filter(Boolean) ?? [];
   const dirty = lines.filter((line) => !line.startsWith("##"));
-  return { lineCount: lines.length, dirtyCount: dirty.length };
+  return { dirtyCount: dirty.length };
 }
 
 function appendRunBoundary(report: string, details: AuditDetails): string {
@@ -1146,7 +1144,7 @@ function hasInlineFlag(tokens: string[], flags: string[]): boolean {
 function getBlockedInterpreterReason(commandName: string, tokens: string[]): string | undefined {
   const lowerTokens = tokens.map((token) => token.toLowerCase());
   if (
-    ["node", "deno", "bun"].includes(commandName) &&
+    ["node", "bun"].includes(commandName) &&
     hasInlineFlag(lowerTokens, [
       "-e",
       "--eval",
@@ -1707,17 +1705,14 @@ async function runAudit(
       throw new Error(outcome.reason);
     }
     details.endedAt = Date.now();
-    details.reportLength = lastContent.length;
     emit();
     return { report: lastContent, details };
   } catch (error) {
     const failure = classifyRunFailure(error, abortController.callerAborted);
     const { message } = failure;
     details.status = failure.status;
-    details.error = failure.error;
     details.endedAt = Date.now();
     lastContent = message;
-    details.reportLength = lastContent.length;
     emit();
     return { report: `## Agent Workflow Audit failed\n\n${message}`, details };
   } finally {
@@ -1855,7 +1850,6 @@ export default function agentWorkflowAuditExtension(pi: ExtensionAPI) {
       if (!details) return;
       details.finalGitStatus = await gitStatusShort(pi, ctx.cwd, ctx.signal).catch(() => undefined);
       report = appendRunBoundary(report, details);
-      details.reportLength = report.length;
       const parentDetails: AuditDetails = {
         ...details,
         toolCallCount: details.toolCalls.length,
