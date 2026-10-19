@@ -314,9 +314,6 @@
     margin: 0;
   }
 
-  .markdown-content p { margin: 0; }
-  .markdown-content p + p { margin-top: 4px; }
-
   .markdown-content a {
     color: var(--mdLink);
     text-decoration: underline;
@@ -337,21 +334,6 @@
     font-family: inherit;
   }
 
-  .markdown-content pre {
-    background: transparent;
-    margin: 4px 0;
-    overflow-x: auto;
-    border-left: 3px solid var(--mdCodeBlockBorder);
-    padding-left: 8px;
-  }
-
-  .markdown-content pre code {
-    display: block;
-    background: none;
-    color: var(--mdCodeBlock, var(--text));
-    padding: 0;
-  }
-
   .markdown-content blockquote {
     border-left: 3px solid var(--mdQuoteBorder);
     padding-left: 8px;
@@ -359,15 +341,6 @@
     color: var(--mdQuote);
     font-style: italic;
   }
-
-  .markdown-content ul,
-  .markdown-content ol {
-    margin: 4px 0;
-    padding-left: 1.5em;
-  }
-
-  .markdown-content li { margin: 0; }
-  .markdown-content li::marker { color: var(--mdListBullet); }
 
   .markdown-content hr {
     border: none;

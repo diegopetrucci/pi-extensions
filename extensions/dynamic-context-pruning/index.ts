@@ -140,12 +140,6 @@ export function normalizeSessionProjection(value: unknown): MinimalSessionProjec
   return { entries, messages: entries.flatMap((entry) => entry.messages) };
 }
 
-export function sessionProjectionToMessages(
-  projection: MinimalSessionProjection,
-): MinimalMessage[] {
-  return projection.entries.flatMap((entry) => entry.messages);
-}
-
 const EXTENSION_ID = "dynamic-context-pruning";
 const CONFIG_FILE_NAME = "dynamic-context-pruning.json";
 const DECISION_ENTRY_TYPE = "dynamic-context-pruning:decision";
@@ -164,37 +158,10 @@ const DEFAULT_RECENT_TURNS = 4;
 /** Cache cost model default: fraction of full (non-cached) price still paid for cached tokens. */
 const DEFAULT_CACHED_PRICE_RATIO = 0.1;
 
-/**
- * Default net-benefit gate threshold (max amortization calls). Recalibrated
- * from the representative-corpus benchmark (~/.the-last-harness/
- * agent/sessions, 1,390+ session files, 556 candidates): this is the
- * hindsight-optimal break-even T at cachedPriceRatio r=0.1 (aggressive
- * prompt caching, the common Anthropic case). IMPORTANT caveats:
- *  - Provider/ratio-dependent: this optimum shifts higher as caching gets
- *    weaker (T=29 at r=0.25, T=54 at r=0.5, T=58 at r=0.9 on the same
- *    corpus) — see docs/v2-design.md section 4 and the extension README.
- *  - At r=0.1 the realized deterministic savings this threshold buys are
- *    economically marginal (~20.6k token-units total across the whole
- *    corpus, i.e. pennies); savings only become material at r>=0.25.
- *  - Re-derive via `scripts/benchmark.mjs <sessions-dir> --ratio 0.1` if
- *    the representative corpus changes meaningfully.
- */
+/** Default idle net-benefit gate threshold; see README.md and docs/v2-design.md §4. */
 const DEFAULT_BREAK_EVEN_THRESHOLD = 22;
 
-/**
- * Default mid_loop break-even threshold. The package's own
- * representative-corpus benchmark (turn-START state definition — the same one
- * the runtime `context` handler uses) favored rejecting mid_loop candidates
- * at cachedPriceRatio r=0.1 (mid_loop-optimal T=1, total realized
- * net benefit ~0.0). This supports a conservative default for the measured
- * corpus, not a universal claim that mid_loop pruning cannot pay off.
- * The reported 2026-09-08 byte-level capture (a mid_loop prune at T=22
- * invalidating 81% of a warm request prefix) illustrates cache invalidation,
- * not an inability to amortize it: enough subsequent calls can recoup a
- * one-time bust. Idle keeps T=22; turn-start classification does not imply
- * the provider cache is cold. Users who want the old behavior can override
- * via gate.breakEvenThresholdByState.mid_loop.
- */
+/** Default mid_loop threshold; see README.md for the runtime-aligned benchmark rationale. */
 const DEFAULT_MID_LOOP_BREAK_EVEN_THRESHOLD = 1;
 
 /** Tool names never pruned by default: orchestration/subagent-style tools and todo-like state. */
@@ -243,18 +210,7 @@ export interface PruneProtections {
 }
 
 export interface PruneThresholds {
-  /**
-   * Minimum raw text characters a fresh AUTOMATIC prune proposal must remove
-   * (original text chars minus placeholder chars) to be considered at all
-   * Enforced by `runDynamicContextPruningPipeline` BEFORE the
-   * net-benefit gate (see `PruneGateConfig`/`gate`, which uses break-even token
-   * math and is a separate, later check): text-only candidates below this floor
-   * are dropped up front and never reach gate/batch consideration. Image-bearing
-   * tool-result candidates bypass this raw-text floor (images receive no
-   * synthetic character count) and proceed to the token-based gate. Manual
-   * prunes and already-persisted/replayed decisions always bypass this floor,
-   * same as the gate. A value of 0 disables the floor (no filtering).
-   */
+  /** Minimum automatic-prune text saving; see README.md Configuration for bypass rules. */
   minCharsSaved: number;
 }
 
@@ -493,29 +449,8 @@ export function estimateTokensForContent(
 export type TokenEstimator = (text: string) => number;
 
 /**
- * Classify the agent's current state from the message payload alone:
- * this is the runtime-observable definition used both by the live `context`
- * event handler and (via re-export) by the offline benchmark, so the two can
- * never drift apart.
- *
- * Walk backwards from the end of `messages`, skipping any message that is
- * neither `user`, `assistant`, nor `toolResult` (e.g. system-role bookkeeping
- * entries). The first such message found determines the state:
- *  - `user` (a plain user turn message) => "idle": this call is the FIRST LLM
- *    call of a turn, i.e. the decision is being made from a turn-start state.
- *  - `assistant` or `toolResult` (mid-chain) => "mid_loop": the agent is
- *    iterating (already made at least one call this turn, or is reacting to a
- *    tool result).
- *  - No such message found (empty history, or system-only) => "idle" (safe
- *    default: nothing suggests an in-progress loop).
- *
- * The benchmark (scripts/benchmark.mjs) reclassifies its candidate labels to
- * this SAME definition, reusing this function directly, so the
- * defaults below rest on evidence measured with the exact definition the
- * runtime observes. (An earlier turn-end-based benchmark definition -- "idle"
- * meant "this IS the turn's last assistant message", only knowable in
- * hindsight -- has been retired: the runtime cannot know in advance whether a
- * call is a turn's last one, so that definition was never runtime-observable.)
+ * Shared runtime/benchmark state classifier; see README.md Configuration and
+ * docs/v2-design.md §4 for the turn-start definition and retired turn-end analysis.
  */
 export function classifyAgentStateFromMessages(messages: MinimalMessage[]): AgentState {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -677,7 +612,7 @@ export function isWithinRecencyWindow(index: number, boundaryIndex: number): boo
  * Used by the error-input purge strategy's "older than N turns" rule; a
  * message at the very end of the conversation has 0 turns elapsed.
  */
-export function computeTurnsElapsedSince(messages: MinimalMessage[], index: number): number {
+function computeTurnsElapsedSince(messages: MinimalMessage[], index: number): number {
   let count = 0;
   for (let i = index + 1; i < messages.length; i++) {
     if (messages[i].role === "user") count++;
@@ -974,7 +909,7 @@ export function resolvePruneTombstoneState(entries: MinimalSessionEntry[]): Prun
   return { activeDecisions, activeIdempotencyKeys, restoredKeys, lastDecisionByKey };
 }
 
-export function buildPlaceholderText(reason: string, charsRemoved: number): string {
+function buildPlaceholderText(reason: string, charsRemoved: number): string {
   return `[pruned by ${EXTENSION_ID}: ${reason} (${charsRemoved} chars removed)]`;
 }
 
@@ -1581,7 +1516,7 @@ export function collectCompletedToolCallOccurrences(
 }
 
 /** Placeholder text for a duplicate tool result whose content was replaced. */
-export function buildDedupePlaceholder(toolName: string, newestToolCallId: string): string {
+function buildDedupePlaceholder(toolName: string, newestToolCallId: string): string {
   return `[pruned by ${EXTENSION_ID}: duplicate ${toolName} call result; see newest occurrence (call ${newestToolCallId})]`;
 }
 
@@ -2194,7 +2129,7 @@ export function sessionEntriesToMessages(
   entries: MinimalSessionEntry[],
   projection?: MinimalSessionProjection,
 ): MinimalMessage[] {
-  if (projection) return sessionProjectionToMessages(projection);
+  if (projection) return projection.entries.flatMap((entry) => entry.messages);
   const messages: MinimalMessage[] = [];
   for (const entry of entries) {
     if (entry.type === "message" && entry.message) messages.push(entry.message);

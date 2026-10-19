@@ -175,7 +175,6 @@ type MinimalProjectionEntry = {
 
 type MinimalSessionProjection = {
   entries: MinimalProjectionEntry[];
-  messages?: MinimalMessage[];
 };
 
 type AnalysisResult = {
@@ -208,7 +207,6 @@ type Segment = {
 type CategoryStat = {
   id: CategoryId;
   label: string;
-  shortLabel: string;
   color: string;
   description: string;
   tokens: number;
@@ -240,8 +238,6 @@ type DatasetStats = {
 
 type Dataset = {
   id: DatasetId;
-  label: string;
-  description: string;
   segments: Segment[];
   stats: DatasetStats;
 };
@@ -272,7 +268,6 @@ type ReportData = {
     percent: number | null;
   };
   options: {
-    redacted: boolean;
     defaultDataset: DatasetId;
   };
   categoryMeta: typeof CATEGORY_META;
@@ -905,10 +900,7 @@ function resolveSessionProjection(
     (!Array.isArray(projection.messages) || !projection.messages.every(isProjectionMessage))
   )
     return undefined;
-  return {
-    entries,
-    messages: entries.flatMap((entry) => entry.messages),
-  };
+  return { entries };
 }
 
 function resolveCurrentContextEntries(
@@ -1034,8 +1026,6 @@ function aggregateBy(
 
 function finalizeDataset(
   id: DatasetId,
-  label: string,
-  description: string,
   segments: Segment[],
   messageCount: number,
   authoritativeTokens: number | null,
@@ -1080,7 +1070,6 @@ function finalizeDataset(
       return {
         id: categoryId,
         label: meta.label,
-        shortLabel: meta.shortLabel,
         color: meta.color,
         description: meta.description,
         tokens: Math.round(rawTokens),
@@ -1094,8 +1083,6 @@ function finalizeDataset(
 
   return {
     id,
-    label,
-    description,
     segments,
     stats: {
       tokens: Math.round(displayTotal),
@@ -1177,20 +1164,11 @@ function buildReportData(
   const fullSegments = [...overhead, ...fullAnalysis.segments];
   const currentDataset = finalizeDataset(
     "current",
-    "Current model context",
-    "What pi is expected to send to the model on the next turn: latest compaction summary plus unsummarized messages, system prompt, and active tool schemas.",
     currentSegments,
     currentAnalysis.messageCount,
     contextTokens,
   );
-  const fullDataset = finalizeDataset(
-    "full",
-    "Full active branch history",
-    "Every context-bearing entry on the active branch, including pre-compaction history that may no longer be sent verbatim.",
-    fullSegments,
-    fullAnalysis.messageCount,
-    null,
-  );
+  const fullDataset = finalizeDataset("full", fullSegments, fullAnalysis.messageCount, null);
 
   const notes: string[] = [
     "Per-component token counts are local estimates based mostly on characters/4. Providers expose aggregate usage, not exact per-message attribution.",
@@ -1257,7 +1235,6 @@ function buildReportData(
       percent: contextPercent,
     },
     options: {
-      redacted: options.redact,
       defaultDataset: options.defaultDataset,
     },
     categoryMeta: CATEGORY_META,

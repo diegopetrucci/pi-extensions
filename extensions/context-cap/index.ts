@@ -224,7 +224,7 @@ function unavailableReason(result: ApplyResult | undefined): string | undefined 
     return "physical model has no compatible context-window limit";
   }
   if (result?.reason === "reserve") {
-    return `compaction reserveTokens (${formatTokens(result.reserveTokens ?? DEFAULT_MAX_CONTEXT_WINDOW)}) is at least 300k; the auto-compaction threshold would be zero or negative`;
+    return `compaction reserveTokens (${formatTokens(result.reserveTokens ?? DEFAULT_MAX_CONTEXT_WINDOW)}) is at least ${formatTokens(DEFAULT_MAX_CONTEXT_WINDOW)}; the auto-compaction threshold would be zero or negative`;
   }
   if (result?.reason === "modelOverride") {
     return `compaction.modelOverrides[\"${result.key}\"] is configured; leaving the model window unchanged`;
@@ -317,7 +317,7 @@ export default function contextCapExtension(pi: ExtensionAPI) {
   }
 
   pi.registerCommand("context-cap", {
-    description: "Toggle the 300k effective context-window cap for auto-compaction",
+    description: `Toggle the ${formatTokens(DEFAULT_MAX_CONTEXT_WINDOW)} effective context-window cap for auto-compaction`,
     getArgumentCompletions: (prefix) => {
       const commands = ["on", "off", "toggle", "status"];
       const matches = commands.filter((command) => command.startsWith(prefix.trim()));

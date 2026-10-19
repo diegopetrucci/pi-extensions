@@ -278,8 +278,10 @@ Notes:
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case). It is **provider/ratio-
-  dependent**: the optimal threshold rises as caching gets weaker (T=29 at
-  r=0.25, T=54 at r=0.5, T=58 at r=0.9 on the same corpus).
+  dependent**. In the **historical, retired turn-end run**, the optimal
+  threshold rose as caching got weaker (T=29 at r=0.25, T=54 at r=0.5, T=58
+  at r=0.9); these are not current turn-start results. See
+  [`docs/v2-design.md` §4](./docs/v2-design.md#4-benchmark-decision-gate).
 
 ## Prompt-cache trade-off
 
@@ -326,6 +328,8 @@ Options:
 - `--limit N`: only process the first N session files found.
 - `--ratio R`: cached-price ratio(s) to model; repeatable and/or
   comma-separated (e.g. `--ratio 0.1,0.2`). Default: `0.1`.
+- `--sweep-max N`: explicit ceiling for the auto-expanding threshold sweep
+  (overrides the corpus-derived ceiling). Default: auto-expand from 30 as needed.
 - `--json`: emit a full machine-readable JSON dump instead of aligned text.
 - `--simulate-compression`: additionally SIMULATE v2-style range compression
   (docs/v2-design.md §1/§4 go/no-go evidence) alongside — never mixed into —
@@ -390,9 +394,11 @@ reports two kinds of numbers:
   prune point, and the *actual* net benefit that prune would have produced —
   `realizedNetBenefit = actualRemainingCalls * recurringSaving - penalty`.
 
-It also sweeps the break-even threshold `T` from 1 to 30 and reports the `T`
-that maximizes total realized net benefit across all gate-eligible
-candidates, both overall and split by idle/mid-loop agent state.
+It also sweeps the break-even threshold `T` from 1 to 30, then keeps doubling
+the range while the best `T` sits at the top edge, up to a corpus-derived
+ceiling (hard cap 500). `--sweep-max N` sets that ceiling explicitly. It
+reports the `T` that maximizes total realized net benefit across all
+gate-eligible candidates, both overall and split by idle/mid-loop agent state.
 
 ## Comparison
 
@@ -428,9 +434,11 @@ net benefit, at sufficient candidate volume, with enough remaining-calls
 runway per session to plausibly amortize a compression summary's own token
 cost — see `docs/v2-design.md` §4 for the exact go/no-go bar.
 
-The representative-corpus run of the benchmark harness (over
+The **historical, retired turn-end run** of the benchmark harness (over
 `~/.the-last-harness/agent/sessions`: 1,390+ session files, 556 gate-eligible
-candidates — see the corpus-choice note above) produced:
+candidates — see the corpus-choice note above) produced the following
+figures, preserved as historical context rather than current turn-start
+results (see [`docs/v2-design.md` §4](./docs/v2-design.md#4-benchmark-decision-gate)):
 
 - **Candidates and tokens removed by strategy**: `dedupe` 111 candidates /
   93,330 tokens removed; `error-purge` 187 / 28,191; `superseded-file-ops`
@@ -440,6 +448,7 @@ candidates — see the corpus-choice note above) produced:
   this corpus is dominated by long, tool-heavy agent sessions rather than
   short orchestrator sessions.
 
+The current turn-start re-derivation has 460 gate-eligible candidates.
 Shipped gate defaults remain `idle=22` / `mid_loop=1` (see
 [Configuration](#configuration)).
 
