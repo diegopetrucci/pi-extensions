@@ -51,10 +51,6 @@ async function exists(filePath) {
   }
 }
 
-async function readJson(filePath) {
-  return JSON.parse(await readFile(filePath, "utf8"));
-}
-
 async function findFilesNamed(base, target) {
   const matches = [];
   for (const entry of await readdir(base, { withFileTypes: true })) {

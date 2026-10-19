@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import ts from "typescript";
+import { accumulateAssistantMessages } from "./support/usage-accumulator.mjs";
 
 let tempDir;
 let runtime;
@@ -43,10 +44,10 @@ function createGuardHandlers(factory) {
 
 test("aggregates usage across assistant and compaction session events", async () => {
   const mod = await loadRuntime();
-  const { aggregateAssistantUsage, addAssistantMessageUsage, addSessionEventUsage } = mod.__test__;
+  const { createEmptyUsage, addSessionEventUsage } = mod.__test__;
 
   assert.deepEqual(
-    aggregateAssistantUsage([
+    accumulateAssistantMessages(createEmptyUsage, addSessionEventUsage, [
       { role: "user", usage: { input: 999 } },
       {
         role: "assistant",
@@ -90,7 +91,7 @@ test("aggregates usage across assistant and compaction session events", async ()
       },
     },
   );
-  const explicitZeros = aggregateAssistantUsage([
+  const explicitZeros = accumulateAssistantMessages(createEmptyUsage, addSessionEventUsage, [
     {
       role: "assistant",
       usage: {
@@ -107,11 +108,11 @@ test("aggregates usage across assistant and compaction session events", async ()
   ]);
   assert.equal(explicitZeros.cacheWrite1h, 0);
   assert.equal(explicitZeros.reasoning, 0);
-  const unreported = aggregateAssistantUsage([]);
+  const unreported = createEmptyUsage();
   assert.equal("cacheWrite1h" in unreported, false);
   assert.equal("reasoning" in unreported, false);
 
-  const eventTotal = aggregateAssistantUsage([]);
+  const eventTotal = createEmptyUsage();
   addSessionEventUsage(eventTotal, {
     type: "compaction_end",
     result: {

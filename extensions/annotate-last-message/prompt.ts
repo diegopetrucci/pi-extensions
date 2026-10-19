@@ -1,6 +1,5 @@
 import type {
   AnnotateLastMessageInlineComment,
-  AnnotateLastMessageSectionComment,
   AnnotateLastMessageSubmitPayload,
   LastAssistantMessageData,
   LastAssistantMessageLine,
@@ -34,10 +33,7 @@ function formatSectionLineRange(section: LastAssistantMessageSection): string {
     : `lines ${section.startLine}-${section.endLine}`;
 }
 
-function formatSectionComment(
-  comment: AnnotateLastMessageSectionComment,
-  section: LastAssistantMessageSection | undefined,
-): string {
+function formatSectionComment(section: LastAssistantMessageSection | undefined): string {
   if (section == null) {
     return "Unknown section";
   }
@@ -90,9 +86,7 @@ export function composeAnnotateLastMessagePrompt(
   if (sectionComments.length > 0) {
     lines.push("## Section comments");
     sectionComments.forEach((comment, index) => {
-      lines.push(
-        `${index + 1}. ${formatSectionComment(comment, sectionMap.get(comment.sectionId))}`,
-      );
+      lines.push(`${index + 1}. ${formatSectionComment(sectionMap.get(comment.sectionId))}`);
       lines.push(`   ${comment.body.trim()}`);
       lines.push("");
     });

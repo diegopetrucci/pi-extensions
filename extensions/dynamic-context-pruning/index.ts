@@ -243,13 +243,15 @@ export interface PruneGateConfig {
   /** Fraction of full price still paid for cached ( r ). Default 0.1. */
   cachedPriceRatio: number;
   /**
-   * Default break-even threshold (max future calls to amortize a cache
-   * bust) used when no state-specific override applies. Recalibrated from
-   * the representative-corpus benchmark; see DEFAULT_BREAK_EVEN_THRESHOLD
-   * for the full rationale and ratio-sensitivity caveats.
+   * @deprecated Legacy global fallback retained for direct callers that pass
+   * an unnormalized gate object to resolveBreakEvenThreshold. normalizeConfig
+   * always supplies per-state values, so loaded config does not use this field
+   * to fill missing or invalid state values. Recalibrated from the
+   * representative-corpus benchmark; see DEFAULT_BREAK_EVEN_THRESHOLD for the
+   * full rationale and ratio-sensitivity caveats.
    */
   breakEvenThreshold: number;
-  /** Per-state overrides. Defaults: idle 22, mid_loop 1. */
+  /** Per-state overrides. normalizeConfig defaults to idle 22 and mid_loop 1. */
   breakEvenThresholdByState: { idle: number; mid_loop: number };
 }
 
@@ -1631,11 +1633,6 @@ export function computeFileReadRange(args: Record<string, unknown> | undefined):
   return { start, end };
 }
 
-/** True when a range represents a full-file read (starts at line 1, no limit). */
-export function isFullFileReadRange(range: FileReadRange): boolean {
-  return range.start === 1 && range.end === undefined;
-}
-
 /**
  * Conservative range-coverage check: does `later` fully cover `earlier`?
  * Implements rules 1+2 above via one unified representation (a full-file
@@ -2268,11 +2265,9 @@ const STRATEGY_ALIASES: Record<string, StrategyKey> = {
   "error-purge": "errorPurge",
   errorpurge: "errorPurge",
   error_purge: "errorPurge",
-  errorPurge: "errorPurge",
   "superseded-file-ops": "supersededFileOps",
   supersededfileops: "supersededFileOps",
   superseded_file_ops: "supersededFileOps",
-  supersededFileOps: "supersededFileOps",
 };
 
 const STRATEGY_DISPLAY_NAMES: Record<StrategyKey, string> = {
@@ -2315,9 +2310,11 @@ export function parseContextPruningArgs(rawArgs: string): ContextPruningSubcomma
       return { kind: "toggle" };
     case "strategy": {
       const [nameRaw, valueRaw] = rest;
-      const key = nameRaw
-        ? (STRATEGY_ALIASES[nameRaw.toLowerCase()] ?? STRATEGY_ALIASES[nameRaw])
-        : undefined;
+      const normalizedName = nameRaw?.toLowerCase();
+      const key =
+        normalizedName && Object.hasOwn(STRATEGY_ALIASES, normalizedName)
+          ? STRATEGY_ALIASES[normalizedName]
+          : undefined;
       const value = valueRaw?.toLowerCase();
       if (!key || (value !== "on" && value !== "off")) return { kind: "unknown", raw: rawArgs };
       return { kind: "strategy", strategy: key, value: value === "on" };
@@ -2463,7 +2460,6 @@ function notify(
 }
 
 export const __testing = {
-  globToRegExp,
   getConfigPath,
   readConfig,
   writeConfig,

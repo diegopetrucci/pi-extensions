@@ -322,14 +322,15 @@ test("resolveBreakEvenThreshold uses the per-state override when present", () =>
   assert.equal(resolveBreakEvenThreshold(gateConfig, "mid_loop"), 20);
 });
 
-test("resolveBreakEvenThreshold falls back to breakEvenThreshold when a state override is not a finite number", () => {
+test("resolveBreakEvenThreshold retains the global fallback for direct unnormalized callers", () => {
   const gateConfig = {
     ...defaultConfig().gate,
+    breakEvenThreshold: 50,
     breakEvenThresholdByState: { idle: undefined, mid_loop: undefined },
   };
-  assert.equal(resolveBreakEvenThreshold(gateConfig, "idle"), gateConfig.breakEvenThreshold);
-  assert.equal(resolveBreakEvenThreshold(gateConfig, "mid_loop"), gateConfig.breakEvenThreshold);
-  // With the shipped defaults the states diverge by design (idle=22, mid_loop=1):
+  assert.equal(resolveBreakEvenThreshold(gateConfig, "idle"), 50);
+  assert.equal(resolveBreakEvenThreshold(gateConfig, "mid_loop"), 50);
+  // With the shipped normalized defaults the states diverge by design (idle=22, mid_loop=1):
   const defaults = defaultConfig().gate;
   assert.equal(resolveBreakEvenThreshold(defaults, "idle"), defaults.breakEvenThreshold);
   assert.equal(resolveBreakEvenThreshold(defaults, "mid_loop"), 1);

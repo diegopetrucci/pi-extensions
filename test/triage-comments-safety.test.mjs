@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { accumulateAssistantMessages } from "./support/usage-accumulator.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "..");
@@ -25,10 +26,10 @@ function createGuardHandlers(factory) {
 }
 
 test("triage-comments aggregates usage across assistant and compaction session events", async () => {
-  const { aggregateAssistantUsage, addSessionEventUsage } = await loadTriageTestUtils();
+  const { createEmptyUsage, addSessionEventUsage } = await loadTriageTestUtils();
 
   assert.deepEqual(
-    aggregateAssistantUsage([
+    accumulateAssistantMessages(createEmptyUsage, addSessionEventUsage, [
       {
         role: "assistant",
         usage: {
@@ -72,7 +73,7 @@ test("triage-comments aggregates usage across assistant and compaction session e
       },
     },
   );
-  const explicitZeros = aggregateAssistantUsage([
+  const explicitZeros = accumulateAssistantMessages(createEmptyUsage, addSessionEventUsage, [
     {
       role: "assistant",
       usage: {
@@ -89,11 +90,11 @@ test("triage-comments aggregates usage across assistant and compaction session e
   ]);
   assert.equal(explicitZeros.cacheWrite1h, 0);
   assert.equal(explicitZeros.reasoning, 0);
-  const unreported = aggregateAssistantUsage([]);
+  const unreported = createEmptyUsage();
   assert.equal("cacheWrite1h" in unreported, false);
   assert.equal("reasoning" in unreported, false);
 
-  const eventTotal = aggregateAssistantUsage([]);
+  const eventTotal = createEmptyUsage();
   addSessionEventUsage(eventTotal, {
     type: "compaction_end",
     result: {
