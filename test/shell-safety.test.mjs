@@ -80,6 +80,26 @@ async function executePowerShellAnalyzer(command, args, options = {}) {
   }
 }
 
+const POWERSHELL_CASE_CONCURRENCY = 4;
+
+// Runs worker over items with bounded concurrency; waits for in-flight work, then rethrows the first failure.
+async function mapWithConcurrency(items, limit, worker) {
+  let next = 0;
+  const failures = [];
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length && failures.length === 0) {
+      const item = items[next++];
+      try {
+        await worker(item);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  });
+  await Promise.all(runners);
+  if (failures.length > 0) throw failures[0];
+}
+
 function createPowerShellPi() {
   return process.platform === "win32"
     ? createPi({ execImpl: executePowerShellAnalyzer })
@@ -870,19 +890,23 @@ test(
       assert.equal(parsePowerShellAstOutput(first.stdout).risky, cases[0][1], shell);
       testedShells.push(shell);
 
-      for (const [command, expectedRisk] of cases.slice(1)) {
-        const result = await executePowerShellAnalyzer(
-          shell,
-          [...powerShellArgs, buildPowerShellAstCommand(command)],
-          { timeout: 10_000 },
-        );
-        assert.equal(result.code, 0, `${shell}: ${command}\n${result.stderr}`);
-        assert.equal(
-          parsePowerShellAstOutput(result.stdout).risky,
-          expectedRisk,
-          `${shell}: ${command}`,
-        );
-      }
+      await mapWithConcurrency(
+        cases.slice(1),
+        POWERSHELL_CASE_CONCURRENCY,
+        async ([command, expectedRisk]) => {
+          const result = await executePowerShellAnalyzer(
+            shell,
+            [...powerShellArgs, buildPowerShellAstCommand(command)],
+            { timeout: 10_000 },
+          );
+          assert.equal(result.code, 0, `${shell}: ${command}\n${result.stderr}`);
+          assert.equal(
+            parsePowerShellAstOutput(result.stdout).risky,
+            expectedRisk,
+            `${shell}: ${command}`,
+          );
+        },
+      );
     }
 
     assert.ok(testedShells.length > 0, "expected at least one native PowerShell parser");
@@ -981,7 +1005,7 @@ test("permission-gate allows non-dangerous PowerShell commands without prompting
   assert.equal(typeof toolCallHandler, "function");
   const signal = new AbortController().signal;
 
-  for (const command of [
+  const commands = [
     "Write-Output 'hello'",
     "Remove-Item 'C:\\temp\\single-file.txt'",
     "Remove-Item -Recurse 'C:\\temp\\example'",
@@ -999,7 +1023,10 @@ test("permission-gate allows non-dangerous PowerShell commands without prompting
     "Set-Location 'C:\\temp'",
     "Push-Location '..'; Pop-Location",
     "Get-Command Remove-Item -Syntax",
-  ]) {
+  ];
+
+  // The handler is stateless and exec only records calls, so cases can run concurrently.
+  await mapWithConcurrency(commands, POWERSHELL_CASE_CONCURRENCY, async (command) => {
     const result = await toolCallHandler(
       { toolName: "powershell", input: { command } },
       {
@@ -1015,7 +1042,7 @@ test("permission-gate allows non-dangerous PowerShell commands without prompting
     );
 
     assert.equal(result, undefined, command);
-  }
+  });
 
   assert.equal(prompted, false);
   if (process.platform === "win32") {

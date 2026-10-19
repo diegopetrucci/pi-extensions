@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { getWorkspacePackageDefs, repoRoot } from "./workspace-package-helpers.mjs";
+
+const execFileAsync = promisify(execFile);
+const FIXTURE_CONCURRENCY = 3;
 
 const piHostPeerPackages = new Set([
   "@earendil-works/pi-ai",
@@ -91,14 +95,45 @@ function getDeclaredRuntimeDependencyNames(manifest) {
   ].sort();
 }
 
-function packPackage(packageDef, packDestination) {
-  const args = ["pack", "--ignore-scripts", "--json", "--pack-destination", packDestination];
-  if (packageDef.workspace) args.push("--workspace", packageDef.workspace);
-
-  const stdout = execFileSync("npm", args, { cwd: repoRoot, encoding: "utf8" });
+function packAllPackages(packDestination) {
+  const stdout = execFileSync(
+    "npm",
+    [
+      "pack",
+      "--ignore-scripts",
+      "--json",
+      "--workspaces",
+      "--include-workspace-root",
+      "--pack-destination",
+      packDestination,
+    ],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+  );
   const parsed = JSON.parse(stdout);
-  assert.equal(parsed.length, 1, `expected one npm pack result for ${packageDef.label}`);
-  return path.join(packDestination, parsed[0].filename);
+  assert.equal(
+    parsed.length,
+    publishablePackages.length,
+    "expected one npm pack result per publishable package",
+  );
+  return new Map(parsed.map((entry) => [entry.name, path.join(packDestination, entry.filename)]));
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  let next = 0;
+  const failures = [];
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length && failures.length === 0) {
+      const item = items[next++];
+      try {
+        await worker(item);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  });
+  // Wait for in-flight workers so fixtures are not removed underneath them.
+  await Promise.all(runners);
+  if (failures.length > 0) throw failures[0];
 }
 
 function sanitizePackageName(packageName) {
@@ -120,6 +155,30 @@ function getInstalledDeclaredDependencyDir(packageName) {
 
 function packInstalledDependency(packageName, packDestination) {
   const dependencyDir = getInstalledDeclaredDependencyDir(packageName);
+
+  // Prefer the npm cache copy of the exact installed version (much faster than
+  // repacking large installed directories); fall back to packing the directory.
+  try {
+    const { version } = readJson(path.join(dependencyDir, "package.json"));
+    const stdout = execFileSync(
+      "npm",
+      [
+        "pack",
+        `${packageName}@${version}`,
+        "--offline",
+        "--ignore-scripts",
+        "--json",
+        "--pack-destination",
+        packDestination,
+      ],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const parsed = JSON.parse(stdout);
+    if (parsed.length === 1) return path.join(packDestination, parsed[0].filename);
+  } catch {
+    // fall through to installed-directory pack
+  }
+
   const stdout = execFileSync(
     "npm",
     ["pack", dependencyDir, "--ignore-scripts", "--json", "--pack-destination", packDestination],
@@ -195,13 +254,16 @@ test("publishable tarballs install offline and Pi loads their declared runtime e
     await mkdir(dependencyPackDestination, { recursive: true });
     await mkdir(packagePackDestination, { recursive: true });
 
+    const packageTarballs = packAllPackages(packagePackDestination);
     const packedPackages = publishablePackages.map((packageDef) => {
       const manifest = readJson(path.join(repoRoot, packageDef.manifestPath));
       assertPiHostPeersAvailable(manifest);
+      const tarballPath = packageTarballs.get(manifest.name);
+      assert.ok(tarballPath, `missing npm pack result for ${packageDef.label} (${manifest.name})`);
       return {
         manifest,
         runtimeDependencyNames: getDeclaredRuntimeDependencyNames(manifest),
-        tarballPath: packPackage(packageDef, packagePackDestination),
+        tarballPath,
       };
     });
 
@@ -214,90 +276,102 @@ test("publishable tarballs install offline and Pi loads their declared runtime e
       ]),
     );
 
-    for (const { manifest, runtimeDependencyNames, tarballPath } of packedPackages) {
-      const fixtureRoot = path.join(tempRoot, "fixtures", sanitizePackageName(manifest.name));
-      const agentDir = path.join(fixtureRoot, "agent");
-      const cacheDir = path.join(tempRoot, "cache", sanitizePackageName(manifest.name));
-      const fixtureDependencies = Object.fromEntries([
-        [manifest.name, `file:${tarballPath}`],
-        ...runtimeDependencyNames.map((packageName) => {
-          const dependencyTarballPath = dependencyTarballs.get(packageName);
-          assert.ok(
-            dependencyTarballPath,
-            `missing packed dependency tarball for ${manifest.name} runtime dependency ${packageName}`,
+    await mapWithConcurrency(
+      packedPackages,
+      FIXTURE_CONCURRENCY,
+      async ({ manifest, runtimeDependencyNames, tarballPath }) => {
+        const fixtureRoot = path.join(tempRoot, "fixtures", sanitizePackageName(manifest.name));
+        const agentDir = path.join(fixtureRoot, "agent");
+        const cacheDir = path.join(tempRoot, "cache", sanitizePackageName(manifest.name));
+        const fixtureDependencies = Object.fromEntries([
+          [manifest.name, `file:${tarballPath}`],
+          ...runtimeDependencyNames.map((packageName) => {
+            const dependencyTarballPath = dependencyTarballs.get(packageName);
+            assert.ok(
+              dependencyTarballPath,
+              `missing packed dependency tarball for ${manifest.name} runtime dependency ${packageName}`,
+            );
+            return [packageName, `file:${dependencyTarballPath}`];
+          }),
+        ]);
+
+        try {
+          await mkdir(agentDir, { recursive: true });
+          await mkdir(cacheDir, { recursive: true });
+          await writeFile(
+            path.join(fixtureRoot, "package.json"),
+            `${JSON.stringify({ private: true, dependencies: fixtureDependencies }, null, 2)}\n`,
           );
-          return [packageName, `file:${dependencyTarballPath}`];
-        }),
-      ]);
 
-      try {
-        await mkdir(agentDir, { recursive: true });
-        await mkdir(cacheDir, { recursive: true });
-        await writeFile(
-          path.join(fixtureRoot, "package.json"),
-          `${JSON.stringify({ private: true, dependencies: fixtureDependencies }, null, 2)}\n`,
-        );
+          await execFileAsync(
+            "npm",
+            [
+              "install",
+              "--offline",
+              "--ignore-scripts",
+              "--no-audit",
+              "--no-fund",
+              "--package-lock=false",
+              "--legacy-peer-deps",
+              "--cache",
+              cacheDir,
+            ],
+            { cwd: fixtureRoot, encoding: "utf8" },
+          );
 
-        execFileSync(
-          "npm",
-          [
-            "install",
-            "--offline",
-            "--ignore-scripts",
-            "--no-audit",
-            "--no-fund",
-            "--package-lock=false",
-            "--legacy-peer-deps",
-            "--cache",
-            cacheDir,
-          ],
-          { cwd: fixtureRoot, encoding: "utf8", stdio: "pipe" },
-        );
-
-        const packageDir = getInstalledPackageDir(fixtureRoot, manifest.name);
-        const installedManifestPath = path.join(packageDir, "package.json");
-        assert.ok(
-          existsSync(installedManifestPath),
-          `${manifest.name} should be installed from its tarball`,
-        );
-
-        const installedManifest = readJson(installedManifestPath);
-        assertAnnotateLastMessageAssets(installedManifest, packageDir);
-        const declarations = getRuntimeDeclarations(installedManifest);
-        const extensionEntries = declarations
-          .filter(({ kind }) => kind === "extension")
-          .map(({ entry }) => path.join(packageDir, entry.replace(/^\.\//, "")));
-        await validateInstalledSkills(installedManifest.name, packageDir, declarations);
-
-        const loadResult = await discoverAndLoadExtensions(extensionEntries, fixtureRoot, agentDir);
-        assert.deepEqual(
-          loadResult.errors,
-          [],
-          `Pi loader errors for ${installedManifest.name}: ${loadResult.errors
-            .map(({ path: errorPath, error }) => `${errorPath}: ${error}`)
-            .join("; ")}`,
-        );
-        assert.equal(
-          loadResult.extensions.length,
-          extensionEntries.length,
-          `${installedManifest.name} should load every declared installed extension entry`,
-        );
-
-        for (const extension of loadResult.extensions) {
+          const packageDir = getInstalledPackageDir(fixtureRoot, manifest.name);
+          const installedManifestPath = path.join(packageDir, "package.json");
           assert.ok(
-            registrationCount(extension) > 0,
-            `installed extension should register at least one handler, tool, renderer, command, flag, or shortcut: ${extension.path}`,
+            existsSync(installedManifestPath),
+            `${manifest.name} should be installed from its tarball`,
+          );
+
+          const installedManifest = readJson(installedManifestPath);
+          assertAnnotateLastMessageAssets(installedManifest, packageDir);
+          const declarations = getRuntimeDeclarations(installedManifest);
+          const extensionEntries = declarations
+            .filter(({ kind }) => kind === "extension")
+            .map(({ entry }) => path.join(packageDir, entry.replace(/^\.\//, "")));
+          await validateInstalledSkills(installedManifest.name, packageDir, declarations);
+
+          const loadResult = await discoverAndLoadExtensions(
+            extensionEntries,
+            fixtureRoot,
+            agentDir,
+          );
+          assert.deepEqual(
+            loadResult.errors,
+            [],
+            `Pi loader errors for ${installedManifest.name}: ${loadResult.errors
+              .map(({ path: errorPath, error }) => `${errorPath}: ${error}`)
+              .join("; ")}`,
+          );
+          assert.equal(
+            loadResult.extensions.length,
+            extensionEntries.length,
+            `${installedManifest.name} should load every declared installed extension entry`,
+          );
+
+          for (const extension of loadResult.extensions) {
+            assert.ok(
+              registrationCount(extension) > 0,
+              `installed extension should register at least one handler, tool, renderer, command, flag, or shortcut: ${extension.path}`,
+            );
+          }
+        } catch (error) {
+          throw new Error(`tarball smoke failed for ${manifest.name}: ${error?.message ?? error}`, {
+            cause: error,
+          });
+        } finally {
+          await rm(fixtureRoot, { recursive: true, force: true });
+          assert.equal(
+            existsSync(fixtureRoot),
+            false,
+            `expected ${manifest.name} fixture to clean up`,
           );
         }
-      } finally {
-        await rm(fixtureRoot, { recursive: true, force: true });
-        assert.equal(
-          existsSync(fixtureRoot),
-          false,
-          `expected ${manifest.name} fixture to clean up`,
-        );
-      }
-    }
+      },
+    );
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
     assert.equal(existsSync(tempRoot), false, "expected tarball smoke fixtures to clean up");

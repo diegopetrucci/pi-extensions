@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '26 5 * * 2'
 
+# Non-PR runs use a unique run_id group so they never cancel or queue behind each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

@@ -6,7 +6,7 @@ import test from "node:test";
 import ts from "typescript";
 import { getWorkspacePackageDefs, repoRoot } from "./workspace-package-helpers.mjs";
 
-const packagePackCache = new Map();
+let packagePackCache;
 const localModuleExtensions = [
   ".ts",
   ".tsx",
@@ -69,17 +69,24 @@ function getDependencySections(manifest) {
   );
 }
 
-function getPublishedFiles(packageDef) {
-  const cacheKey = packageDef.workspace ?? packageDef.label;
-  if (packagePackCache.has(cacheKey)) return packagePackCache.get(cacheKey);
+function loadPublishedFiles() {
+  const stdout = execFileSync(
+    "npm",
+    ["pack", "--dry-run", "--json", "--workspaces", "--include-workspace-root"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  const filesByName = new Map();
+  for (const result of JSON.parse(stdout)) {
+    filesByName.set(result.name, new Set(result.files.map((file) => toPosix(file.path))));
+  }
+  return filesByName;
+}
 
-  const args = ["pack", "--dry-run", "--json"];
-  if (packageDef.workspace) args.push("--workspace", packageDef.workspace);
-  const stdout = execFileSync("npm", args, { cwd: repoRoot, encoding: "utf8" });
-  const parsed = JSON.parse(stdout);
-  assert.equal(parsed.length, 1, `expected one npm pack result for ${packageDef.label}`);
-  const files = new Set(parsed[0].files.map((file) => toPosix(file.path)));
-  packagePackCache.set(cacheKey, files);
+function getPublishedFiles(packageDef) {
+  packagePackCache ??= loadPublishedFiles();
+  const name = readManifest(packageDef).name;
+  const files = packagePackCache.get(name);
+  assert.ok(files, `expected npm pack output for ${packageDef.label} (${name})`);
   return files;
 }
 

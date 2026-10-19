@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Non-PR runs use a unique run_id group so they never cancel or queue behind each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     name: Validate (Node ${{ matrix.node-version }})
@@ -68,13 +73,21 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Setup Dev Drive
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
+        with:
+          workspace-copy: true
+
       - name: Install dependencies
-        run: npm ci
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        run: npm ci --no-audit --no-fund
 
       - name: Check installed package state
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
         run: npm run preflight:install-state
 
       - name: Exercise permission gate with the native PowerShell parser
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
         run: node --test test/shell-safety.test.mjs
         env:
           PI_REQUIRE_POWERSHELL_7: "1"
