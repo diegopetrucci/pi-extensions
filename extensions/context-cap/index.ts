@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 
-const DEFAULT_MAX_CONTEXT_WINDOW = 300_000;
+const DEFAULT_MAX_CONTEXT_WINDOW = 350_000;
 const DEFAULT_RESERVE_TOKENS = 16_384;
 const PROCESS_STATE_KEY = Symbol.for("pi-extensions.context-cap.model-holds.v1");
 type AnyModel = Model<Api> | Model<any>;
@@ -224,7 +224,7 @@ function unavailableReason(result: ApplyResult | undefined): string | undefined 
     return "physical model has no compatible context-window limit";
   }
   if (result?.reason === "reserve") {
-    return `compaction reserveTokens (${formatTokens(result.reserveTokens ?? DEFAULT_MAX_CONTEXT_WINDOW)}) is at least 300k; the auto-compaction threshold would be zero or negative`;
+    return `compaction reserveTokens (${formatTokens(result.reserveTokens ?? DEFAULT_MAX_CONTEXT_WINDOW)}) is at least 350k; the auto-compaction threshold would be zero or negative`;
   }
   if (result?.reason === "modelOverride") {
     return `compaction.modelOverrides[\"${result.key}\"] is configured; leaving the model window unchanged`;
@@ -317,7 +317,7 @@ export default function contextCapExtension(pi: ExtensionAPI) {
   }
 
   pi.registerCommand("context-cap", {
-    description: "Toggle the 300k effective context-window cap for auto-compaction",
+    description: "Toggle the 350k effective context-window cap for auto-compaction",
     getArgumentCompletions: (prefix) => {
       const commands = ["on", "off", "toggle", "status"];
       const matches = commands.filter((command) => command.startsWith(prefix.trim()));
