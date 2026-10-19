@@ -766,11 +766,6 @@ async function writeLibrarianPreferences(preferences: LibrarianPreferences): Pro
   await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-async function writeCachePreference(preference: CacheMode): Promise<void> {
-  const preferences = await readLibrarianPreferences();
-  await writeLibrarianPreferences({ ...preferences, cacheMode: preference });
-}
-
 function resolveCacheDecision(preference: CacheMode): { enabled: boolean; reason: string } {
   if (preference === "enabled") {
     return { enabled: true, reason: "cache preference enabled; using cached local checkouts" };
@@ -1469,7 +1464,6 @@ export const __test__ = {
   parseModelPreference,
   resolveThinkingLevel,
   aggregateAssistantUsage,
-  addAssistantMessageUsage,
   addSessionEventUsage,
   inspectFinalAssistant,
   classifyRunFailure,
@@ -1477,14 +1471,12 @@ export const __test__ = {
   createLibrarianAbortController,
   cleanupExpiredCache,
   cleanupExpiredRepos,
-  cleanupLockOwnershipError,
   tryAcquireCleanupLock,
   heartbeatCleanupLock,
   releaseCleanupLock,
   CLEANUP_LOCK_FILE,
   CLEANUP_LOCK_STALE_MS,
   CLEANUP_LOCK_MAX_LEASE_MS,
-  isCleanupLockLeaseExpired,
 };
 
 export default function librarianExtension(pi: ExtensionAPI) {
@@ -1655,17 +1647,6 @@ export default function librarianExtension(pi: ExtensionAPI) {
       const cacheRoot = getUserCacheReposRoot();
       const configPath = getCacheConfigPath();
 
-      const setPreference = async (mode: CacheMode): Promise<string | undefined> => {
-        cachePreference = mode;
-        try {
-          await writeCachePreference(mode);
-          return undefined;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return `Preference changed for this process, but could not save ${configPath}: ${message}`;
-        }
-      };
-
       const formatSetMessage = (mode: CacheMode, warning?: string): string => {
         const main =
           mode === "enabled"
@@ -1675,20 +1656,20 @@ export default function librarianExtension(pi: ExtensionAPI) {
       };
 
       if (action === "on" || action === "enable") {
-        const warning = await setPreference("enabled");
+        const warning = await savePreferences({ ...currentPreferences(), cacheMode: "enabled" });
         notifyCommand(ctx, formatSetMessage("enabled", warning), warning ? "warning" : "info");
         return;
       }
 
       if (action === "off" || action === "disable") {
-        const warning = await setPreference("disabled");
+        const warning = await savePreferences({ ...currentPreferences(), cacheMode: "disabled" });
         notifyCommand(ctx, formatSetMessage("disabled", warning), warning ? "warning" : "info");
         return;
       }
 
       if (action === "toggle") {
         const next = cachePreference === "enabled" ? "disabled" : "enabled";
-        const warning = await setPreference(next);
+        const warning = await savePreferences({ ...currentPreferences(), cacheMode: next });
         notifyCommand(ctx, formatSetMessage(next, warning), warning ? "warning" : "info");
         return;
       }

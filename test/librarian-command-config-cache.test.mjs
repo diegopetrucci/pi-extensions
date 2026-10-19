@@ -665,6 +665,49 @@ test("librarian-config warns when preferences cannot be saved but still updates 
   assert.match(notifications.at(-1).message, /thinkingLevel=high\./);
 });
 
+test("librarian-cache persists in-memory defaults after a failed config save", async (t) => {
+  const { agentDir, configPath } = setupLibrarianEnv(t);
+  const diskPreferences = {
+    cacheMode: "disabled",
+    model: "anthropic/claude-haiku-4-5",
+    thinkingLevel: "low",
+  };
+  writeFileSync(configPath, JSON.stringify(diskPreferences));
+
+  const librarianExtension = await loadFreshLibrarianExtension();
+  const harness = createExtensionHarness();
+  librarianExtension(harness.pi);
+  const { ctx, notifications } = createCommandContext();
+  await getHandler(harness, "session_start")({}, ctx);
+
+  const extensionsPath = path.join(agentDir, "extensions");
+  const displacedPath = `${extensionsPath}.displaced`;
+  renameSync(extensionsPath, displacedPath);
+  writeFileSync(extensionsPath, "conflict\n");
+
+  await getCommand(harness, "librarian-config").handler("model openai/gpt-5:high", ctx);
+  assert.equal(notifications.at(-1).level, "warning");
+  assert.match(
+    notifications.at(-1).message,
+    /Preference changed for this process, but could not save/,
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(path.join(displacedPath, "librarian.json"), "utf8")),
+    diskPreferences,
+  );
+
+  rmSync(extensionsPath);
+  renameSync(displacedPath, extensionsPath);
+  await getCommand(harness, "librarian-cache").handler("toggle", ctx);
+  assert.equal(notifications.at(-1).level, "info");
+
+  const savedPreferences = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.equal(savedPreferences.model, "openai/gpt-5");
+  assert.equal(savedPreferences.thinkingLevel, "high");
+  assert.equal(savedPreferences.cacheMode, "enabled");
+  assert.equal(savedPreferences.cacheEnabled, true);
+});
+
 test("librarian tool_result marks error results without flagging successful or unrelated tool events", async () => {
   const librarianExtension = await loadFreshLibrarianExtension();
   const harness = createExtensionHarness();
