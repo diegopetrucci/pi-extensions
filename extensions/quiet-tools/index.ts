@@ -418,7 +418,6 @@ export const __testing = {
   formatMcpCallLine,
   createQuietResolver,
   QuietCallRenderComponent,
-  QuietResultRenderComponent,
   QuietToolsDelegateToDefault,
 };
 

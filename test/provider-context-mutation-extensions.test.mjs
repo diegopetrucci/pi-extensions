@@ -81,7 +81,7 @@ test("context-cap caps only the active known physical model and restores it on s
   });
 
   await sessionStart({}, ctx);
-  assert.equal(activeModel.contextWindow, 300_000);
+  assert.equal(activeModel.contextWindow, 350_000);
   assert.equal(
     largeRegistryModel.contextWindow,
     400_000,
@@ -144,13 +144,13 @@ test("context-cap restores the previous active model across selection and branch
   const secondCtx = createContextCapContext({ model: second }).ctx;
 
   await sessionStart({}, firstCtx);
-  assert.equal(first.contextWindow, 300_000);
+  assert.equal(first.contextWindow, 350_000);
   await modelSelect({ model: second, previousModel: first }, secondCtx);
   assert.equal(first.contextWindow, 500_000);
-  assert.equal(second.contextWindow, 300_000);
+  assert.equal(second.contextWindow, 350_000);
 
   await sessionTree({}, secondCtx);
-  assert.equal(second.contextWindow, 300_000);
+  assert.equal(second.contextWindow, 350_000);
   await sessionShutdown({}, secondCtx);
   assert.equal(second.contextWindow, 400_000);
 });
@@ -167,15 +167,15 @@ test("context-cap restores on reload and can be enabled again without stale orig
   const { ctx } = createContextCapContext({ model });
 
   await sessionStart({}, ctx);
-  assert.equal(model.contextWindow, 300_000);
+  assert.equal(model.contextWindow, 350_000);
   await sessionShutdown({ reason: "reload" }, ctx);
   assert.equal(model.contextWindow, 500_000);
   await sessionStart({ reason: "reload" }, ctx);
-  assert.equal(model.contextWindow, 300_000);
+  assert.equal(model.contextWindow, 350_000);
   await command.handler("off", ctx);
   assert.equal(model.contextWindow, 500_000);
   await command.handler("on", ctx);
-  assert.equal(model.contextWindow, 300_000);
+  assert.equal(model.contextWindow, 350_000);
 });
 
 test("context-cap coordinates separately loaded instances process-wide and restores after either shutdown order", async () => {
@@ -208,14 +208,14 @@ test("context-cap coordinates separately loaded instances process-wide and resto
 
     await firstStart({}, firstContext);
     await secondStart({}, secondContext);
-    assert.equal(sharedPhysical.contextWindow, 300_000);
+    assert.equal(sharedPhysical.contextWindow, 350_000);
 
     const shutdownHandlers = [firstShutdownHandler, secondShutdownHandler];
     const shutdownContexts = [firstContext, secondContext];
     await shutdownHandlers[firstShutdown]({}, shutdownContexts[firstShutdown]);
     assert.equal(
       sharedPhysical.contextWindow,
-      300_000,
+      350_000,
       "the remaining process-wide holder keeps the cap active",
     );
     await shutdownHandlers[secondShutdown]({}, shutdownContexts[secondShutdown]);
@@ -246,16 +246,16 @@ test("context-cap keeps the shared cap while one factory instance is disabled an
   await firstStart({}, firstContextState.ctx);
   await secondStart({}, secondContextState.ctx);
   await firstCommand.handler("status", firstContextState.ctx);
-  assert.match(firstContextState.notifications.at(-1).message, /300k\/500k effective\/original/);
+  assert.match(firstContextState.notifications.at(-1).message, /350k\/500k effective\/original/);
   assert.match(
     firstContextState.notifications.at(-1).message,
     /1 other holder still holds the cap/,
   );
 
   await firstCommand.handler("off", firstContextState.ctx);
-  assert.equal(sharedPhysical.contextWindow, 300_000);
+  assert.equal(sharedPhysical.contextWindow, 350_000);
   await firstShutdown({}, firstContextState.ctx);
-  assert.equal(sharedPhysical.contextWindow, 300_000);
+  assert.equal(sharedPhysical.contextWindow, 350_000);
   await secondShutdown({}, secondContextState.ctx);
   assert.equal(sharedPhysical.contextWindow, 500_000);
 });
@@ -283,10 +283,10 @@ test("context-cap switches one holder without releasing another instance or its 
   await firstModelSelect({ model: replacement, previousModel: sharedPhysical }, replacementContext);
   assert.equal(
     sharedPhysical.contextWindow,
-    300_000,
+    350_000,
     "the second instance still holds the shared model",
   );
-  assert.equal(replacement.contextWindow, 300_000);
+  assert.equal(replacement.contextWindow, 350_000);
 
   await firstShutdown({}, replacementContext);
   assert.equal(replacement.contextWindow, 400_000);
@@ -305,7 +305,7 @@ test("context-cap leaves an outside write alone and duplicate releases are idemp
   const { ctx } = createContextCapContext({ model });
 
   await sessionStart({}, ctx);
-  assert.equal(model.contextWindow, 300_000);
+  assert.equal(model.contextWindow, 350_000);
   model.contextWindow = 175_000;
   await sessionShutdown({}, ctx);
   assert.equal(model.contextWindow, 175_000);
@@ -339,9 +339,9 @@ test("context-cap branch restoration releases only this instance hold", async ()
   await secondStart({}, secondContext);
   await firstStart({}, firstContext);
   await firstTree({}, firstContext);
-  assert.equal(sharedPhysical.contextWindow, 300_000);
+  assert.equal(sharedPhysical.contextWindow, 350_000);
   await firstShutdown({}, firstContext);
-  assert.equal(sharedPhysical.contextWindow, 300_000);
+  assert.equal(sharedPhysical.contextWindow, 350_000);
   await secondShutdown({}, secondContext);
   assert.equal(sharedPhysical.contextWindow, 500_000);
 });
@@ -361,14 +361,14 @@ test("context-cap exposes the process-wide limitation to a context without the e
   const childWithoutExtension = { model: sharedPhysical };
 
   await sessionStart({}, ctx);
-  assert.equal(childWithoutExtension.model.contextWindow, 300_000);
+  assert.equal(childWithoutExtension.model.contextWindow, 350_000);
   await sessionShutdown({}, ctx);
   assert.equal(childWithoutExtension.model.contextWindow, 500_000);
 });
 
 test("context-cap guards a non-positive compaction threshold and explicit model overrides", async () => {
   const guardedModel = { provider: "anthropic", id: "reserve-guard", contextWindow: 500_000 };
-  const reserveHarness = createContextCapHarness({ compaction: { reserveTokens: 300_000 } });
+  const reserveHarness = createContextCapHarness({ compaction: { reserveTokens: 350_000 } });
   const reserveExtension = await loadExtension("extensions/context-cap/index.ts");
   reserveExtension(reserveHarness.pi);
   const reserveStart = getHandler(reserveHarness, "session_start");
@@ -397,7 +397,7 @@ test("context-cap guards a non-positive compaction threshold and explicit model 
   assert.match(overrideContextState.notifications.at(-1).message, /modelOverrides/);
 
   const boundaryModel = { provider: "anthropic", id: "reserve-boundary", contextWindow: 500_000 };
-  const boundaryHarness = createContextCapHarness({ compaction: { reserveTokens: 299_999 } });
+  const boundaryHarness = createContextCapHarness({ compaction: { reserveTokens: 349_999 } });
   const boundaryExtension = await loadExtension("extensions/context-cap/index.ts");
   boundaryExtension(boundaryHarness.pi);
   await getHandler(boundaryHarness, "session_start")(
@@ -406,7 +406,7 @@ test("context-cap guards a non-positive compaction threshold and explicit model 
   );
   assert.equal(
     boundaryModel.contextWindow,
-    300_000,
+    350_000,
     "reserveTokens below the cap still permits the cap",
   );
   await getHandler(boundaryHarness, "session_shutdown")(
@@ -433,7 +433,7 @@ test("context-cap status, off, on, and toggle commands report and mutate the ses
   await command.handler("status", ctx);
   assert.match(notifications.at(-1).message, /Context cap is enabled\./);
   assert.match(notifications.at(-1).message, /anthropic\/claude-opus-4-8/);
-  assert.match(notifications.at(-1).message, /300k\/400k effective\/original/);
+  assert.match(notifications.at(-1).message, /350k\/400k effective\/original/);
 
   await command.handler("off", ctx);
   assert.equal(model.contextWindow, 400_000);
@@ -444,8 +444,8 @@ test("context-cap status, off, on, and toggle commands report and mutate the ses
   );
 
   await command.handler("on", ctx);
-  assert.equal(model.contextWindow, 300_000);
-  assert.deepEqual(statuses.at(-1), { key: "context-cap", value: "ctx cap 300k" });
+  assert.equal(model.contextWindow, 350_000);
+  assert.deepEqual(statuses.at(-1), { key: "context-cap", value: "ctx cap 350k" });
   assert.match(
     notifications.at(-1).message,
     /Context cap enabled \(1 active model window\(s\) capped\/restored\)\./,
@@ -492,8 +492,8 @@ test("context-cap offers completions, supports aliases, and warns on invalid usa
   );
 
   await command.handler("enable", ctx);
-  assert.equal(model.contextWindow, 300_000);
-  assert.deepEqual(statuses.at(-1), { key: "context-cap", value: "ctx cap 300k" });
+  assert.equal(model.contextWindow, 350_000);
+  assert.deepEqual(statuses.at(-1), { key: "context-cap", value: "ctx cap 350k" });
   assert.match(
     notifications.at(-1).message,
     /Context cap enabled \(1 active model window\(s\) capped\/restored\)\./,
@@ -535,7 +535,7 @@ test("context-cap tolerates registry failures, reports no-model status, and skip
       },
     },
   );
-  assert.equal(activeModel.contextWindow, 300_000);
+  assert.equal(activeModel.contextWindow, 350_000);
   assert.deepEqual(registryFailureNotifications, []);
 
   const noModelNotifications = [];
@@ -578,6 +578,6 @@ test("context-cap tolerates registry failures, reports no-model status, and skip
       },
     },
   );
-  assert.equal(selectedModel.contextWindow, 300_000);
+  assert.equal(selectedModel.contextWindow, 350_000);
   assert.deepEqual(modelSelectStatuses, []);
 });

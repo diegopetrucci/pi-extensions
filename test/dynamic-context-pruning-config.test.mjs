@@ -60,3 +60,83 @@ test("readConfig falls back to defaults when no config file exists", async (t) =
   const config = await dcp.__testing.readConfig();
   assert.deepEqual(config, dcp.defaultConfig());
 });
+
+test("normalizeConfig then resolveBreakEvenThreshold preserves state defaults and legacy fallback semantics", async () => {
+  const dcp = await import(pathToFileURL(modulePath).href);
+  const cases = [
+    {
+      name: "no config",
+      raw: undefined,
+      expectedGlobal: 22,
+      expectedByState: { idle: 22, mid_loop: 1 },
+    },
+    {
+      name: "global-only config",
+      raw: { gate: { breakEvenThreshold: 50 } },
+      expectedGlobal: 50,
+      expectedByState: { idle: 22, mid_loop: 1 },
+    },
+    {
+      name: "global-only zero",
+      raw: { gate: { breakEvenThreshold: 0 } },
+      expectedGlobal: 0,
+      expectedByState: { idle: 22, mid_loop: 1 },
+    },
+    {
+      name: "explicit zero state overrides",
+      raw: {
+        gate: {
+          breakEvenThreshold: 50,
+          breakEvenThresholdByState: { idle: 0, mid_loop: 0 },
+        },
+      },
+      expectedGlobal: 50,
+      expectedByState: { idle: 0, mid_loop: 0 },
+    },
+    {
+      name: "partial state overrides",
+      raw: {
+        gate: { breakEvenThreshold: 50, breakEvenThresholdByState: { idle: 7 } },
+      },
+      expectedGlobal: 50,
+      expectedByState: { idle: 7, mid_loop: 1 },
+    },
+    {
+      name: "full state overrides",
+      raw: {
+        gate: {
+          breakEvenThreshold: 50,
+          breakEvenThresholdByState: { idle: 7, mid_loop: 13 },
+        },
+      },
+      expectedGlobal: 50,
+      expectedByState: { idle: 7, mid_loop: 13 },
+    },
+    {
+      name: "invalid global and state values",
+      raw: {
+        gate: {
+          breakEvenThreshold: "not-a-number",
+          breakEvenThresholdByState: { idle: -1, mid_loop: "also-not-a-number" },
+        },
+      },
+      expectedGlobal: 22,
+      expectedByState: { idle: 22, mid_loop: 1 },
+    },
+  ];
+
+  for (const { name, raw, expectedGlobal, expectedByState } of cases) {
+    const config = dcp.normalizeConfig(raw);
+    assert.equal(config.gate.breakEvenThreshold, expectedGlobal, `${name}: global field`);
+    assert.equal(
+      dcp.resolveBreakEvenThreshold(config.gate, "idle"),
+      expectedByState.idle,
+      `${name}: idle threshold`,
+    );
+    assert.equal(
+      dcp.resolveBreakEvenThreshold(config.gate, "mid_loop"),
+      expectedByState.mid_loop,
+      `${name}: mid_loop threshold`,
+    );
+  }
+});

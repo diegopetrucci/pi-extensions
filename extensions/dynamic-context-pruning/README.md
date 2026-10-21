@@ -275,6 +275,14 @@ Notes:
   warm request prefix between consecutive LLM calls separated only by a
   toolResult) illustrates cache invalidation, not proof that amortization is
   impossible. Set `mid_loop` back to `22` to restore the old parity behavior.
+- `gate.breakEvenThreshold` is a deprecated legacy field retained for
+  compatibility. Loaded config always resolves through
+  `gate.breakEvenThresholdByState`, so a global-only value (including `0`) has
+  no runtime effect, and missing or invalid state values use their existing
+  normalized defaults rather than inheriting the global value. Direct callers
+  of the exported `resolveBreakEvenThreshold` may still use this field as the
+  fallback when they pass an unnormalized gate object. Set explicit per-state
+  values instead.
 - `gate.breakEvenThreshold`'s default of `22` is calibrated from the
   representative-corpus benchmark at `cachedPriceRatio` r=0.1 (aggressive
   prompt caching, the common case). It is **provider/ratio-

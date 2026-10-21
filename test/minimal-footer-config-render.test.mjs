@@ -451,7 +451,7 @@ test("minimal-footer loadConfig prefers trusted project config over global confi
   });
 });
 
-test("minimal-footer defaults dumb-zone threshold to 300k and warns only above the threshold", (t) => {
+test("minimal-footer defaults dumb-zone threshold to 350k and warns only above the threshold", (t) => {
   const { projectDir } = setupTempDirs(t);
   const config = loadConfig({
     cwd: projectDir,
@@ -460,7 +460,7 @@ test("minimal-footer defaults dumb-zone threshold to 300k and warns only above t
     },
   });
 
-  assert.equal(config.context.dumbZone.thresholdTokens, 300000);
+  assert.equal(config.context.dumbZone.thresholdTokens, 350000);
 
   const render = (footerConfig, tokens) =>
     renderFooterLines({
@@ -475,8 +475,8 @@ test("minimal-footer defaults dumb-zone threshold to 300k and warns only above t
       theme: plainTheme,
     }).join("\n");
 
-  assert.doesNotMatch(render(config, 300000), /DUMB ZONE/);
-  assert.match(render(config, 300001), /DUMB ZONE/);
+  assert.doesNotMatch(render(config, 350000), /DUMB ZONE/);
+  assert.match(render(config, 350001), /DUMB ZONE/);
 
   const customConfig = {
     ...config,

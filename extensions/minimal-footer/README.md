@@ -10,7 +10,7 @@ It replaces pi's built-in footer with a cleaner two-line layout that focuses on 
 - TLH-style git dirty counts, ahead/behind counts, and optional PR number
 - current repo name
 - current context percentage
-- red `DUMB ZONE` indicator when context usage is above 300k tokens
+- red `DUMB ZONE` indicator when context usage is above 350k tokens
 - current model and thinking level
 - OpenAI Codex usage windows, labeled from the durations reported by OpenAI
 - `xp` marker when Pi experimental features are enabled
@@ -39,7 +39,7 @@ main · +1 ~2 ?3 ↑1 • PR #42
 
 The markers are `!` conflicts, `+` staged, `~` unstaged, `?` untracked, `↑` ahead, and `↓` behind. PR numbers are fetched best-effort with `gh pr view`. Git polling is skipped until Pi reports that the project is trusted, and `git status` is run with fsmonitor disabled.
 
-When context usage is above 300k tokens, the bottom-left line includes a red warning:
+When context usage is above 350k tokens, the bottom-left line includes a red warning:
 
 ```text
 44.1% · DUMB ZONE
@@ -115,7 +115,7 @@ Example:
     "showPercent": true,
     "dumbZone": {
       "enabled": true,
-      "thresholdTokens": 300000,
+      "thresholdTokens": 350000,
       "label": "DUMB ZONE",
       "color": "error"
     }
@@ -231,7 +231,7 @@ Disable git dirty/ahead/PR status:
 
 - **Top left:** current git branch plus dirty/ahead/PR status when available
 - **Top right:** current repo directory name
-- **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 300k context tokens
+- **Bottom left:** current context usage percentage, plus red `DUMB ZONE` above 350k context tokens
 - **Bottom left on `openai-codex`:** current context usage percentage plus the Codex usage windows reported for the account
 - **Bottom left on `openai` ChatGPT OAuth:** current context usage percentage plus `usage unsupported`; no legacy WHAM request is attempted
 - **Bottom left with `PI_EXPERIMENTAL=1`:** current context usage percentage plus `xp`
@@ -246,7 +246,7 @@ This extension also lives inside the broader [`pi-extensions`](../../README.md) 
 - Replaces pi's built-in footer entirely.
 - Uses pi footer data for git branch updates, plus background cached git/gh checks for dirty counts and PR number after project trust is granted.
 - Shows only context percentage, not context window size.
-- Shows `DUMB ZONE` only while context usage is above 300k tokens.
+- Shows `DUMB ZONE` only while context usage is above 350k tokens.
 - Shows the model id rather than a provider-specific display label.
 - Shows `xp` when `PI_EXPERIMENTAL=1`.
 - For `openai-codex`, reads pi's stored OAuth login and fetches usage from ChatGPT's backend usage endpoint. Window labels are inferred from each window's reported duration; missing or unrecognized durations use neutral `usage` labels rather than guessing from window position.

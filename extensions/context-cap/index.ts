@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 
-const DEFAULT_MAX_CONTEXT_WINDOW = 300_000;
+const DEFAULT_MAX_CONTEXT_WINDOW = 350_000;
 const DEFAULT_RESERVE_TOKENS = 16_384;
 const PROCESS_STATE_KEY = Symbol.for("pi-extensions.context-cap.model-holds.v1");
 type AnyModel = Model<Api> | Model<any>;

@@ -3,7 +3,7 @@
     "showPercent": true,
     "dumbZone": {
       "enabled": true,
-      "thresholdTokens": 300000,
+      "thresholdTokens": 350000,
       "label": "DUMB ZONE",
       "color": "error"
     }

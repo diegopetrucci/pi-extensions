@@ -207,26 +207,36 @@ test("parseContextPruningArgs: status/stats/on/off/toggle", () => {
   assert.deepEqual(parseContextPruningArgs("toggle"), { kind: "toggle" });
 });
 
-test("parseContextPruningArgs: strategy <name> on|off, including dashed and camelCase aliases", () => {
-  assert.deepEqual(parseContextPruningArgs("strategy dedupe on"), {
-    kind: "strategy",
-    strategy: "dedupe",
-    value: true,
-  });
-  assert.deepEqual(parseContextPruningArgs("strategy error-purge off"), {
+test("parseContextPruningArgs: strategy aliases remain case-insensitive across documented forms", () => {
+  const aliases = [
+    ["dedupe", "dedupe"],
+    ["ERROR-PURGE", "errorPurge"],
+    ["errorPurge", "errorPurge"],
+    ["error_purge", "errorPurge"],
+    ["SUPERSEDED-FILE-OPS", "supersededFileOps"],
+    ["supersededFileOps", "supersededFileOps"],
+    ["SUPERSEDED_FILE_OPS", "supersededFileOps"],
+  ];
+
+  for (const [alias, strategy] of aliases) {
+    assert.deepEqual(
+      parseContextPruningArgs(`strategy ${alias} on`),
+      { kind: "strategy", strategy, value: true },
+      alias,
+    );
+  }
+});
+
+test("parseContextPruningArgs: inherited strategy names are unknown and do not affect aliases", () => {
+  for (const alias of ["toString", "valueOf", "constructor", "hasOwnProperty", "__proto__"]) {
+    const raw = `strategy ${alias} on`;
+    assert.deepEqual(parseContextPruningArgs(raw), { kind: "unknown", raw }, alias);
+  }
+
+  assert.deepEqual(parseContextPruningArgs("strategy errorPurge off"), {
     kind: "strategy",
     strategy: "errorPurge",
     value: false,
-  });
-  assert.deepEqual(parseContextPruningArgs("strategy errorPurge on"), {
-    kind: "strategy",
-    strategy: "errorPurge",
-    value: true,
-  });
-  assert.deepEqual(parseContextPruningArgs("strategy superseded-file-ops on"), {
-    kind: "strategy",
-    strategy: "supersededFileOps",
-    value: true,
   });
 });
 

@@ -1,6 +1,6 @@
 # context-cap
 
-A pi extension that treats large-context models as having an effective 300k-token context window, so pi's built-in auto-compaction starts earlier, and avoids the dumb zone.
+A pi extension that treats large-context models as having an effective 350k-token context window, so pi's built-in auto-compaction starts earlier, and avoids the dumb zone.
 
 By default, pi auto-compacts when:
 
@@ -11,10 +11,10 @@ contextTokens > model.contextWindow - reserveTokens
 This extension changes the active model's in-memory `contextWindow` to:
 
 ```text
-min(originalContextWindow, 300000)
+min(originalContextWindow, 350000)
 ```
 
-With pi's default `reserveTokens` of 16,384, models larger than 300k will proactively compact around 283,616 tokens.
+With pi's default `reserveTokens` of 16,384, models larger than 350k will proactively compact around 333,616 tokens.
 
 ## Commands
 
@@ -65,21 +65,21 @@ Then reload pi:
 
 ### Settings guard and alternative
 
-- On Pi hosts exposing `getSettings()`, the extension skips the cap whenever `compaction.modelOverrides` contains the active model's key (`provider/model-id`), whatever fields that entry sets; it does not read `reserveTokens` from the override. Otherwise it uses `compaction.reserveTokens`, then the default `16,384`, and skips the cap when that value is at least `300,000` (which would make the threshold zero or negative). Hosts without `getSettings()` use the older cap behavior without this guard.
-- Pi's provider request path also derives an output-token budget from the effective window (`contextWindow - contextTokens - 4096`, with any provider-specific clamp applied afterward). The cap can therefore reduce response or thinking-token budgets near the limit, in addition to causing earlier compaction; Pi's overflow handling may also treat a request above 300k as overflow and retry after compaction. Use `/context-cap off` when you need the full model window temporarily.
-- As a session-scoped alternative, configure Pi's own `compaction.modelOverrides` instead of this extension. The exact key is `provider/model-id`; to match this extension's default 300k threshold for a model with original window `W`, let `R` be the configured `reserveTokens` value (default `16,384`) and use:
+- On Pi hosts exposing `getSettings()`, the extension skips the cap whenever `compaction.modelOverrides` contains the active model's key (`provider/model-id`), whatever fields that entry sets; it does not read `reserveTokens` from the override. Otherwise it uses `compaction.reserveTokens`, then the default `16,384`, and skips the cap when that value is at least `350,000` (which would make the threshold zero or negative). Hosts without `getSettings()` use the older cap behavior without this guard.
+- Pi's provider request path also derives an output-token budget from the effective window (`contextWindow - contextTokens - 4096`, with any provider-specific clamp applied afterward). The cap can therefore reduce response or thinking-token budgets near the limit, in addition to causing earlier compaction; Pi's overflow handling may also treat a request above 350k as overflow and retry after compaction. Use `/context-cap off` when you need the full model window temporarily.
+- As a session-scoped alternative, configure Pi's own `compaction.modelOverrides` instead of this extension. The exact key is `provider/model-id`; to match this extension's default 350k threshold for a model with original window `W`, let `R` be the configured `reserveTokens` value (default `16,384`) and use:
 
   ```text
-  reserveTokens = W - 300000 + R
+  reserveTokens = W - 350000 + R
   ```
 
-  For example, with the default `R`, a 1,000,000-token model uses `716384`, yielding the same `283616` threshold as `300000 - 16384`:
+  For example, with the default `R`, a 1,000,000-token model uses `666384`, yielding the same `333616` threshold as `350000 - 16384`:
 
   ```json
   {
     "compaction": {
       "modelOverrides": {
-        "provider/model-id": { "reserveTokens": 716384 }
+        "provider/model-id": { "reserveTokens": 666384 }
       }
     }
   }

@@ -14,7 +14,6 @@ const {
   extractFileOpPathArg,
   normalizeFileOpsPath,
   computeFileReadRange,
-  isFullFileReadRange,
   readRangeCovers,
 } = dcp;
 
@@ -111,14 +110,12 @@ test("computeFileReadRange: no offset/limit is a full-file read", () => {
   const range = computeFileReadRange({});
   assert.equal(range.start, 1);
   assert.equal(range.end, undefined);
-  assert.equal(isFullFileReadRange(range), true);
 });
 
 test("computeFileReadRange: offset/limit produce a bounded range", () => {
   const range = computeFileReadRange({ offset: 10, limit: 5 });
   assert.equal(range.start, 10);
   assert.equal(range.end, 14);
-  assert.equal(isFullFileReadRange(range), false);
 });
 
 test("readRangeCovers: a later full read covers an earlier full read", () => {

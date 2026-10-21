@@ -873,12 +873,6 @@ function addAssistantMessageUsage(total: Usage, message: unknown): void {
   addUsage(total, assistant.usage as Usage);
 }
 
-function aggregateAssistantUsage(messages: unknown[]): Usage {
-  const total = createEmptyUsage();
-  for (const message of messages) addAssistantMessageUsage(total, message);
-  return total;
-}
-
 function addSessionEventUsage(total: Usage, event: unknown): void {
   const sessionEvent = event as { type?: string; message?: unknown; result?: { usage?: Usage } };
   if (sessionEvent?.type === "message_end")
@@ -1757,7 +1751,7 @@ export const __test__ = {
   normalizeThinkingLevel,
   resolveThinkingLevel,
   selectCodeReviewerModel,
-  aggregateAssistantUsage,
+  createEmptyUsage,
   addAssistantMessageUsage,
   addSessionEventUsage,
   inspectFinalAssistant,
