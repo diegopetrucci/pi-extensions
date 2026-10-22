@@ -15,13 +15,20 @@ import {
   parseOracleProviderMatrix,
 } from "./support/provider-policy-contract-support.mjs";
 
-function catalogTexts(provider) {
-  return getBuiltinModels(provider).map((model) => `${model.id} ${model.name ?? ""}`.toLowerCase());
+function matchesPreferencePattern(model, pattern) {
+  const haystack = `${model.id} ${model.name ?? ""}`.toLowerCase();
+  const needle = pattern.toLowerCase();
+  if (!needle.endsWith(" ")) return haystack.includes(needle);
+  const separator = haystack.indexOf(" ");
+  const id = separator === -1 ? haystack : haystack.slice(0, separator);
+  return `${id} `.includes(needle);
 }
 
 function firstCatalogMatch(provider, patterns) {
-  const texts = catalogTexts(provider);
-  return patterns.find((pattern) => texts.some((text) => text.includes(pattern.toLowerCase())));
+  const models = getBuiltinModels(provider);
+  return patterns.find((pattern) =>
+    models.some((model) => matchesPreferencePattern(model, pattern)),
+  );
 }
 
 function firstCatalogMatchId(provider, patterns) {
@@ -95,9 +102,9 @@ test("hardcoded provider preference patterns still match the pinned built-in cat
     const preferences = extractConst(file, constName);
     for (const [provider, patterns] of Object.entries(preferences)) {
       if (LEGACY_PROVIDER_ALIAS_KEYS.has(provider)) continue; // legacy key has no catalog entry
-      const texts = catalogTexts(provider);
+      const models = getBuiltinModels(provider);
       const missing = patterns.filter(
-        (pattern) => !texts.some((text) => text.includes(pattern.toLowerCase())),
+        (pattern) => !models.some((model) => matchesPreferencePattern(model, pattern)),
       );
       for (const pattern of missing) {
         violations.push(`${file} / ${provider}: ${pattern}`);
@@ -111,8 +118,41 @@ test("hardcoded provider preference patterns still match the pinned built-in cat
   );
 });
 
+test("trailing-space catalog matching checks model IDs instead of display names", () => {
+  assert.equal(
+    firstCatalogMatch("github-copilot", ["gpt-5.4 "]),
+    undefined,
+    "Copilot gpt-5.4 must not match the gpt-5.4 nano display name",
+  );
+  assert.equal(
+    firstCatalogMatch("openai", ["gpt-5.4 "]),
+    "gpt-5.4 ",
+    "an ID-only trailing-space pattern should match the exact gpt-5.4 ID",
+  );
+});
+
+test("Pi 1.4.0 keeps live OpenRouter Kimi K2 Thinking directly after K2.6", () => {
+  const pattern = "moonshotai/kimi-k2-thinking";
+  assert.equal(firstCatalogMatch("openrouter", [pattern]), pattern);
+  for (const role of ["oracle", "contrarian"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    const k26Index = preferences.openrouter.indexOf("moonshotai/kimi-k2.6");
+    assert.notEqual(k26Index, -1, `${role} is missing the live Kimi K2.6 preference`);
+    assert.equal(
+      preferences.openrouter[k26Index + 1],
+      pattern,
+      `${role} changed Kimi K2 Thinking order`,
+    );
+    assert.equal(
+      preferences["vercel-ai-gateway"].includes(pattern),
+      false,
+      `${role} must keep the removed Vercel Kimi K2 Thinking preference absent`,
+    );
+  }
+});
+
 test("cross-provider frontier preference patterns still match the pinned built-in catalog", () => {
-  const catalog = getBuiltinProviders().flatMap((provider) => catalogTexts(provider));
+  const catalog = getBuiltinProviders().flatMap((provider) => getBuiltinModels(provider));
   // Collect all stale patterns across every file before asserting, so a single
   // failure message lists every offending file/pattern at once.
   const violations = [];
@@ -122,7 +162,7 @@ test("cross-provider frontier preference patterns still match the pinned built-i
   ]) {
     const patterns = extractConst(file, constName);
     const missing = patterns.filter(
-      (pattern) => !catalog.some((text) => text.includes(pattern.toLowerCase())),
+      (pattern) => !catalog.some((model) => matchesPreferencePattern(model, pattern)),
     );
     for (const pattern of missing) {
       violations.push(`${file}: ${pattern}`);
@@ -145,7 +185,7 @@ test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
       "workers-ai/@cf/zai-org/glm-5.3",
     ],
     "cloudflare-workers-ai": ["@cf/deepseek-ai/deepseek-v4-pro-0813", "@cf/zai-org/glm-5.3"],
-    nvidia: ["moonshotai/kimi-k3"],
+    nvidia: ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k2.6"],
     openrouter: ["z-ai/glm-5.3"],
     together: ["zai-org/GLM-5.3-Flash"],
     "vercel-ai-gateway": ["zai/glm-5.3"],
@@ -221,7 +261,7 @@ test("Pi 0.99 TypeSafe classifier provider has no chat preference or selectable 
   assert.equal(firstCatalogMatchId("typesafe", []), undefined);
 });
 
-test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
+test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => {
   const expected = {
     fireworks: [
       "accounts/fireworks/models/kimi-k3",
@@ -237,12 +277,10 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
       "mimo-v2.5-pro",
       "mimo-v2.5",
       "minimax-m3",
-      "minimax-m2.7",
       "kimi-k3",
       "kimi-k2.7-code ",
       "grok-4.7 ",
       "grok-4.7",
-      "grok-4.6",
     ],
     radius: [
       "gpt-6-astra ",
@@ -278,9 +316,7 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
       "Qwen/Qwen3.7-Max",
       "Qwen/Qwen3.6-Plus",
       "MiniMaxAI/MiniMax-M3",
-      "MiniMaxAI/MiniMax-M2.7",
       "openai/gpt-oss-120b",
-      "nvidia/nemotron-3-ultra-550b-a55b",
     ],
   };
   for (const role of ["oracle", "contrarian"]) {
@@ -291,6 +327,32 @@ test("Pi 0.99 dead-entry cleanup preserves the approved survivor order", () => {
         survivors,
         `${role} changed survivor order for ${provider}`,
       );
+    }
+  }
+});
+
+test("Pi 1.4.0 Xiaomi preference ladders use the published 2.6 tiers in order", () => {
+  const expected = {
+    xiaomi: ["mimo-v2.6-pro-ultraspeed", "mimo-v2.6-pro", "mimo-v2.6-flash"],
+    "xiaomi-token-plan-ams": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+    "xiaomi-token-plan-cn": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+    "xiaomi-token-plan-sgp": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+  };
+
+  for (const role of ["oracle", "contrarian"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    for (const [provider, patterns] of Object.entries(expected)) {
+      assert.deepEqual(
+        preferences[provider],
+        patterns,
+        `${role}/${provider} changed the Pi 1.4.0 Xiaomi tier order`,
+      );
+      for (const pattern of patterns) {
+        assert.ok(
+          firstCatalogMatch(provider, [pattern]),
+          `${role}/${provider} preference ${pattern} is absent from the Pi 1.4.0 catalog`,
+        );
+      }
     }
   }
 });

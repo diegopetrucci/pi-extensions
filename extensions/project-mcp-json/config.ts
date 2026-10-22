@@ -224,7 +224,8 @@ export function parseMcpJson(text: string, env: Record<string, string> = {}): Pa
 
   let root: unknown;
   try {
-    root = JSON.parse(text);
+    const jsonText = text.startsWith("\uFEFF") ? text.slice(1) : text;
+    root = JSON.parse(jsonText);
   } catch {
     // Never include raw parse error text in warnings.
     warnings.push("project-mcp-json: .mcp.json could not be parsed as JSON; skipping all servers");

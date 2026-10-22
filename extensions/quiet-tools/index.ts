@@ -162,12 +162,22 @@ function formatPathArg(args: unknown, theme: RenderTheme, placeholder = "..."): 
   return path ? theme.fg("accent", shortenPath(path)) : theme.fg("toolOutput", placeholder);
 }
 
+function parseReadLineNumber(value: unknown): number | undefined {
+  if (typeof value === "string" && value.trim() !== "") value = Number(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function formatReadLineRange(args: unknown, theme: RenderTheme): string {
-  const offset = numberArg(args, "offset");
-  const limit = numberArg(args, "limit");
-  if (offset === undefined && limit === undefined) return "";
-  const startLine = offset ?? 1;
-  const endLine = limit !== undefined ? startLine + limit - 1 : "";
+  const record = asRecord(args);
+  const offset = record?.offset;
+  const limit = record?.limit;
+  if (offset == null && limit == null) return "";
+  const startLine = offset == null ? 1 : parseReadLineNumber(offset);
+  if (startLine === undefined) return "";
+  if (limit == null) return theme.fg("warning", `:${startLine}`);
+  const count = parseReadLineNumber(limit);
+  if (count === undefined) return "";
+  const endLine = startLine + count - 1;
   return theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
 }
 

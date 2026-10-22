@@ -37,7 +37,7 @@ function createTool(
   };
 }
 
-test("Pi 1.0.4 subagent allowlist: direct-exposure MCP tools are active/callable/defined; write, edit, codemode, non-MCP extension tools, and custom tools remain absent", async (t) => {
+test("Pi 1.4.0 subagent allowlist: direct-exposure MCP tools are active/callable/defined; write, edit, codemode, non-MCP extension tools, and custom tools remain absent", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-child-tool-boundary-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -571,18 +571,47 @@ function assertMcpPositiveControls(session, allowlist, phase) {
   );
 }
 
-function assertRestoredBoundaryPositiveControls(session, allowlist, phase) {
+function assertDeferredBoundaryInactive(session, allowlist, phase, reason) {
+  assert.equal(
+    session.getActiveToolNames().includes("late_deferred"),
+    false,
+    `${phase}: ${reason} must not activate the allowed late_deferred tool`,
+  );
+  if (allowlist && allowlist.includes("mcp__*")) {
+    assert.equal(
+      session.getActiveToolNames().includes("mcp__fixture__deferred"),
+      false,
+      `${phase}: ${reason} must not activate the allowed deferred MCP tool`,
+    );
+  }
+}
+
+function assertExplicitBoundaryIsolation(session, allowlist, phase) {
+  assertBoundaryPositiveControls(session, phase);
+  assertDeferredBoundaryInactive(session, allowlist, phase, "the explicit loadout");
+}
+
+function assertNoTranscriptBoundaryIsolation(session, allowlist, phase) {
+  assertBoundaryPositiveControls(session, phase);
+  assertDeferredBoundaryInactive(session, allowlist, phase, "the absent or empty transcript");
+}
+
+function assertBoundaryActivationPositiveControls(session, allowlist, phase, source) {
   assertBoundaryPositiveControls(session, phase);
   assert.ok(
     session.getActiveToolNames().includes("late_deferred"),
-    `${phase}: restored transcript must activate the allowed late_deferred tool`,
+    `${phase}: ${source} must activate the allowed late_deferred tool`,
   );
   if (allowlist && allowlist.includes("mcp__*")) {
     assert.ok(
       session.getActiveToolNames().includes("mcp__fixture__deferred"),
-      `${phase}: restored transcript must activate the allowed deferred MCP tool`,
+      `${phase}: ${source} must activate the allowed deferred MCP tool`,
     );
   }
+}
+
+function assertRestoredBoundaryPositiveControls(session, allowlist, phase) {
+  assertBoundaryActivationPositiveControls(session, allowlist, phase, "restored transcript");
 }
 
 async function createBoundaryScenario(scenario) {
@@ -745,7 +774,12 @@ async function createBoundaryScenario(scenario) {
 async function createRestoredBoundarySession(
   environment,
   createdSession,
-  { includeTranscript = true, transcriptTools = boundaryToolNames, onExtensionError } = {},
+  {
+    includeTranscript = true,
+    transcriptTools = boundaryToolNames,
+    usesDefaultTools = false,
+    onExtensionError,
+  } = {},
 ) {
   const transcriptSource = SessionManager.inMemory(environment.root);
   if (includeTranscript) {
@@ -805,13 +839,13 @@ async function createRestoredBoundarySession(
     customTools: [createBoundaryTool("custom_fixture_tool")],
     modelRuntime: environment.modelRuntime,
     allowedToolNames: environment.scenario.allowlist,
-    usesDefaultTools: false,
+    usesDefaultTools,
   });
   await session.bindExtensions({ mode: "json", onError: onExtensionError });
   return { session, restorationToolNames };
 }
 
-test("Pi 1.0.4 subagent allowlists survive real reloads, late registrations, and restored transcripts; mcp__* grants access to configured MCP tools", async (t) => {
+test("Pi 1.4.0 subagent allowlists preserve explicit loadouts and restore default-tool transcripts across reloads; mcp__* grants access to configured MCP tools", async (t) => {
   const scenarios = [
     { name: "empty allowlist", allowlist: [] },
     {
@@ -841,9 +875,12 @@ test("Pi 1.0.4 subagent allowlists survive real reloads, late registrations, and
       const environment = await createBoundaryScenario(scenario);
       caseTest.after(() => rm(environment.root, { recursive: true, force: true }));
       let created;
-      let restored;
+      let explicitRestored;
+      let defaultRestored;
       let absentTranscript;
       let emptyTranscript;
+      let defaultAbsentTranscript;
+      let defaultEmptyTranscript;
       const extensionErrors = [];
       const captureExtensionError = (error) => extensionErrors.push(error);
       try {
@@ -938,80 +975,227 @@ test("Pi 1.0.4 subagent allowlists survive real reloads, late registrations, and
         if (scenario.positive)
           assertBoundaryPositiveControls(created.session, "attempted reactivation");
 
-        const restoredResult = await createRestoredBoundarySession(environment, created.session, {
+        // Pi 1.4.0 must not let a transcript override an explicitly selected loadout.
+        const explicitResult = await createRestoredBoundarySession(environment, created.session, {
+          usesDefaultTools: false,
           onExtensionError: captureExtensionError,
         });
-        restored = restoredResult.session;
+        explicitRestored = explicitResult.session;
         assert.equal(boundaryToolNames.length, 15, "boundary fixture must declare 15 tools");
         assert.deepEqual(
-          restoredResult.restorationToolNames,
+          explicitResult.restorationToolNames,
           boundaryToolNames,
-          "restoration input must retain all 15 declared fixture tools",
+          "explicit-loadout restoration input must retain all 15 declared fixture tools",
         );
-        assertBoundarySurface(restored, scenario.allowlist, "restored transcript");
-        assertMcpPositiveControls(restored, scenario.allowlist, "restored transcript");
+        assertBoundarySurface(explicitRestored, scenario.allowlist, "explicit loadout transcript");
+        assertMcpPositiveControls(
+          explicitRestored,
+          scenario.allowlist,
+          "explicit loadout transcript",
+        );
         if (scenario.positive)
-          assertRestoredBoundaryPositiveControls(
-            restored,
+          assertExplicitBoundaryIsolation(
+            explicitRestored,
             scenario.allowlist,
-            "restored transcript",
+            "explicit loadout transcript",
           );
-        await restored.reload();
-        assertBoundarySurface(restored, scenario.allowlist, "restored transcript reload");
-        assertMcpPositiveControls(restored, scenario.allowlist, "restored transcript reload");
+        await explicitRestored.reload();
+        assertBoundarySurface(
+          explicitRestored,
+          scenario.allowlist,
+          "explicit loadout transcript reload",
+        );
+        assertMcpPositiveControls(
+          explicitRestored,
+          scenario.allowlist,
+          "explicit loadout transcript reload",
+        );
         if (scenario.positive)
-          assertRestoredBoundaryPositiveControls(
-            restored,
+          assertExplicitBoundaryIsolation(
+            explicitRestored,
             scenario.allowlist,
-            "restored transcript reload",
+            "explicit loadout transcript reload",
           );
-        restored.setActiveToolsByName(boundaryToolNames);
-        assertBoundarySurface(restored, scenario.allowlist, "restored attempted reactivation");
-        assertMcpPositiveControls(restored, scenario.allowlist, "restored attempted reactivation");
+        explicitRestored.setActiveToolsByName(boundaryToolNames);
+        assertBoundarySurface(
+          explicitRestored,
+          scenario.allowlist,
+          "explicit loadout attempted reactivation",
+        );
+        assertMcpPositiveControls(
+          explicitRestored,
+          scenario.allowlist,
+          "explicit loadout attempted reactivation",
+        );
+        if (scenario.positive)
+          assertBoundaryActivationPositiveControls(
+            explicitRestored,
+            scenario.allowlist,
+            "explicit loadout attempted reactivation",
+            "explicit activation",
+          );
+
+        // Pi 1.4.0 restores the transcript loadout for sessions using default tools.
+        const defaultResult = await createRestoredBoundarySession(environment, created.session, {
+          usesDefaultTools: true,
+          onExtensionError: captureExtensionError,
+        });
+        defaultRestored = defaultResult.session;
+        assert.deepEqual(
+          defaultResult.restorationToolNames,
+          boundaryToolNames,
+          "default-tools restoration input must retain all 15 declared fixture tools",
+        );
+        assertBoundarySurface(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored transcript",
+        );
+        assertMcpPositiveControls(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored transcript",
+        );
         if (scenario.positive)
           assertRestoredBoundaryPositiveControls(
-            restored,
+            defaultRestored,
             scenario.allowlist,
-            "restored attempted reactivation",
+            "default-tools restored transcript",
+          );
+        await defaultRestored.reload();
+        assertBoundarySurface(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored transcript reload",
+        );
+        assertMcpPositiveControls(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored transcript reload",
+        );
+        if (scenario.positive)
+          assertRestoredBoundaryPositiveControls(
+            defaultRestored,
+            scenario.allowlist,
+            "default-tools restored transcript reload",
+          );
+        defaultRestored.setActiveToolsByName(boundaryToolNames);
+        assertBoundarySurface(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored attempted reactivation",
+        );
+        assertMcpPositiveControls(
+          defaultRestored,
+          scenario.allowlist,
+          "default-tools restored attempted reactivation",
+        );
+        if (scenario.positive)
+          assertRestoredBoundaryPositiveControls(
+            defaultRestored,
+            scenario.allowlist,
+            "default-tools restored attempted reactivation",
           );
 
         if (scenario.positive) {
           const absentResult = await createRestoredBoundarySession(environment, created.session, {
             includeTranscript: false,
+            usesDefaultTools: false,
             onExtensionError: captureExtensionError,
           });
           absentTranscript = absentResult.session;
           assert.deepEqual(
             absentResult.restorationToolNames,
             [],
-            "absent transcript must provide no restoration tools",
+            "explicit absent transcript must provide no restoration tools",
           );
           assertBoundarySurface(absentTranscript, scenario.allowlist, "absent transcript");
-          assertBoundaryPositiveControls(absentTranscript, "absent transcript");
           assertMcpPositiveControls(absentTranscript, scenario.allowlist, "absent transcript");
-          assert.equal(
-            absentTranscript.getActiveToolNames().includes("late_deferred"),
-            false,
-            "deferred tool must stay inactive without transcript restoration",
+          assertNoTranscriptBoundaryIsolation(
+            absentTranscript,
+            scenario.allowlist,
+            "absent transcript",
           );
 
           const emptyResult = await createRestoredBoundarySession(environment, created.session, {
             transcriptTools: [],
+            usesDefaultTools: false,
             onExtensionError: captureExtensionError,
           });
           emptyTranscript = emptyResult.session;
           assert.deepEqual(
             emptyResult.restorationToolNames,
             [],
-            "empty transcript must provide no restoration tools",
+            "explicit empty transcript must provide no restoration tools",
           );
           assertBoundarySurface(emptyTranscript, scenario.allowlist, "empty transcript");
-          assertBoundaryPositiveControls(emptyTranscript, "empty transcript");
           assertMcpPositiveControls(emptyTranscript, scenario.allowlist, "empty transcript");
-          assert.equal(
-            emptyTranscript.getActiveToolNames().includes("late_deferred"),
-            false,
-            "deferred tool must stay inactive with an empty transcript",
+          assertNoTranscriptBoundaryIsolation(
+            emptyTranscript,
+            scenario.allowlist,
+            "empty transcript",
+          );
+
+          const defaultAbsentResult = await createRestoredBoundarySession(
+            environment,
+            created.session,
+            {
+              includeTranscript: false,
+              usesDefaultTools: true,
+              onExtensionError: captureExtensionError,
+            },
+          );
+          defaultAbsentTranscript = defaultAbsentResult.session;
+          assert.deepEqual(
+            defaultAbsentResult.restorationToolNames,
+            [],
+            "default-tools absent transcript must provide no restoration tools",
+          );
+          assertBoundarySurface(
+            defaultAbsentTranscript,
+            scenario.allowlist,
+            "default-tools absent transcript",
+          );
+          assertMcpPositiveControls(
+            defaultAbsentTranscript,
+            scenario.allowlist,
+            "default-tools absent transcript",
+          );
+          assertNoTranscriptBoundaryIsolation(
+            defaultAbsentTranscript,
+            scenario.allowlist,
+            "default-tools absent transcript",
+          );
+
+          const defaultEmptyResult = await createRestoredBoundarySession(
+            environment,
+            created.session,
+            {
+              transcriptTools: [],
+              usesDefaultTools: true,
+              onExtensionError: captureExtensionError,
+            },
+          );
+          defaultEmptyTranscript = defaultEmptyResult.session;
+          assert.deepEqual(
+            defaultEmptyResult.restorationToolNames,
+            [],
+            "default-tools empty transcript must provide no restoration tools",
+          );
+          assertBoundarySurface(
+            defaultEmptyTranscript,
+            scenario.allowlist,
+            "default-tools empty transcript",
+          );
+          assertMcpPositiveControls(
+            defaultEmptyTranscript,
+            scenario.allowlist,
+            "default-tools empty transcript",
+          );
+          assertNoTranscriptBoundaryIsolation(
+            defaultEmptyTranscript,
+            scenario.allowlist,
+            "default-tools empty transcript",
           );
         }
 
@@ -1041,9 +1225,12 @@ test("Pi 1.0.4 subagent allowlists survive real reloads, late registrations, and
           "restored loadout checks must not contact a provider",
         );
       } finally {
+        defaultEmptyTranscript?.dispose();
+        defaultAbsentTranscript?.dispose();
         emptyTranscript?.dispose();
         absentTranscript?.dispose();
-        restored?.dispose();
+        defaultRestored?.dispose();
+        explicitRestored?.dispose();
         created?.session.dispose();
       }
     });

@@ -130,6 +130,32 @@ test("quiet-tools formats focused call summaries for built-in tools without mult
   }
 });
 
+test("quiet-tools read ranges match Pi semantics for numeric and malformed values", () => {
+  const base = "<toolTitle>*read*</toolTitle> <accent>README.md</accent>";
+  const read = (args) => formatQuietCallLine("read", { path: "README.md", ...args }, theme);
+
+  assert.equal(read({ offset: "10", limit: 5 }), `${base}<warning>:10-14</warning>`);
+  assert.equal(read({ offset: 10, limit: 5 }), `${base}<warning>:10-14</warning>`);
+  assert.equal(read({ limit: 5 }), `${base}<warning>:1-5</warning>`);
+  assert.equal(read({ offset: null, limit: 5 }), `${base}<warning>:1-5</warning>`);
+  assert.equal(read({ offset: "10" }), `${base}<warning>:10</warning>`);
+  assert.equal(read({ offset: 10, limit: null }), `${base}<warning>:10</warning>`);
+  assert.equal(read({}), base);
+  assert.equal(read({ offset: null, limit: null }), base);
+
+  for (const args of [
+    { offset: "", limit: 5 },
+    { offset: "not-a-number", limit: 5 },
+    { offset: Number.NaN, limit: 5 },
+    { offset: Number.POSITIVE_INFINITY, limit: 5 },
+    { offset: 10, limit: "not-a-number" },
+    { offset: 10, limit: Number.NaN },
+    { offset: 10, limit: Number.POSITIVE_INFINITY },
+  ]) {
+    assert.equal(read(args), base, JSON.stringify(args));
+  }
+});
+
 test("formatMcpCallLine renders tool name + compact JSON args on one line", () => {
   assert.equal(
     formatMcpCallLine("mcp__server__tool", { key: "value" }, theme),

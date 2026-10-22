@@ -201,6 +201,21 @@ test("parseMcpJson: malformed JSON returns empty servers and a warning", () => {
   }
 });
 
+test("parseMcpJson: leading UTF-8 BOM is accepted", () => {
+  const input = json({ bomServer: { type: "stdio", command: "node" } });
+  assert.deepEqual(parseMcpJson(`\uFEFF${input}`), parseMcpJson(input));
+});
+
+test("parseMcpJson: malformed JSON with leading UTF-8 BOM returns empty servers and a warning", () => {
+  const result = parseMcpJson("\uFEFF{not valid json}");
+  assert.equal(result.servers.length, 0);
+  assert.ok(result.warnings.length > 0);
+  // Warning must not contain the raw JSON text
+  for (const w of result.warnings) {
+    assert.ok(!w.includes("not valid json"), `warning leaks JSON content: ${w}`);
+  }
+});
+
 test("parseMcpJson: non-object root returns empty servers and a warning", () => {
   const result = parseMcpJson('"just a string"');
   assert.equal(result.servers.length, 0);
