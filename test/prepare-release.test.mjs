@@ -489,16 +489,33 @@ test("changed inputs cannot reuse stale managed document evidence or mutate mani
   const checklist = await readFile(path.join(root, "docs/publish-checklist-v1.1.0.md"), "utf8");
   assert.match(
     checklist,
-    /## Agent-safe follow-up actions\n\n- \[ \] commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/,
+    /## Agent-safe follow-up actions\n\n- \[ \] obtain explicit user approval before any commit-creating command, then commit release prep changes outside this tool\n- \[ \] tag the release outside this tool\n- \[ \] push the branch and tag outside this tool\n- \[ \] create the GitHub release outside this tool/,
   );
   assert.match(
     checklist,
-    /## Human-only release actions\n\n- \[ \] dispatch the trusted `publish\.yml` workflow from `main` with the exact release tag in both confirmation fields\n- \[ \] inspect the verified package plan and approve the `npm-release` environment deployment/,
+    /## Authorized trusted OIDC release actions\n\n- \[ \] with an explicit user release request, run `scripts\/publish-release\.mjs v1\.1\.0 --dry-run` and review the exact tag, body, package, and tarball evidence/,
   );
-  assert.doesNotMatch(
+  assert.match(
     checklist,
-    /Human-only release actions[\s\S]*commit, tag, push, and create the GitHub release/s,
+    /dispatch the trusted `publish\.yml` workflow only when the authenticated GitHub identity is permitted, from verified `main`, with the exact release tag in both `release_tag` and `confirmation` fields/,
   );
+  assert.match(
+    checklist,
+    /approve the protected `npm-release` environment deployment only with an eligible authenticated GitHub identity; required reviewers, `main` branch restrictions, and no-self-review protections remain enforced/,
+  );
+  assert.match(
+    checklist,
+    /if GitHub rejects the identity's dispatch or approval, escalate to an eligible human; never bypass or disable protection/,
+  );
+  assert.match(
+    checklist,
+    /let the workflow publish through npm OIDC only; never run local `npm publish` or use legacy npm token\/OTP credentials/,
+  );
+  assert.match(
+    checklist,
+    /after verified workflow publication success, wait five minutes before post-publish registry\/package-page or npm-install verification/,
+  );
+  assert.doesNotMatch(checklist, /Human-only release actions/);
   const manifestPath = path.join(root, "packages/a/package.json");
   const before = await readFile(manifestPath);
   input.versions["@example/a"] = "1.2.0";
