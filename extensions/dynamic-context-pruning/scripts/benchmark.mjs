@@ -220,7 +220,8 @@ async function findJsonlFilesRecursive(rootPath) {
     let entries;
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      console.error(`warning: could not read ${currentPath}: ${error.message}`);
       return;
     }
     for (const entry of entries) {

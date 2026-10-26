@@ -161,16 +161,18 @@ test("brrr subscribes to settled runs and reads the final assistant message from
   assert.equal(handlers.has("agent_end"), false);
 
   await handlers.get("agent_settled")(
-    {
-      messages: [{ role: "assistant", content: "stale agent_end reply" }],
-    },
+    { type: "agent_settled", aborted: false },
     createSettledContext({
       cwd: projectDir,
-      messages: [{ role: "assistant", content: "final settled reply" }],
+      messages: [
+        { role: "assistant", content: "older reply" },
+        { role: "assistant", content: "final settled reply" },
+      ],
     }),
   );
 
   const [{ options }] = fetchCalls;
+  assert.equal(options.redirect, "error");
   assert.deepEqual(JSON.parse(options.body), {
     title: "Pi finished",
     message: "final settled reply",
@@ -270,9 +272,7 @@ test("brrr uses trusted project config over global config and formats webhook pa
   const handler = handlers.get("agent_settled");
   assert.equal(typeof handler, "function");
 
-  const event = {
-    messages: [{ role: "assistant", content: "This should be ignored by the fallback template." }],
-  };
+  const event = { type: "agent_settled", aborted: false };
 
   await handler(event, {
     cwd: projectDir,
@@ -339,7 +339,7 @@ test("brrr resolves $ENV and ${ENV} webhook references when sending notification
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -357,7 +357,7 @@ test("brrr resolves $ENV and ${ENV} webhook references when sending notification
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -407,7 +407,7 @@ test("brrr skips disabled, non-interactive, and invalid webhook configurations",
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -423,7 +423,7 @@ test("brrr skips disabled, non-interactive, and invalid webhook configurations",
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: false,
@@ -439,7 +439,7 @@ test("brrr skips disabled, non-interactive, and invalid webhook configurations",
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -456,7 +456,7 @@ test("brrr skips disabled, non-interactive, and invalid webhook configurations",
   });
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -492,7 +492,7 @@ test("brrr falls back to the valid config and warns when project config JSON is 
   assert.equal(typeof handler, "function");
 
   await handler(
-    { messages: [] },
+    { type: "agent_settled", aborted: false },
     {
       cwd: projectDir,
       hasUI: true,
@@ -521,6 +521,100 @@ test("brrr falls back to the valid config and warns when project config JSON is 
   );
 });
 
+for (const [field, value] of Object.entries({
+  enabled: "false",
+  onlyWhenInteractive: "false",
+  webhook: 42,
+  idleSeconds: "0",
+  title: null,
+  message: {},
+  includeLastAssistantMessage: "false",
+  sound: [],
+  openUrl: false,
+  imageUrl: 42,
+})) {
+  test(`brrr warns and uses the default for a wrong-typed ${field}`, async (t) => {
+    const { agentDir, projectDir } = setupTempDirs(t);
+    setAgentDirEnv(t, agentDir);
+    setEnvVar(t, "BRRR_WEBHOOK_URL", "https://api.brrr.now/v1/br_defaults");
+    const configPath = path.join(agentDir, "extensions", "brrr.json");
+    writeBrrrConfig(configPath, {
+      webhook: "https://api.brrr.now/v1/br_defaults",
+      idleSeconds: null,
+      [field]: value,
+    });
+
+    const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+    const consoleErrors = captureConsoleErrors(t);
+    const brrrExtension = await loadFreshExtension("extensions/brrr/index.ts");
+    const { pi, handlers, commands } = createExtensionHarness();
+    brrrExtension(pi);
+
+    const { ctx, notifications } = createCommandContext({ cwd: projectDir });
+    await getBrrrCommand(commands).handler([], ctx);
+    assert.equal(
+      notifications[0].message,
+      `brrr is enabled; webhook configured; idle threshold ${field === "idleSeconds" ? "20s" : "off"}.`,
+    );
+
+    const context = createSettledContext({
+      cwd: projectDir,
+      messages:
+        field === "includeLastAssistantMessage"
+          ? [{ role: "assistant", content: "Settled reply" }]
+          : [],
+    });
+    const event = { type: "agent_settled", aborted: false };
+    await handlers.get("agent_settled")(event, { ...context, hasUI: false });
+    assert.equal(fetchCalls.length, 0);
+    await handlers.get("agent_settled")(event, context);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, "https://api.brrr.now/v1/br_defaults");
+    assert.deepEqual(JSON.parse(fetchCalls[0].options.body), {
+      title: "Pi finished",
+      message:
+        field === "includeLastAssistantMessage"
+          ? "Settled reply"
+          : "Pi finished working in 'sample-project'.",
+    });
+    assert.deepEqual(
+      consoleErrors,
+      Array(3).fill(`Warning: Invalid config in ${configPath}: wrong type for ${field}.`),
+    );
+  });
+}
+
+for (const root of [null, [], 42, "config"]) {
+  test(`brrr warns and ignores a non-object config root: ${JSON.stringify(root)}`, async (t) => {
+    const { agentDir, projectDir } = setupTempDirs(t);
+    setAgentDirEnv(t, agentDir);
+    writeBrrrConfig(path.join(agentDir, "extensions", "brrr.json"), {
+      webhook: "https://api.brrr.now/v1/br_global",
+      idleSeconds: null,
+      message: "Global fallback",
+    });
+    const configPath = path.join(projectDir, CONFIG_DIR_NAME, "brrr.json");
+    writeBrrrConfig(configPath, root);
+
+    const fetchCalls = patchFetch(t, async () => ({ status: 202 }));
+    const consoleErrors = captureConsoleErrors(t);
+    const brrrExtension = await loadFreshExtension("extensions/brrr/index.ts");
+    const { pi, handlers } = createExtensionHarness();
+    brrrExtension(pi);
+    await handlers.get("agent_settled")(
+      { type: "agent_settled", aborted: false },
+      createSettledContext({ cwd: projectDir }),
+    );
+
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, "https://api.brrr.now/v1/br_global");
+    assert.equal(JSON.parse(fetchCalls[0].options.body).message, "Global fallback");
+    assert.deepEqual(consoleErrors, [
+      `Warning: Invalid config in ${configPath}: expected an object.`,
+    ]);
+  });
+}
+
 test("brrr extracts only text parts from the latest structured assistant message", async (t) => {
   const { agentDir, projectDir } = setupTempDirs(t);
   setAgentDirEnv(t, agentDir);
@@ -543,7 +637,9 @@ test("brrr extracts only text parts from the latest structured assistant message
   assert.equal(typeof handler, "function");
 
   await handler(
-    {
+    { type: "agent_settled", aborted: false },
+    createSettledContext({
+      cwd: projectDir,
       messages: [
         { role: "assistant", content: "Older reply that should not be used." },
         {
@@ -556,12 +652,7 @@ test("brrr extracts only text parts from the latest structured assistant message
           ],
         },
       ],
-    },
-    {
-      cwd: projectDir,
-      hasUI: true,
-      isProjectTrusted: () => true,
-    },
+    }),
   );
 
   const [{ options }] = fetchCalls;
@@ -593,7 +684,9 @@ test("brrr skips empty latest assistant content and falls back to the configured
   assert.equal(typeof handler, "function");
 
   await handler(
-    {
+    { type: "agent_settled", aborted: false },
+    createSettledContext({
+      cwd: projectDir,
       messages: [
         { role: "assistant", content: "Older reply that should be ignored." },
         {
@@ -605,12 +698,7 @@ test("brrr skips empty latest assistant content and falls back to the configured
           ],
         },
       ],
-    },
-    {
-      cwd: projectDir,
-      hasUI: true,
-      isProjectTrusted: () => true,
-    },
+    }),
   );
 
   const [{ options }] = fetchCalls;
@@ -649,17 +737,14 @@ test("brrr uses the last assistant message, truncates payloads, and logs webhook
   const assistantMessage = `${"x".repeat(805)}\n`;
   await assert.doesNotReject(() =>
     handler(
-      {
+      { type: "agent_settled", aborted: false },
+      createSettledContext({
+        cwd: projectDir,
         messages: [
           { role: "user", content: "Ignore me" },
           { role: "assistant", content: assistantMessage },
         ],
-      },
-      {
-        cwd: projectDir,
-        hasUI: true,
-        isProjectTrusted: () => true,
-      },
+      }),
     ),
   );
 
