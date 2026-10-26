@@ -451,6 +451,28 @@ test("minimal-footer loadConfig prefers trusted project config over global confi
   });
 });
 
+for (const root of [null, []]) {
+  test(`minimal-footer loadConfig warns and uses defaults for a ${root === null ? "null" : "array"} root`, (t) => {
+    const { agentDir, projectDir } = setupTempDirs(t);
+    const context = {
+      cwd: projectDir,
+      isProjectTrusted() {
+        return false;
+      },
+    };
+    const defaults = loadConfig(context);
+    const configPath = path.join(agentDir, "extensions", "minimal-footer.json");
+    writeJson(configPath, root);
+
+    const { result, messages } = captureConsoleError(() => loadConfig(context));
+
+    assert.deepEqual(result, defaults);
+    assert.equal(messages.length, 1);
+    assert.ok(messages[0].startsWith(`Warning: Could not parse ${configPath}:`));
+    assert.match(messages[0], /Expected a non-null, non-array object/);
+  });
+}
+
 test("minimal-footer defaults dumb-zone threshold to 350k and warns only above the threshold", (t) => {
   const { projectDir } = setupTempDirs(t);
   const config = loadConfig({

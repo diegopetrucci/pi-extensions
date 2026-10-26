@@ -66,7 +66,24 @@ function readConfigFile(path: string): Partial<BrrrConfig> {
   if (!existsSync(path)) return {};
 
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as Partial<BrrrConfig>;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      console.error(`Warning: Invalid config in ${path}: expected an object.`);
+      return {};
+    }
+
+    const fields = parsed as Record<string, unknown>;
+    const config: Record<string, unknown> = {};
+    for (const [field, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
+      if (!Object.hasOwn(fields, field)) continue;
+      const value = fields[field];
+      if (typeof value === typeof defaultValue || (field === "idleSeconds" && value === null)) {
+        config[field] = value;
+      } else {
+        console.error(`Warning: Invalid config in ${path}: wrong type for ${field}.`);
+      }
+    }
+    return config as Partial<BrrrConfig>;
   } catch (error) {
     console.error(`Warning: Could not parse ${path}: ${error}`);
     return {};
@@ -196,15 +213,6 @@ function sessionMessages(sessionManager: SessionMessageSource | undefined): read
     .flatMap((entry: SessionEntry) => (entry.type === "message" ? [entry.message] : []));
 }
 
-function resolveAssistantMessage(
-  sessionManager: SessionMessageSource | undefined,
-  fallbackMessages: readonly unknown[],
-): string | undefined {
-  return (
-    lastAssistantMessage(sessionMessages(sessionManager)) ?? lastAssistantMessage(fallbackMessages)
-  );
-}
-
 function truncateMessage(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 800) return trimmed;
@@ -227,6 +235,7 @@ async function sendBrrr(
 
     const response = await fetch(webhook, {
       method: "POST",
+      redirect: "error",
       headers: {
         "content-type": "application/json",
         accept: "application/json",
@@ -274,7 +283,7 @@ export default function brrrExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("agent_settled", async (event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
     const config = loadConfig(ctx);
     if (!config.enabled) return;
     if (config.onlyWhenInteractive && !ctx.hasUI) return;
@@ -284,10 +293,7 @@ export default function brrrExtension(pi: ExtensionAPI) {
     if (await shouldSkipForIdleThreshold(config.idleSeconds)) return;
 
     const assistantMessage = config.includeLastAssistantMessage
-      ? resolveAssistantMessage(
-          ctx.sessionManager,
-          (event as { messages?: readonly unknown[] }).messages ?? [],
-        )
+      ? lastAssistantMessage(sessionMessages(ctx.sessionManager))
       : undefined;
     const message = truncateMessage(assistantMessage || formatTemplate(config.message, ctx.cwd));
     const result = await sendBrrr(webhook, {
