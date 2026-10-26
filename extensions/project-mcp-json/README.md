@@ -42,9 +42,10 @@ mirroring the logic Pi uses for its own `.pi/` config resources.
 ### Decision order (evaluated each session)
 
 1. **Project not trusted** (`/trust` has not been granted) → skip silently.
-2. **Project has Pi resources** (e.g. `.pi/mcp.json`, `.pi/extensions/`,
-   `.agents/skills/` in the project or an ancestor) → Pi already made a
-   genuine trust decision for this project; load `.mcp.json` as well.
+2. **Project has Pi resources** (e.g. `.pi/mcp.json` or `.pi/extensions/` in
+   the project directory itself, or `.agents/skills/` in the project or an
+   ancestor, excluding `~/.agents/skills/`) → Pi already made a genuine trust
+   decision for this project; load `.mcp.json` as well.
 3. **Saved trust decision** — check `~/.pi/agent/trust.json` for the nearest
    ancestor of the project directory:
    - `true` → load.
