@@ -12,9 +12,6 @@ const ANTHROPIC_PROVIDER_ID = "anthropic";
 const ANTHROPIC_API_ID = "anthropic-messages";
 const ANTHROPIC_FAST_SPEED = "fast";
 const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
-const CLAUDE_CODE_OAUTH_BETAS = ["claude-code-20250219", "oauth-2025-04-20"];
-const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
-const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const ANTHROPIC_SUPPORTED_MODELS = new Set(["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"]);
 
 const OPENAI_PROVIDER_ID = "openai-codex";
@@ -78,11 +75,6 @@ type RecursivePartial<T> = {
 };
 
 type PayloadRecord = Record<string, unknown>;
-
-type AnthropicHeaderCompat = {
-  forceAdaptiveThinking?: boolean;
-  supportsEagerToolInputStreaming?: boolean;
-};
 
 type Eligibility = {
   eligible: boolean;
@@ -368,67 +360,17 @@ function getStatusMessage(ctx: ExtensionContext, state: SessionState): string {
   return `Fast mode is ${describeMode(state)}. Current model: ${eligibility.modelKey}.${injected}`;
 }
 
-function splitBetaHeader(value: string | null | undefined): string[] {
-  return (value ?? "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-async function isAnthropicOAuth(ctx: ExtensionContext): Promise<boolean> {
-  try {
-    const resolution = await ctx.modelRegistry.getProviderAuth(ANTHROPIC_PROVIDER_ID);
-    const apiKey = resolution?.auth.apiKey;
-    if (typeof apiKey === "string") return apiKey.includes("sk-ant-oat");
-  } catch {
-    // Fall back to the synchronous registry snapshot below.
-  }
-
-  return ctx.model ? ctx.modelRegistry.isUsingOAuth(ctx.model) : false;
-}
-
-function getAnthropicProviderBetas(ctx: ExtensionContext, hasActiveTools: boolean): string[] {
-  const model = ctx.model;
-  if (!model) return [];
-  const compat = model.compat as AnthropicHeaderCompat | undefined;
-
-  const betas: string[] = [];
-  if (hasActiveTools && compat?.supportsEagerToolInputStreaming === false) {
-    betas.push(FINE_GRAINED_TOOL_STREAMING_BETA);
-  }
-  if (compat?.forceAdaptiveThinking !== true) {
-    betas.push(INTERLEAVED_THINKING_BETA);
-  }
-  return betas;
-}
-
-async function injectAnthropicFastHeader(
-  headers: Record<string, string | null>,
-  ctx: ExtensionContext,
-  state: SessionState,
-  hasActiveTools: boolean,
-): Promise<void> {
-  if (state.ultrafast || !isFastEnabled(state)) return;
-  const eligibility = getEligibility(ctx, false);
-  if (!eligibility.eligible || eligibility.provider !== "anthropic") return;
-
-  const matchingKeys = Object.keys(headers).filter(
-    (name) => name.toLowerCase() === "anthropic-beta",
-  );
-  const existing = matchingKeys.flatMap((name) => splitBetaHeader(headers[name]));
-  const matchingModelEntries = Object.entries(ctx.model?.headers ?? {}).filter(
-    ([name]) => name.toLowerCase() === "anthropic-beta",
-  );
-  const modelBetas = matchingModelEntries.flatMap(([, value]) => splitBetaHeader(value));
-  const providerBetas = getAnthropicProviderBetas(ctx, hasActiveTools);
-  const oauthBetas = (await isAnthropicOAuth(ctx)) ? CLAUDE_CODE_OAUTH_BETAS : [];
-  const next = Array.from(
-    new Set([...modelBetas, ...existing, ...oauthBetas, ...providerBetas, ANTHROPIC_FAST_BETA]),
-  );
-
-  for (const key of matchingKeys) delete headers[key];
-  const outputKey = matchingModelEntries.at(-1)?.[0] ?? "anthropic-beta";
-  headers[outputKey] = next.join(",");
+/**
+ * Adds the Fast beta to the request's `betas` list instead of rewriting the
+ * `anthropic-beta` header. Pi derives the final beta list from the model and
+ * request (mid-conversation effort, server-side fallback, inline tools, OAuth,
+ * interleaved thinking, ...) and treats an explicit `anthropic-beta` header as
+ * the complete list, so setting that header here would drop any beta this
+ * extension does not know about.
+ */
+function withAnthropicFastBeta(betas: unknown[] | undefined): unknown[] {
+  const existing = betas ?? [];
+  return existing.includes(ANTHROPIC_FAST_BETA) ? existing : [...existing, ANTHROPIC_FAST_BETA];
 }
 
 function injectUltrafastPayload(
@@ -461,9 +403,10 @@ function injectFastPayload(
 
   if (eligibility.provider === "anthropic") {
     if ("speed" in payload) return undefined;
+    if (payload.betas !== undefined && !Array.isArray(payload.betas)) return undefined;
     state.lastInjectedAt = Date.now();
     state.lastInjectedModel = eligibility.modelKey;
-    return { ...payload, speed: ANTHROPIC_FAST_SPEED };
+    return { ...payload, speed: ANTHROPIC_FAST_SPEED, betas: withAnthropicFastBeta(payload.betas) };
   }
 
   if ("service_tier" in payload) return undefined;
@@ -550,12 +493,6 @@ export default function fastExtension(pi: ExtensionAPI) {
       }
     }
     updateStatus(ctx, state);
-  });
-
-  pi.on("before_provider_headers", async (event, ctx) => {
-    const hasActiveTools =
-      typeof pi.getActiveTools === "function" && pi.getActiveTools().length > 0;
-    await injectAnthropicFastHeader(event.headers, ctx, getState(ctx), hasActiveTools);
   });
 
   pi.on("before_provider_request", (event, ctx) => {
