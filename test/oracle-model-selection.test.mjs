@@ -137,12 +137,12 @@ test("oracle auto-selection stays on the current provider when it has no reasoni
   );
 });
 
-test("Oracle maps actual Pi 0.87.1 GPT-6 Sol to high while Astra and Opus 5.5 remain xhigh", async () => {
+test("Oracle maps actual Pi 1.4.0 GPT-6 Sol to high while Astra and Opus 5.5 remain xhigh", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
   const sol = getBuiltinModels("openai").find((model) => model.id === "gpt-6-sol");
   const astra = getBuiltinModels("openai").find((model) => model.id === "gpt-6-astra");
   const opus = getBuiltinModels("anthropic").find((model) => model.id === "claude-opus-5-5");
-  assert.ok(sol && astra && opus, "expected Pi 0.87.1 frontier models in the pinned catalog");
+  assert.ok(sol && astra && opus, "expected Pi 1.4.0 frontier models in the pinned catalog");
 
   assert.equal(resolveThinkingLevel(sol, undefined).effective, "high");
   assert.equal(resolveThinkingLevel(astra, undefined).effective, "xhigh");
@@ -234,6 +234,25 @@ test("oracle thinking-level resolution clamps unsupported levels for matched mod
 });
 
 const WEAKER_SIBLING_CASES = [
+  ["google", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["google-vertex", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["opencode", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["openrouter", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
+  ["vercel-ai-gateway", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
+  ["azure", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+  ["openai", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+  ["vercel-ai-gateway", "openai/gpt-5.3-codex", "openai/gpt-5.3-codex-fast"],
+  ["cloudflare-workers-ai", "@cf/zai-org/glm-5.3", "@cf/zai-org/glm-5.3-flash"],
+  [
+    "cloudflare-ai-gateway",
+    "workers-ai/@cf/zai-org/glm-5.3",
+    "workers-ai/@cf/zai-org/glm-5.3-flash",
+  ],
+  ["openrouter", "z-ai/glm-5.3", "z-ai/glm-5.3-flash"],
+  ["vercel-ai-gateway", "zai/glm-5.3", "zai/glm-5.3-flash"],
+  ["vercel-ai-gateway", "openai/gpt-5.4", "openai/gpt-5.4-mini"],
+  ["vercel-ai-gateway", "openai/gpt-5.4", "openai/gpt-5.4-nano"],
+  ["zai", "glm-5.2", "glm-5.2-highspeed"],
   ["google", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
   ["google-vertex", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
   ["meta", "muse-spark-1.3", "muse-spark-1.3-contributor"],

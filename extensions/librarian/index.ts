@@ -1057,6 +1057,9 @@ function getBlockedBashReason(
   command: string,
   options: { workspace: string; cacheRoot: string; cacheEnabled: boolean },
 ): string | undefined {
+  if (/`/.test(command) || /\$\(/.test(command))
+    return "Librarian bash blocks command substitution.";
+
   if (!options.cacheEnabled && command.includes(options.cacheRoot)) {
     return "Local repo checkout cache is disabled for this Librarian call.";
   }
@@ -1069,6 +1072,13 @@ function getBlockedBashReason(
     /(^|[\n;&|()])\s*(?:sudo|su|rm|rmdir|mv|cp|chmod|chown|dd|truncate|killall|pkill|launchctl|osascript|pbcopy|pbpaste|eval|exec|xargs)(?=$|[\s;&|()])/;
   if (destructiveLocal.test(scan))
     return "Librarian bash blocks destructive/local side-effect commands.";
+
+  if (
+    /(^|[\n;&|()])\s*find(?=\s)[^\n;&|]*\s-(?:delete|exec|execdir|ok|okdir)(?=$|[\s;&|()])/.test(
+      scan,
+    )
+  )
+    return "Librarian bash blocks find actions that delete files or execute commands.";
 
   const extraNetworkOrShell =
     /(^|[\n;&|()])\s*(?:curl|wget|nc|netcat|ssh|scp|sftp|rsync|bash|sh|zsh|fish|python|python3|perl|ruby|node|deno)(?=$|[\s;&|()])/;

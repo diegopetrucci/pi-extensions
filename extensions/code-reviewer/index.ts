@@ -91,7 +91,7 @@ const AZURE_MODEL_PREFERENCES = [
   "gpt-5.5",
   "gpt-5.4-pro",
   "gpt-5.4",
-  "gpt-5.3-codex",
+  "gpt-5.3-codex ",
   "gpt-5-pro",
   "gpt-5-chat-latest",
   "gpt-5.2-pro",
@@ -159,7 +159,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-opus-5.5",
     "claude-opus-5",
     "gpt-5.4",
-    "gpt-5.3-codex",
+    "gpt-5.3-codex ",
     "grok-4.7 ",
     "grok-4.7",
     "grok-4.6",
@@ -183,7 +183,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-opus-5",
     "gpt-5.4-pro",
     "gpt-5.4",
-    "gpt-5.3-codex",
+    "gpt-5.3-codex ",
   ],
   "opencode-go": ["grok-4.7 ", "grok-4.7"],
   openrouter: [
@@ -225,7 +225,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-opus-5-5",
     "claude-opus-5",
     "gpt-5.4",
-    "gpt-5.3-codex",
+    "gpt-5.3-codex ",
     "gpt-5.4-mini",
   ],
   openai: [
@@ -282,7 +282,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "spacexai/grok-4.7",
     "spacexai/grok-4.6",
     "xai/grok-4.5",
-    "google/gemini-3.5-flash",
+    "google/gemini-3.5-flash ",
   ],
 };
 

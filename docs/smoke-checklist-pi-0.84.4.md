@@ -22,7 +22,7 @@ Pi 0.84.3–0.84.4 changed prompt lifecycle events, terminal capability override
    FAIL: missing, garbled, stale, or out-of-bound footer content.
 
 4. **Context and quiet-tool commands** — Run `/context-cap status`, `/context`, and `/quiet-tools status`, then trigger an `ls` tool call.<br>
-   PASS: an effective window of at most 300,000 tokens is reported (exactly 300,000 on a model whose native window is larger), a nonblank redacted context report opens, quiet-tools showed a one-time notice that rendering is inactive below Pi 1.0.1, and the `ls` row stays native.<br>
+   PASS: an effective window of at most 350,000 tokens is reported (exactly 350,000 on a model whose native window is larger), a nonblank redacted context report opens, quiet-tools showed a one-time notice that rendering is inactive below Pi 1.0.1, and the `ls` row stays native.<br>
    FAIL: missing commands, an unredacted/blank report, a missing quiet-tools notice, or a collapsed quiet `ls` row.
 
 5. **Oracle streaming and catalog selection** — Run `/oracle-model`, then ask Oracle a short question.<br>

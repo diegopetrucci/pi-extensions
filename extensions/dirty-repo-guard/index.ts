@@ -12,9 +12,12 @@ async function checkDirtyRepo(
   ctx: ExtensionContext,
   action: string,
 ): Promise<{ cancel: boolean } | undefined> {
-  const { stdout, code } = await pi.exec("git", ["status", "--porcelain"]);
+  const { stdout, code, killed } = await pi.exec("git", ["status", "--porcelain"], {
+    timeout: 15_000,
+    signal: ctx.signal,
+  });
 
-  if (code !== 0) {
+  if (killed || code !== 0) {
     return;
   }
 
