@@ -31,9 +31,32 @@ test("dirty-repo-guard allows session changes for clean and non-git repositories
   assert.equal(await beforeSwitch({ reason: "new" }, { hasUI: false }), undefined);
   assert.equal(await beforeFork({}, { hasUI: false }), undefined);
   assert.deepEqual(execCalls, [
-    ["git", ["status", "--porcelain"]],
-    ["git", ["status", "--porcelain"]],
+    ["git", ["status", "--porcelain"], { timeout: 15_000, signal: undefined }],
+    ["git", ["status", "--porcelain"], { timeout: 15_000, signal: undefined }],
   ]);
+});
+
+test("dirty-repo-guard treats killed status checks as unknown and forwards timeout and signal", async () => {
+  const dirtyRepoGuard = await loadExtension("extensions/dirty-repo-guard/index.ts");
+  const { signal } = new AbortController();
+  let stdout = "";
+  const { pi, handlers, execCalls } = createExtensionHarness({
+    async execImpl() {
+      return { stdout, code: 0, killed: true };
+    },
+  });
+  dirtyRepoGuard(pi);
+
+  for (const eventName of ["session_before_switch", "session_before_fork"]) {
+    for (stdout of ["", " M src/index.ts\n"]) {
+      const handler = getHandler(handlers, eventName);
+      assert.equal(await handler({ reason: "resume" }, { hasUI: false, signal }), undefined);
+    }
+  }
+  assert.equal(execCalls.length, 4);
+  for (const call of execCalls) {
+    assert.deepEqual(call, ["git", ["status", "--porcelain"], { timeout: 15_000, signal }]);
+  }
 });
 
 test("dirty-repo-guard blocks dirty repo session changes when no UI is available", async () => {

@@ -49,6 +49,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const bashResult = await pi.exec("bash", ["-c", command], {
           timeout: TIMEOUT_MS,
+          signal: ctx.signal,
         });
 
         const output = bashResult.stdout || bashResult.stderr || "";
