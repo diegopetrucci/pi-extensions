@@ -1,13 +1,12 @@
 # permission-gate
 
-A small pi extension that prompts for confirmation before running potentially dangerous bash or PowerShell commands or writing to protected paths.
+A small pi extension that prompts for confirmation before running potentially dangerous bash commands or writing to protected paths. Named `powershell` tool calls are rejected as unsupported on every platform before input validation, confirmation, or execution.
 
 This started from the original `permission-gate.ts` example in [`earendil-works/pi`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/permission-gate.ts) and adds conservative shell and path hardening.
 
 ## What it checks
 
 - `rm -rf`
-- PowerShell `Remove-Item -Recurse -Force` and its standard aliases, including module-qualified, interpolated, splatted, and backtick-escaped forms
 - `sudo`
 - `chmod` / `chown` with `777`
 - direct `write` / `edit` calls touching normalized protected paths:
@@ -19,17 +18,13 @@ Safe `.env` templates/examples such as `.env.example` and `.env.production.templ
 
 Write and edit paths are resolved the same way Pi's built-in tools do — including `file:` URL decoding (percent-encoded paths like `file:///…/%2Eenv` are decoded before checking), `~` and `~/` tilde expansion, Unicode space normalisation, and resolution of relative paths against `ctx.cwd`. Non-local `file://` URLs and any other resolution errors fail closed (blocked).
 
-If pi is running without an interactive UI, it blocks matching commands and protected path writes by default.
+If pi is running without an interactive UI, it blocks matching bash commands and protected path writes by default. Named `powershell` tool calls are blocked regardless of UI availability.
 
-For Pi's built-in local Windows PowerShell tool, commands that pass the fast lexical checks are also parsed with the same PowerShell installation's AST parser before execution. Malformed input, parser failures, `Remove-Item` parameter splatting, command-resolution changes (aliases/modules/providers/direct function or filter definitions), known script/process/job/member invocation wrappers, computed member calls, and analyzer inputs above 16,000 UTF-8 bytes are treated conservatively and require confirmation (or are blocked when no UI is available). Computed targets passed to provider-capable mutation commands also require confirmation because the target could resolve to `Alias:` or `Function:`. Literal quoted/commented examples, including literal here-strings, stay benign. Definitely enabled `-WhatIf` removals (`-WhatIf`, `-WhatIf:$true`, or `-WhatIf:1`) remain non-destructive and are allowed; computed switch values require confirmation.
-
-Non-Windows and custom/remote `powershell` tools receive the conservative lexical checks, but only Pi's built-in local Windows tool can be verified with its actual parser. Pi extensions are trusted code: tool overrides, remote operations, spawn hooks, and mutations made by handlers loaded after this gate are outside its boundary and must enforce their own final-input policy.
-
-This is a targeted confirmation guard for the command classes listed above, not a shell sandbox or a proof that every unlisted executable/API is harmless.
+This is a named-tool policy, not a system-wide PowerShell ban or a shell sandbox: it does not inspect PowerShell text launched through bash or other tools, and trusted extensions, tool overrides, remote operations, spawn hooks, and later handlers must enforce their own final-input policy.
 
 ## Pi 0.99 dispatch boundary
 
-The policy is deliberately named-tool-only: it checks `bash`, `powershell`, `write`, and `edit` `tool_call` events. Pi 0.99 routes `ctx.executeTool()` calls (including calls made by `codemode`) through the same preflight tool-call pipeline and supplies `parentToolCallId`; the named checks therefore apply to nested calls too. Executed calls (including execution errors and `isError` results) reach the tool-result hook. Preflight-blocked, invalid, and unknown-tool calls instead produce Pi's host error result and, for nested calls, a bounded nested-call record without an after-execution `tool_result` event. Confirmation cancellation, UI failure, and missing UI fail closed.
+The policy is deliberately named-tool-only: it checks `bash`, `powershell`, `write`, and `edit` `tool_call` events. Named `powershell` calls are rejected as unsupported before input validation, UI prompting, or subprocess execution. Pi 0.99 routes `ctx.executeTool()` calls (including calls made by `codemode`) through the same preflight tool-call pipeline and supplies `parentToolCallId`; the named checks therefore apply to nested calls too. Executed calls (including execution errors and `isError` results) reach the tool-result hook. Preflight-blocked, invalid, and unknown-tool calls instead produce Pi's host error result and, for nested calls, a bounded nested-call record without an after-execution `tool_result` event. Confirmation cancellation, UI failure, and missing UI fail closed.
 
 MCP calls also pass through Pi's host pipeline, but arbitrary `mcp__<server>__<tool>` names are outside this extension's existing guarantee. This extension does not authorize arbitrary MCP tools, infer policy from `readOnlyHint`/`destructiveHint` annotations, or provide a universal MCP security sandbox. Any annotation-based or broader MCP policy requires separate human approval. Custom tools, remote/overridden implementations, and later handlers must enforce their own final-input policy.
 
@@ -62,8 +57,8 @@ Then reload pi:
 ## Notes
 
 - Hooks the `tool_call` event.
-- Inspects `bash`, `powershell`, `write`, and `edit` tool calls.
-- Validates shell timeouts as well as command strings and fails closed on malformed calls.
+- Inspects `bash`, `powershell`, `write`, and `edit` tool calls; rejects named `powershell` calls as unsupported.
+- Validates bash timeouts as well as command strings and fails closed on malformed calls.
 - Normalizes relative/absolute paths before matching so traversal tricks do not bypass the guard.
 - Resolves write and edit paths like Pi's built-in tools (file URLs, `~` expansion, cwd) so percent-encoded URLs, tilde paths, and cwd-relative paths inside protected directories are all caught.
 - Prompts with a simple `Yes` / `No` selector before allowing dangerous commands or protected path writes.
