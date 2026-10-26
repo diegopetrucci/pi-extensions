@@ -182,13 +182,13 @@ test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
     baseten: ["zai-org/GLM-5.3 "],
     "cloudflare-ai-gateway": [
       "workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813",
-      "workers-ai/@cf/zai-org/glm-5.3",
+      "workers-ai/@cf/zai-org/glm-5.3 ",
     ],
-    "cloudflare-workers-ai": ["@cf/deepseek-ai/deepseek-v4-pro-0813", "@cf/zai-org/glm-5.3"],
+    "cloudflare-workers-ai": ["@cf/deepseek-ai/deepseek-v4-pro-0813", "@cf/zai-org/glm-5.3 "],
     nvidia: ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k2.6"],
-    openrouter: ["z-ai/glm-5.3"],
+    openrouter: ["z-ai/glm-5.3 "],
     together: ["zai-org/GLM-5.3-Flash"],
-    "vercel-ai-gateway": ["zai/glm-5.3"],
+    "vercel-ai-gateway": ["zai/glm-5.3 "],
   };
 
   for (const [provider, patterns] of Object.entries(expectedPatterns)) {
@@ -301,7 +301,7 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "claude-sonnet-5",
       "gpt-5.5",
       "gpt-5.4 ",
-      "gpt-5.3-codex",
+      "gpt-5.3-codex ",
       "kimi-k3",
       "glm-5.3 ",
       "deepseek-v4.1-flash",

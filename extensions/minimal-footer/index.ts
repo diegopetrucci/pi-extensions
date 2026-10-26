@@ -202,7 +202,11 @@ function readConfigFile(path: string): RecursivePartial<MinimalFooterConfig> {
   if (!existsSync(path)) return {};
 
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as RecursivePartial<MinimalFooterConfig>;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Expected a non-null, non-array object");
+    }
+    return parsed as RecursivePartial<MinimalFooterConfig>;
   } catch (error) {
     console.error(`Warning: Could not parse ${path}: ${error}`);
     return {};

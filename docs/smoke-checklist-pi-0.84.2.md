@@ -22,8 +22,8 @@
    FAIL: status bar row is blank where git info should appear, or text is corrupted.
 
 4. **context-cap** — Run `/context-cap status`.<br>
-   PASS: reply states context cap is enabled and shows an effective window of at most 300 000 tokens (exactly 300 000 on a model whose native window is larger).<br>
-   FAIL: command not found, or reported window exceeds 300 000 tokens.
+   PASS: reply states context cap is enabled and shows an effective window of at most 350 000 tokens (exactly 350 000 on a model whose native window is larger).<br>
+   FAIL: command not found, or reported window exceeds 350 000 tokens.
 
 5. **context-inspector** — Run `/context`.<br>
    PASS: pi opens an HTML file in the default browser showing a breakdown of context categories (System, Tool schemas, User, Assistant, Tool results, etc.); no error notification.<br>

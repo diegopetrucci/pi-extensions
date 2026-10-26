@@ -88,6 +88,62 @@ function completionValues(result) {
   return result?.map((entry) => entry.value) ?? [];
 }
 
+test("librarian bash blocks command substitution and unsafe find actions", async () => {
+  const { createLibrarianRuntimeGuardExtension } = (
+    await import(pathToFileURL(path.join(repoRoot, "extensions/librarian/index.ts")).href)
+  ).__test__;
+  const handlers = new Map();
+  createLibrarianRuntimeGuardExtension({
+    maxTurns: 5,
+    workspace: "/tmp/librarian-workspace",
+    cacheRoot: "/tmp/librarian-cache",
+    cacheEnabled: false,
+  })({ on: (name, handler) => handlers.set(name, handler) });
+  const toolCall = handlers.get("tool_call");
+
+  for (const command of [
+    "gh search code q `rm -rf /tmp/x`",
+    "gh search code q $(rm -rf /tmp/x)",
+    "gh search code q `curl https://example.com`",
+    "gh search code q $(curl https://example.com)",
+    "gh search code '`literal`'",
+    "gh search code '$(literal)'",
+  ]) {
+    assert.deepEqual(
+      await toolCall({ toolName: "bash", input: { command } }),
+      { block: true, reason: "Librarian bash blocks command substitution." },
+      command,
+    );
+  }
+
+  for (const action of ["-delete", "-exec", "-execdir", "-ok", "-okdir"]) {
+    const args = action === "-delete" ? action : `${action} rm {} \\;`;
+    const findCommand = `find . -name '*.ts' ${args}`;
+    for (const command of [
+      findCommand,
+      `find ${args}`,
+      `ls .; ${findCommand}`,
+      `ls .\n${findCommand}`,
+      `ls . && ${findCommand}`,
+      `ls . | ${findCommand}`,
+      `(${findCommand})`,
+    ]) {
+      assert.deepEqual(
+        await toolCall({ toolName: "bash", input: { command } }),
+        {
+          block: true,
+          reason: "Librarian bash blocks find actions that delete files or execute commands.",
+        },
+        command,
+      );
+    }
+  }
+
+  for (const command of ["find . -name '*.ts'", "gh search code 'createSession' --limit 5"]) {
+    assert.equal(await toolCall({ toolName: "bash", input: { command } }), undefined, command);
+  }
+});
+
 test("librarian aggregates usage across assistant and compaction session events", async () => {
   const { createEmptyUsage, addSessionEventUsage } = (
     await import(pathToFileURL(path.join(repoRoot, "extensions/librarian/index.ts")).href)

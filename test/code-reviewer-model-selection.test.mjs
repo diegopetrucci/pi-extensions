@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 
 import ts from "typescript";
 
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+
 import { createExtensionHarness } from "./extension-test-helpers.mjs";
 import {
   createModelSelectionContext,
@@ -148,6 +150,32 @@ export function __setCreateAgentSessionBehaviors(nextBehaviors) {
     setCreateAgentSessionBehaviors: piModule.__setCreateAgentSessionBehaviors,
   };
 }
+
+const WEAKER_SIBLING_CASES = [
+  ["vercel-ai-gateway", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
+  ["azure", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+];
+
+test("code_reviewer anchored preferences keep stronger ids ahead of weaker siblings", async () => {
+  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
+  for (const [provider, strongId, weakId] of WEAKER_SIBLING_CASES) {
+    const models = getBuiltinModels(provider);
+    const strong = models.find((model) => model.id === strongId);
+    const weak = models.find((model) => model.id === weakId);
+    assert.ok(strong && weak, `expected ${provider} siblings in the pinned catalog`);
+    for (const available of [[weak, strong], [weak]]) {
+      const result = await selectCodeReviewerModel(
+        createModelSelectionContext({ model: weak, available }),
+      );
+      assert.equal(result.ok, true);
+      assert.equal(
+        `${result.selection.provider}/${result.selection.id}`,
+        `${provider}/${available.length === 2 ? strongId : weakId}`,
+        `${provider} did not select the preferred available sibling`,
+      );
+    }
+  }
+});
 
 test("code_reviewer auto-selection prefers an opposite provider and model family when available", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();

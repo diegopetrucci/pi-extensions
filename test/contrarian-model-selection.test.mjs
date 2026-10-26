@@ -88,6 +88,25 @@ test("contrarian auto-selection falls back to the current provider when no oppos
 });
 
 const WEAKER_SIBLING_CASES = [
+  ["google", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["google-vertex", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["opencode", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+  ["openrouter", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
+  ["vercel-ai-gateway", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
+  ["azure", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+  ["openai", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
+  ["vercel-ai-gateway", "openai/gpt-5.3-codex", "openai/gpt-5.3-codex-fast"],
+  ["cloudflare-workers-ai", "@cf/zai-org/glm-5.3", "@cf/zai-org/glm-5.3-flash"],
+  [
+    "cloudflare-ai-gateway",
+    "workers-ai/@cf/zai-org/glm-5.3",
+    "workers-ai/@cf/zai-org/glm-5.3-flash",
+  ],
+  ["openrouter", "z-ai/glm-5.3", "z-ai/glm-5.3-flash"],
+  ["vercel-ai-gateway", "zai/glm-5.3", "zai/glm-5.3-flash"],
+  ["vercel-ai-gateway", "openai/gpt-5.4", "openai/gpt-5.4-mini"],
+  ["vercel-ai-gateway", "openai/gpt-5.4", "openai/gpt-5.4-nano"],
+  ["zai", "glm-5.2", "glm-5.2-highspeed"],
   ["google", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
   ["meta", "muse-spark-1.3", "muse-spark-1.3-contributor"],
   ["meta", "muse-spark-1.2", "muse-spark-1.2-contributor"],
