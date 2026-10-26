@@ -1038,7 +1038,7 @@ function isSafeGitRemoteCommand(tokens: string[], subcommandIndex: number): bool
   if (args.length === 0) return true;
   if (args.length === 1 && (args[0] === "-v" || args[0] === "--verbose")) return true;
   const remoteAction = args.find((arg) => !arg.startsWith("-"));
-  return remoteAction === "show" || remoteAction === "get-url";
+  return remoteAction === "get-url";
 }
 
 function isBlockedGitLocalFileOption(
@@ -1143,7 +1143,7 @@ function getBlockedGitReason(command: string): string | undefined {
   }
   if (parsed.subcommand === "remote") {
     if (!isSafeGitRemoteCommand(tokens, parsed.index)) {
-      return "Triage bash allows git remote only for read-only list/show/get-url queries.";
+      return "Triage bash allows git remote only for read-only list or get-url queries.";
     }
     return undefined;
   }
@@ -1193,6 +1193,9 @@ function getBlockedGhApiReason(tokens: string[]): string | undefined {
     ) {
       return "Triage bash allows read-only gh api calls only; request fields and input files are blocked.";
     }
+    if (token === "--cache" || lowerToken.startsWith("--cache=")) {
+      return "Triage bash blocks gh api --cache because it writes local cache files.";
+    }
 
     let method: string | undefined;
     if (lowerToken === "-x" || lowerToken === "--method") {
@@ -1237,6 +1240,20 @@ function getBlockedGhReason(command: string): string | undefined {
   if (getExecutableName(tokens[0] ?? "") !== "gh") return undefined;
   if (/\bgh\s+auth\s+(?:login|logout|refresh|setup-git|token)\b/i.test(command)) {
     return "Triage bash blocks gh auth commands and token inspection.";
+  }
+  if (
+    tokens.some((token) => {
+      const lowerToken = token.toLowerCase();
+      return (
+        lowerToken === "--web" ||
+        lowerToken === "-w" ||
+        (/^-[a-z]{2,}$/i.test(token) && lowerToken.includes("w")) ||
+        lowerToken.startsWith("--web=") ||
+        lowerToken.startsWith("-w=")
+      );
+    })
+  ) {
+    return "Triage bash blocks gh --web because it can launch external browser helpers.";
   }
   const apiReason = getBlockedGhApiReason(tokens);
   if (apiReason) return apiReason;
