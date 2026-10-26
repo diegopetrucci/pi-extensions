@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import {
   createAgentSession,
   createCodemodeExtension,
@@ -20,18 +18,8 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 
-import {
-  analyzePowerShellAstPayload,
-  analyzePowerShellLexically,
-  buildPowerShellAstCommand,
-  MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES,
-  parsePowerShellAstOutput,
-  POWERSHELL_AST_MARKER,
-} from "../extensions/permission-gate/powershell-safety.ts";
-
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "..");
-const execFileAsync = promisify(execFile);
 
 async function loadExtension(relativePath) {
   const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath)).href;
@@ -59,51 +47,6 @@ function createPi({ execImpl } = {}) {
     handlers,
     execCalls,
   };
-}
-
-async function executePowerShellAnalyzer(command, args, options = {}) {
-  try {
-    const { stdout, stderr } = await execFileAsync(command, args, {
-      timeout: options.timeout,
-      signal: options.signal,
-      windowsHide: true,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    return { stdout, stderr, code: 0, killed: false };
-  } catch (error) {
-    return {
-      stdout: typeof error?.stdout === "string" ? error.stdout : "",
-      stderr: typeof error?.stderr === "string" ? error.stderr : String(error),
-      code: typeof error?.code === "number" ? error.code : 1,
-      killed: Boolean(error?.killed),
-    };
-  }
-}
-
-const POWERSHELL_CASE_CONCURRENCY = 4;
-
-// Runs worker over items with bounded concurrency; waits for in-flight work, then rethrows the first failure.
-async function mapWithConcurrency(items, limit, worker) {
-  let next = 0;
-  const failures = [];
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length && failures.length === 0) {
-      const item = items[next++];
-      try {
-        await worker(item);
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-  });
-  await Promise.all(runners);
-  if (failures.length > 0) throw failures[0];
-}
-
-function createPowerShellPi() {
-  return process.platform === "win32"
-    ? createPi({ execImpl: executePowerShellAnalyzer })
-    : createPi();
 }
 
 function createToolEventRecorder(events) {
@@ -589,466 +532,63 @@ test("permission-gate keeps concurrent confirmation decisions correlated to thei
   assert.ok(prompts.some((prompt) => prompt.includes("beta")));
 });
 
-test("PowerShell fallback analysis covers native syntax and keeps quoted/commented text benign", () => {
-  const riskyCommands = [
-    "Microsoft.PowerShell.Management\\Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "Remove-Item (Join-Path $env:TEMP example) -Recurse -Force",
-    "Write-Output \"result: $(Remove-Item -Recurse -Force 'C:\\temp\\example')\"",
-    "Write-Output @\"\nresult: $(Remove-Item -Recurse -Force 'C:\\temp\\example')\n\"@",
-    "Remove-Item -Recurse `\n-Force 'C:\\temp\\example'",
-    "Remove-Item -Re`curse -Fo`rce 'C:\\temp\\example'",
-    "$parameters = @{ Recurse = $true; Force = $true }; Remove-Item @parameters",
-    "$parameters = @{ Recurse = $true; Force = $true }; Remove-Item @global:parameters",
-    "$command = 'Remove-Item'; & $command -Recurse -Force 'C:\\temp\\example'",
-    "Set-Alias zap Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Item 'Alias:zap' Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "New-Item ('Ali' + 'as:zap') -Value Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Content 'Function:\\zap' \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
-    "Remove-Item 'Alias:zap'; zap -Recurse -Force 'C:\\temp\\example'",
-    "Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Location Function:; Set-Content zap \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
-    "function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf",
-    "filter zap { Write-Output ok }; zap",
-    "Remove-Module commands; zap -Recurse -Force 'C:\\temp\\example'",
-    "Import-Module '.\\commands.psm1'; zap -Recurse -Force 'C:\\temp\\example'",
-    "& '.\\cleanup.ps1'",
-    "start powershell.exe -ArgumentList '-Command Remove-Item -Recurse -Force C:\\temp\\example'",
-    "Start-Job -ScriptBlock { Remove-Item -Recurse -Force 'C:\\temp\\example' }",
-    "Start-ThreadJob -ScriptBlock ([scriptblock]'Remove-Item -Recurse -Force C:\\temp\\example')",
-    "[System.Diagnostics.Process]::Start('powershell.exe', '-Command Remove-Item -Recurse -Force C:\\temp\\example')",
-    "$p = New-Object System.Diagnostics.Process; $p.StartInfo.FileName = 'powershell.exe'; $p.Start()",
-    "$method = 'Start'; $p = New-Object System.Diagnostics.Process; $p.$method()",
-    "$p = New-Object System.Diagnostics.Process; ($p).'Start'()",
-    "${t}::'ShellExecute'('powershell.exe', '-Command Remove-Item -Recurse -Force C:\\temp\\example')",
-    "$ExecutionContext.InvokeCommand.InvokeScript('Remove-Item -Recurse -Force C:\\temp\\example')",
-    "Remove-Item -Recurse -Force -WhatIf:$(1 -eq 1) 'C:\\temp\\example'",
-    "Write-Output ok }",
-    "try { Write-Output ok",
-    "<# Remove-Item -Recurse -Force 'C:\\temp\\example'",
-  ];
-  const safeCommands = [
-    "Write-Output \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"",
-    "Write-Output 'sudo chmod 777'",
-    "Write-Output ok; # Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "<# Remove-Item -Recurse -Force 'C:\\temp\\example' #>\nWrite-Output ok",
-    "Remove-Item -Recurse -Force -WhatIf 'C:\\temp\\example'",
-    "Remove-Item -Recurse -Force -WhatIf:$true 'C:\\temp\\example'",
-    "Remove-Item -Recurse -Force -WhatIf:1 'C:\\temp\\example'",
-    "Write-Output @'\ndon't execute: Remove-Item -Recurse -Force C:\\temp\\example\n'@",
-    "$parameters = @{ Name = 'example'; Enabled = $true }",
-    "Set-Location 'C:\\temp'",
-    "Push-Location '..'; Pop-Location",
-  ];
-
-  for (const command of riskyCommands) {
-    assert.equal(analyzePowerShellLexically(command).risky, true, command);
-  }
-  for (const command of safeCommands) {
-    assert.equal(analyzePowerShellLexically(command).risky, false, command);
-  }
-});
-
-test("PowerShell AST analysis fails closed and classifies parsed command metadata", () => {
-  const element = (text, overrides = {}) => ({
-    type: "StringConstantExpressionAst",
-    text,
-    parameter: null,
-    argument: null,
-    splatted: false,
-    ...overrides,
-  });
-  const command = (name, elements) => ({
-    name,
-    invocationOperator: "Unknown",
-    elements,
-  });
-
-  const destructive = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 0,
-    commands: [
-      command("Microsoft.PowerShell.Management\\Remove-Item", [
-        element("Microsoft.PowerShell.Management\\Remove-Item"),
-        element("-Recurse", { type: "CommandParameterAst", parameter: "Recurse" }),
-        element("-Force", { type: "CommandParameterAst", parameter: "Force" }),
-      ]),
-    ],
-  });
-  const whatIf = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 0,
-    commands: [
-      command("Remove-Item", [
-        element("Remove-Item"),
-        element("-Recurse", { type: "CommandParameterAst", parameter: "Recurse" }),
-        element("-Force", { type: "CommandParameterAst", parameter: "Force" }),
-        element("-WhatIf", { type: "CommandParameterAst", parameter: "WhatIf" }),
-      ]),
-    ],
-  });
-  const quotedDisplay = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 0,
-    commands: [command("Write-Output", [element("Write-Output"), element("'sudo chmod 777'")])],
-  });
-  const aliasMutation = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 0,
-    commands: [
-      command("Set-Alias", [element("Set-Alias"), element("zap"), element("Remove-Item")]),
-    ],
-  });
-  const dynamicMemberInvocation = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 1,
-    functionDefinitionCount: 0,
-    commands: [],
-  });
-  const functionDefinition = analyzePowerShellAstPayload({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 1,
-    commands: [],
-  });
-
-  assert.equal(destructive.risky, true);
-  assert.equal(whatIf.risky, false);
-  assert.equal(quotedDisplay.risky, false);
-  assert.equal(aliasMutation.risky, true);
-  assert.equal(dynamicMemberInvocation.risky, true);
-  assert.equal(functionDefinition.risky, true);
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: ["Unexpected token"],
-      commands: [],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: [],
-      commands: [command(null, [])],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(analyzePowerShellAstPayload({ analyzerError: "parser unavailable" }).risky, true);
-  assert.equal(
-    analyzePowerShellAstPayload({
-      analyzerError: true,
-      parseErrors: [],
-      commands: [],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: [],
-      commands: [{ name: "Get-Date" }],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: [],
-      commands: [command("Get-Date", [])],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: [],
-      commands: [],
-      dynamicInvocationCount: -1,
-      functionDefinitionCount: 0,
-    }).risky,
-    true,
-  );
-  assert.equal(
-    analyzePowerShellAstPayload({
-      parseErrors: [],
-      commands: [],
-      dynamicInvocationCount: 0,
-      functionDefinitionCount: -1,
-    }).risky,
-    true,
-  );
-});
-
-test("PowerShell AST output parsing uses the final marked payload and rejects malformed output", () => {
-  const safePayload = JSON.stringify({
-    parseErrors: [],
-    dynamicInvocationCount: 0,
-    functionDefinitionCount: 0,
-    commands: [
-      {
-        name: "Write-Output",
-        invocationOperator: "Unknown",
-        elements: [
-          {
-            type: "StringConstantExpressionAst",
-            text: "Write-Output",
-            parameter: null,
-            argument: null,
-            splatted: false,
-          },
-        ],
-      },
-    ],
-  });
-
-  assert.equal(
-    parsePowerShellAstOutput(`startup noise\n${POWERSHELL_AST_MARKER}${safePayload}\n`).risky,
-    false,
-  );
-  assert.equal(parsePowerShellAstOutput("startup noise only").risky, true);
-  assert.equal(parsePowerShellAstOutput(`${POWERSHELL_AST_MARKER}{not-json}`).risky, true);
-});
-
-test(
-  "native Windows PowerShell parsers classify AST-only and fallback-sensitive forms",
-  {
-    skip: process.platform !== "win32",
-  },
-  async () => {
-    const powerShellArgs = [
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-    ];
-    const exactBoundaryPrefix = "Write-Output '";
-    const exactBoundarySuffix = "'";
-    const exactBoundaryCommand = `${exactBoundaryPrefix}${"a".repeat(
-      MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES -
-        Buffer.byteLength(exactBoundaryPrefix + exactBoundarySuffix, "utf8"),
-    )}${exactBoundarySuffix}`;
-    assert.equal(
-      Buffer.byteLength(exactBoundaryCommand, "utf8"),
-      MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES,
-    );
-
-    const cases = [
-      ["Write-Output 'hello'", false],
-      ["Write-Output \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"", false],
-      ["Remove-Item -Recurse -Force -WhatIf 'C:\\temp\\example'", false],
-      ["Microsoft.PowerShell.Management\\Remove-Item -Recurse -Force 'C:\\temp\\example'", true],
-      ["$parameters = @{}; Remove-Item @global:parameters", true],
-      ["Set-Alias zap Remove-Item; zap -Recurse -Force 'C:\\temp\\example'", true],
-      ["New-Item ('Ali' + 'as:zap') -Value Remove-Item", true],
-      ["Set-Content 'Function:\\zap' \"Write-Output ok\"", true],
-      ["Remove-Item 'Alias:zap'", true],
-      ["Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location", true],
-      ["Set-Location Function:; Set-Content zap 'Write-Output ok'", true],
-      [
-        "function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf",
-        true,
-      ],
-      ["filter zap { Write-Output ok }; zap", true],
-      ["Remove-Module commands", true],
-      ["start powershell.exe -ArgumentList '-Command Write-Output ok'", true],
-      ["Start-ThreadJob -ScriptBlock ([scriptblock]'Write-Output ok')", true],
-      ["[System.Diagnostics.Process]::Start('powershell.exe', '-Command Write-Output ok')", true],
-      ["$p = New-Object System.Diagnostics.Process; $p.Start()", true],
-      ["$method = 'Start'; $p = New-Object System.Diagnostics.Process; $p.$method()", true],
-      ["$p = New-Object System.Diagnostics.Process; $p.('Start')()", true],
-      ["$p = New-Object System.Diagnostics.Process; ($p).'Start'()", true],
-      ["${t}::'ShellExecute'('powershell.exe', '-Command Write-Output ok')", true],
-      ["Write-Output @'\ndon't execute: Remove-Item -Recurse -Force C:\\temp\\example\n'@", false],
-      [exactBoundaryCommand, false],
-      ["Write-Output ok }", true],
-    ];
-    const testedShells = [];
-
-    for (const shell of ["pwsh.exe", "powershell.exe"]) {
-      try {
-        await execFileAsync("where.exe", [shell], { windowsHide: true });
-      } catch {
-        continue;
-      }
-
-      const first = await executePowerShellAnalyzer(
-        shell,
-        [...powerShellArgs, buildPowerShellAstCommand(cases[0][0])],
-        { timeout: 10_000 },
-      );
-      assert.equal(first.code, 0, `${shell}: ${first.stderr}`);
-      assert.equal(parsePowerShellAstOutput(first.stdout).risky, cases[0][1], shell);
-      testedShells.push(shell);
-
-      await mapWithConcurrency(
-        cases.slice(1),
-        POWERSHELL_CASE_CONCURRENCY,
-        async ([command, expectedRisk]) => {
-          const result = await executePowerShellAnalyzer(
-            shell,
-            [...powerShellArgs, buildPowerShellAstCommand(command)],
-            { timeout: 10_000 },
-          );
-          assert.equal(result.code, 0, `${shell}: ${command}\n${result.stderr}`);
-          assert.equal(
-            parsePowerShellAstOutput(result.stdout).risky,
-            expectedRisk,
-            `${shell}: ${command}`,
-          );
-        },
-      );
-    }
-
-    assert.ok(testedShells.length > 0, "expected at least one native PowerShell parser");
-    assert.ok(
-      testedShells.includes("powershell.exe"),
-      "expected to exercise the Windows PowerShell 5.1 fallback",
-    );
-    if (process.env.PI_REQUIRE_POWERSHELL_7 === "1") {
-      assert.ok(testedShells.includes("pwsh.exe"), "expected to exercise PowerShell 7");
-    }
-  },
-);
-
-test("permission-gate blocks recursive forced PowerShell removals and wrappers without UI", async () => {
+test("permission-gate rejects named PowerShell calls before validation, prompting, or execution", async () => {
   const permissionGate = await loadExtension("extensions/permission-gate/index.ts");
-  const { pi, handlers } = createPowerShellPi();
+  let promptCount = 0;
+  const { pi, handlers, execCalls } = createPi();
   permissionGate(pi);
 
   const toolCallHandler = handlers.get("tool_call");
   assert.equal(typeof toolCallHandler, "function");
+  const ui = {
+    async select() {
+      promptCount += 1;
+      return "Yes";
+    },
+  };
+  const cases = [
+    {
+      description: "benign input without UI",
+      input: { command: "Write-Output 'hello'" },
+      ctx: { hasUI: false },
+    },
+    {
+      description: "destructive input with UI",
+      input: { command: "Remove-Item -Recurse -Force C:\\temp\\example" },
+      ctx: { hasUI: true, ui },
+    },
+    {
+      description: "malformed input with UI",
+      input: {},
+      ctx: { hasUI: true, ui },
+    },
+    {
+      description: "malformed input without UI",
+      input: null,
+      ctx: { hasUI: false },
+    },
+  ];
 
-  for (const command of [
-    "Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "remove-item -force -recurse 'C:\\temp\\example'",
-    "ri -r -fo 'C:\\temp\\example'",
-    "Get-ChildItem 'C:\\temp' | Remove-Item -Rec -For",
-    "try { Remove-Item -Recurse -Force 'C:\\temp\\example' }",
-    "& 'Remove-Item' -Recurse -Force 'C:\\temp\\example'",
-    "$removed = Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "iex \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"",
-    "Invoke-Expression -Command \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"",
-    "pwsh -Command \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"",
-    "pwsh -EncodedCommand UgBlAG0AbwB2AGUALQBJAHQAZQBtACAALQBSAGUAYwB1AHIAcwBlACAALQBGAG8AcgBjAGUA",
-    "Write-Output $(Remove-Item -Recurse -Force 'C:\\temp\\example')",
-    "Write-Output \"result: $(Remove-Item -Recurse -Force 'C:\\temp\\example')\"",
-    "Write-Output @\"\nresult: $(Remove-Item -Recurse -Force 'C:\\temp\\example')\n\"@",
-    "Remove-Item (Join-Path $env:TEMP example) -Recurse -Force",
-    "Remove-Item -Recurse `\n-Force 'C:\\temp\\example'",
-    "Remove-Item -Re`curse -Fo`rce 'C:\\temp\\example'",
-    "& \"Remove`-Item\" -Recurse -Force 'C:\\temp\\example'",
-    "Microsoft.PowerShell.Management\\Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "$parameters = @{ Recurse = $true; Force = $true; Path = 'C:\\temp\\example' }; Remove-Item @parameters",
-    "$parameters = @{ Recurse = $true; Force = $true; Path = 'C:\\temp\\example' }; Remove-Item @global:parameters",
-    "$command = 'Remove-Item'; & $command -Recurse -Force 'C:\\temp\\example'",
-    "Set-Alias zap Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Item 'Alias:zap' Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "New-Item ('Ali' + 'as:zap') -Value Remove-Item; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Content 'Function:\\zap' \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
-    "Remove-Item 'Alias:zap'; zap -Recurse -Force 'C:\\temp\\example'",
-    "Push-Location Alias:; New-Item zap -Value Remove-Item; Pop-Location; zap -Recurse -Force 'C:\\temp\\example'",
-    "Set-Location Function:; Set-Content zap \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"; zap",
-    "function Remove-Item { param($Path) [IO.Directory]::Delete($Path, $true) }; Remove-Item 'C:\\temp\\example' -Recurse -Force -WhatIf",
-    "filter zap { Write-Output ok }; zap",
-    "Remove-Module commands; zap -Recurse -Force 'C:\\temp\\example'",
-    "Import-Module '.\\commands.psm1'; zap -Recurse -Force 'C:\\temp\\example'",
-    "& '.\\cleanup.ps1'",
-    "start powershell.exe -ArgumentList '-Command Remove-Item -Recurse -Force C:\\temp\\example'",
-    "Start-Job -ScriptBlock { Remove-Item -Recurse -Force 'C:\\temp\\example' }",
-    "Start-ThreadJob -ScriptBlock ([scriptblock]'Remove-Item -Recurse -Force C:\\temp\\example')",
-    "[System.Diagnostics.Process]::Start('powershell.exe', '-Command Remove-Item -Recurse -Force C:\\temp\\example')",
-    "$p = New-Object System.Diagnostics.Process; $p.StartInfo.FileName = 'powershell.exe'; $p.Start()",
-    "$method = 'Start'; $p = New-Object System.Diagnostics.Process; $p.$method()",
-    "$p = New-Object System.Diagnostics.Process; ($p).'Start'()",
-    "${t}::'ShellExecute'('powershell.exe', '-Command Remove-Item -Recurse -Force C:\\temp\\example')",
-    "$ExecutionContext.InvokeCommand.InvokeScript('Remove-Item -Recurse -Force C:\\temp\\example')",
-    "Remove-Item -Recurse -Force -WhatIf:$(1 -eq 1) 'C:\\temp\\example'",
-    "Write-Output ok }",
-    "try { Write-Output ok",
-    "<# Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    `${"$(".repeat(34)}Remove-Item -Recurse -Force 'C:\\temp\\example'${")".repeat(34)}`,
-    "x".repeat(MAX_POWERSHELL_ANALYSIS_SOURCE_BYTES + 1),
-  ]) {
+  for (const { description, input, ctx } of cases) {
     const result = await toolCallHandler(
-      { toolName: "powershell", input: { command } },
-      { hasUI: false },
+      {
+        toolCallId: `powershell-${description.replaceAll(" ", "-")}`,
+        parentToolCallId: "codemode-root",
+        toolName: "powershell",
+        input,
+      },
+      ctx,
     );
 
     assert.deepEqual(
       result,
-      {
-        block: true,
-        reason: "Dangerous command blocked (no UI for confirmation)",
-      },
-      command,
+      { block: true, reason: "Unsupported powershell tool blocked" },
+      description,
     );
   }
-});
 
-test("permission-gate allows non-dangerous PowerShell commands without prompting", async () => {
-  const permissionGate = await loadExtension("extensions/permission-gate/index.ts");
-  let prompted = false;
-  const { pi, handlers, execCalls } = createPowerShellPi();
-  permissionGate(pi);
-
-  const toolCallHandler = handlers.get("tool_call");
-  assert.equal(typeof toolCallHandler, "function");
-  const signal = new AbortController().signal;
-
-  const commands = [
-    "Write-Output 'hello'",
-    "Remove-Item 'C:\\temp\\single-file.txt'",
-    "Remove-Item -Recurse 'C:\\temp\\example'",
-    "Remove-Item -Force 'C:\\temp\\single-file.txt'",
-    "Remove-Item -Recurse:$false -Force 'C:\\temp\\single-file.txt'",
-    "Write-Output \"Remove-Item -Recurse -Force 'C:\\temp\\example'\"",
-    "Write-Output 'sudo chmod 777'",
-    "Write-Output ok; # Remove-Item -Recurse -Force 'C:\\temp\\example'",
-    "<# Remove-Item -Recurse -Force 'C:\\temp\\example' #>\nWrite-Output ok",
-    "Remove-Item -Recurse -Force -WhatIf 'C:\\temp\\example'",
-    "Remove-Item -Recurse -Force -WhatIf:$true 'C:\\temp\\example'",
-    "Remove-Item -Recurse -Force -WhatIf:1 'C:\\temp\\example'",
-    "Write-Output @'\ndon't execute: Remove-Item -Recurse -Force C:\\temp\\example\n'@",
-    "$parameters = @{ Name = 'example'; Enabled = $true }",
-    "Set-Location 'C:\\temp'",
-    "Push-Location '..'; Pop-Location",
-    "Get-Command Remove-Item -Syntax",
-  ];
-
-  // The handler is stateless and exec only records calls, so cases can run concurrently.
-  await mapWithConcurrency(commands, POWERSHELL_CASE_CONCURRENCY, async (command) => {
-    const result = await toolCallHandler(
-      { toolName: "powershell", input: { command } },
-      {
-        hasUI: true,
-        signal,
-        ui: {
-          async select() {
-            prompted = true;
-            return "No";
-          },
-        },
-      },
-    );
-
-    assert.equal(result, undefined, command);
-  });
-
-  assert.equal(prompted, false);
-  if (process.platform === "win32") {
-    assert.ok(execCalls.length > 0);
-    assert.ok(execCalls.every(([, , options]) => options.signal === signal));
-  }
+  assert.equal(promptCount, 0);
+  assert.equal(execCalls.length, 0);
 });
 
 test("permission-gate blocks destructive rm variants and shell wrappers when no UI is available", async () => {
@@ -1278,35 +818,8 @@ test("permission-gate blocks malformed shell inputs without prompting", async ()
       },
     },
   );
-  const missingPowerShellCommand = await toolCallHandler(
-    { toolName: "powershell", input: {} },
-    {
-      hasUI: true,
-      ui: {
-        async select() {
-          prompted = true;
-          return "Yes";
-        },
-      },
-    },
-  );
   const invalidBashTimeout = await toolCallHandler(
     { toolName: "bash", input: { command: "printf ok", timeout: "5" } },
-    {
-      hasUI: true,
-      ui: {
-        async select() {
-          prompted = true;
-          return "Yes";
-        },
-      },
-    },
-  );
-  const invalidPowerShellTimeout = await toolCallHandler(
-    {
-      toolName: "powershell",
-      input: { command: "Write-Output ok", timeout: Number.POSITIVE_INFINITY },
-    },
     {
       hasUI: true,
       ui: {
@@ -1326,17 +839,9 @@ test("permission-gate blocks malformed shell inputs without prompting", async ()
     block: true,
     reason: "Malformed bash command blocked",
   });
-  assert.deepEqual(missingPowerShellCommand, {
-    block: true,
-    reason: "Malformed powershell command blocked",
-  });
   assert.deepEqual(invalidBashTimeout, {
     block: true,
     reason: "Malformed bash command blocked",
-  });
-  assert.deepEqual(invalidPowerShellTimeout, {
-    block: true,
-    reason: "Malformed powershell command blocked",
   });
   assert.equal(prompted, false);
 });
@@ -1688,46 +1193,6 @@ test("permission-gate respects interactive allow/deny decisions for dangerous ba
   assert.equal(allowed, undefined);
 });
 
-test("permission-gate respects interactive allow/deny decisions for dangerous PowerShell commands", async () => {
-  const permissionGate = await loadExtension("extensions/permission-gate/index.ts");
-  const prompts = [];
-  const { pi, handlers } = createPi();
-  permissionGate(pi);
-
-  const toolCallHandler = handlers.get("tool_call");
-  assert.equal(typeof toolCallHandler, "function");
-  const event = {
-    toolName: "powershell",
-    input: { command: "Remove-Item -Recurse -Force 'C:\\temp\\example'" },
-  };
-
-  const blocked = await toolCallHandler(event, {
-    hasUI: true,
-    ui: {
-      async select(prompt, options) {
-        prompts.push({ prompt, options });
-        return "No";
-      },
-    },
-  });
-
-  assert.deepEqual(blocked, { block: true, reason: "Blocked by user" });
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0].prompt, /Remove-Item -Recurse -Force/);
-  assert.deepEqual(prompts[0].options, ["Yes", "No"]);
-
-  const allowed = await toolCallHandler(event, {
-    hasUI: true,
-    ui: {
-      async select() {
-        return "Yes";
-      },
-    },
-  });
-
-  assert.equal(allowed, undefined);
-});
-
 test("permission-gate allows non-dangerous bash commands without prompting", async () => {
   const permissionGate = await loadExtension("extensions/permission-gate/index.ts");
   let prompted = false;
@@ -1910,12 +1375,13 @@ const results = await Promise.allSettled([
   tools.edit({ path: ".git/pi-dzb7-no-edit", edits: [{ oldText: "x", newText: "y" }] }),
   tools.bash({ command: "printf nested-safe" }),
   tools.read({ path: "fixture.txt" }),
-  tools.chain_fixture({ command: "printf chain-safe" })
+  tools.chain_fixture({ command: "printf chain-safe" }),
+  tools.powershell({ command: "Write-Output nested-unsupported" })
 ]);
 return results.map((entry) => entry.status === "fulfilled" ? entry.value : String(entry.reason));
 `;
   const fixture = await createPi99HostFixture({
-    tools: ["bash", "read", "write", "edit", "codemode", "chain_fixture"],
+    tools: ["bash", "powershell", "read", "write", "edit", "codemode", "chain_fixture"],
     customTools: [createNestedChainTool()],
     responses: [
       fauxAssistantMessage(fauxToolCall("codemode", { code: nestedCode }, { id: "codemode-root" })),
@@ -1932,7 +1398,7 @@ return results.map((entry) => entry.status === "fulfilled" ? entry.value : Strin
     assert.equal(parentResult.isError, false);
     assert.ok(parentResult.nestedCalls);
     assert.equal(parentResult.nestedCalls.complete, true);
-    assert.equal(parentResult.nestedCalls.calls.length, 7);
+    assert.equal(parentResult.nestedCalls.calls.length, 8);
 
     const nestedCalls = new Map(parentResult.nestedCalls.calls.map((call) => [call.id, call]));
     assert.equal(nestedCalls.get("codemode-root/1").status, "error");
@@ -1942,18 +1408,28 @@ return results.map((entry) => entry.status === "fulfilled" ? entry.value : Strin
     assert.equal(nestedCalls.get("codemode-root/5").status, "ok");
     assert.equal(nestedCalls.get("codemode-root/6").status, "ok");
     assert.equal(nestedCalls.get("codemode-root/6/1").status, "ok");
+    assert.equal(nestedCalls.get("codemode-root/7").status, "error");
     assert.match(nestedCalls.get("codemode-root/1").error, /Dangerous command blocked/);
     assert.match(nestedCalls.get("codemode-root/2").error, /Protected path blocked/);
     assert.match(nestedCalls.get("codemode-root/3").error, /Protected path blocked/);
+    assert.match(nestedCalls.get("codemode-root/7").error, /Unsupported powershell tool blocked/);
     assert.equal(existsSync(path.join(fixture.cwd, ".git", "pi-dzb7-no-write")), false);
     assert.equal(existsSync(path.join(fixture.cwd, ".git", "pi-dzb7-no-edit")), false);
 
     const nestedToolCalls = fixture.events.filter(
       (event) => event.type === "tool_call" && event.parentToolCallId,
     );
-    assert.equal(nestedToolCalls.length, 7);
+    assert.equal(nestedToolCalls.length, 8);
     assert.ok(
       nestedToolCalls.every((event) => event.toolCallId.startsWith(`${event.parentToolCallId}/`)),
+    );
+    assert.ok(
+      nestedToolCalls.some(
+        (event) =>
+          event.toolName === "powershell" &&
+          event.toolCallId === "codemode-root/7" &&
+          event.parentToolCallId === "codemode-root",
+      ),
     );
     assert.ok(
       nestedToolCalls.some(
@@ -1975,10 +1451,15 @@ return results.map((entry) => entry.status === "fulfilled" ? entry.value : Strin
     const executionEnds = fixture.events.filter(
       (event) => event.type === "tool_execution_end" && event.parentToolCallId,
     );
-    assert.equal(executionEnds.length, 7);
+    assert.equal(executionEnds.length, 8);
     assert.ok(
       executionEnds.some(
         (event) => event.toolCallId === "codemode-root/1" && event.isError === true,
+      ),
+    );
+    assert.ok(
+      executionEnds.some(
+        (event) => event.toolCallId === "codemode-root/7" && event.isError === true,
       ),
     );
   } finally {
