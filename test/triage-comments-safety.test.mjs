@@ -385,6 +385,7 @@ test("triage-comments bash guard allows read-only inspection commands and blocks
     "git remote --verbose",
     "git remote get-url origin",
     "gh pr view 18",
+    "gh pr list --search -label:wontfix",
     "gh api repos/acme/widgets/pulls/18",
     "pwd -P",
   ]) {
@@ -397,6 +398,8 @@ test("triage-comments bash guard allows read-only inspection commands and blocks
     ["git remote show -n origin", /git remote only for read-only list or get-url queries/],
     ["gh pr view 123 --web", /gh --web/],
     ["gh repo view -w", /gh --web/],
+    ["gh pr view 123 -cw", /gh --web/],
+    ["gh repo view -wb", /gh --web/],
     ["gh pr view 123 --web=true", /gh --web/],
     ["gh repo view -w=true", /gh --web/],
     ["gh api repos/o/r --cache 1h", /gh api --cache/],

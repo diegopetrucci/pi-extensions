@@ -1247,6 +1247,7 @@ function getBlockedGhReason(command: string): string | undefined {
       return (
         lowerToken === "--web" ||
         lowerToken === "-w" ||
+        (/^-[a-z]{2,}$/i.test(token) && lowerToken.includes("w")) ||
         lowerToken.startsWith("--web=") ||
         lowerToken.startsWith("-w=")
       );
