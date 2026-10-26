@@ -262,7 +262,7 @@ test("inline-bash expands user inline commands through the extension API", async
   const { pi, handlers, execCalls } = createPi({
     async execImpl(command, args, options) {
       assert.equal(command, "bash");
-      assert.deepEqual(options, { timeout: 30000 });
+      assert.deepEqual(options, { timeout: 30000, signal: undefined });
 
       if (args[1] === "pwd") {
         return { stdout: " /tmp/project \n", stderr: "", code: 0 };
@@ -303,8 +303,8 @@ test("inline-bash expands user inline commands through the extension API", async
     images,
   });
   assert.deepEqual(execCalls, [
-    ["bash", ["-c", "pwd"], { timeout: 30000 }],
-    ["bash", ["-c", "git branch --show-current"], { timeout: 30000 }],
+    ["bash", ["-c", "pwd"], { timeout: 30000, signal: undefined }],
+    ["bash", ["-c", "git branch --show-current"], { timeout: 30000, signal: undefined }],
   ]);
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].level, "info");
@@ -319,7 +319,7 @@ test("inline-bash expands inline commands without UI notifications when no UI is
     async execImpl(command, args, options) {
       assert.equal(command, "bash");
       assert.deepEqual(args, ["-c", "pwd"]);
-      assert.deepEqual(options, { timeout: 30000 });
+      assert.deepEqual(options, { timeout: 30000, signal: undefined });
       return { stdout: "/tmp/no-ui\n", stderr: "", code: 0 };
     },
   });
@@ -338,7 +338,7 @@ test("inline-bash expands inline commands without UI notifications when no UI is
     text: "cwd=/tmp/no-ui",
     images: [],
   });
-  assert.deepEqual(execCalls, [["bash", ["-c", "pwd"], { timeout: 30000 }]]);
+  assert.deepEqual(execCalls, [["bash", ["-c", "pwd"], { timeout: 30000, signal: undefined }]]);
 });
 
 test("inline-bash renders pi.exec throw failures inline without crashing", async () => {
@@ -427,8 +427,8 @@ test("inline-bash expands repeated inline patterns in a single prompt", async ()
     images: [],
   });
   assert.deepEqual(execCalls, [
-    ["bash", ["-c", "pwd"], { timeout: 30000 }],
-    ["bash", ["-c", "pwd"], { timeout: 30000 }],
+    ["bash", ["-c", "pwd"], { timeout: 30000, signal: undefined }],
+    ["bash", ["-c", "pwd"], { timeout: 30000, signal: undefined }],
   ]);
 });
 

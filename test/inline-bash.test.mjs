@@ -16,6 +16,7 @@ async function loadInputHandler(execImpl) {
 }
 
 test("inline-bash expands RPC steer and follow-up input as user-origin text", async () => {
+  const { signal } = new AbortController();
   const { handler, harness } = await loadInputHandler(async (command, args, options) => {
     assert.equal(command, "bash");
     assert.equal(options.timeout, 30000);
@@ -35,7 +36,7 @@ test("inline-bash expands RPC steer and follow-up input as user-origin text", as
     streamingBehavior: "followUp",
   };
 
-  assert.deepEqual(await handler(steerEvent, { hasUI: false }), {
+  assert.deepEqual(await handler(steerEvent, { hasUI: false, signal }), {
     action: "transform",
     text: "Steer with printf steer output",
     images: undefined,
@@ -46,8 +47,8 @@ test("inline-bash expands RPC steer and follow-up input as user-origin text", as
     images: undefined,
   });
   assert.deepEqual(harness.execCalls, [
-    ["bash", ["-c", "printf steer"], { timeout: 30000 }],
-    ["bash", ["-c", "printf follow-up"], { timeout: 30000 }],
+    ["bash", ["-c", "printf steer"], { timeout: 30000, signal }],
+    ["bash", ["-c", "printf follow-up"], { timeout: 30000, signal: undefined }],
   ]);
 });
 
@@ -163,7 +164,7 @@ test("inline-bash keeps !{...} inside command output next to a later expansion",
     },
   );
   assert.deepEqual(harness.execCalls, [
-    ["bash", ["-c", "echo-nested"], { timeout: 30000 }],
-    ["bash", ["-c", "uname"], { timeout: 30000 }],
+    ["bash", ["-c", "echo-nested"], { timeout: 30000, signal: undefined }],
+    ["bash", ["-c", "uname"], { timeout: 30000, signal: undefined }],
   ]);
 });
