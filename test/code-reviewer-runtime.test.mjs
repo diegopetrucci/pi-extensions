@@ -515,3 +515,27 @@ test("runtime guard blocks unsafe calls, rewrites git bash commands, and enforce
       "Tool use is disabled on final code_reviewer turn 2/2. Answer now with the evidence already gathered.",
   });
 });
+
+test("code-reviewer git branch guard uses a strict read-only flag allowlist", async () => {
+  const mod = await loadRuntime();
+  const { getBlockedBashReason } = mod.__test__;
+  for (const command of [
+    "git branch -v -dv x",
+    "git branch -dv x",
+    "git branch --del x",
+    "git branch -Mv a b",
+    "git branch --mov a b",
+  ]) {
+    assert.notEqual(getBlockedBashReason(command), undefined, command);
+  }
+  for (const command of [
+    "git branch",
+    "git branch -a",
+    "git branch -vv",
+    "git branch --show-current",
+    "git branch --contains HEAD",
+    "git branch --list 'feat/*'",
+  ]) {
+    assert.equal(getBlockedBashReason(command), undefined, command);
+  }
+});

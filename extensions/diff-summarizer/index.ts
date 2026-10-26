@@ -141,11 +141,39 @@ const SAFE_GIT_BRANCH_FLAGS = new Set([
   "--remotes",
   "-v",
   "-vv",
-  "--show-current",
+  "--verbose",
+  "-l",
   "--list",
+  "--show-current",
+  "--column",
+  "--no-column",
+  "--color",
+  "--no-color",
+  "-i",
+  "--ignore-case",
+]);
+const SAFE_GIT_BRANCH_VALUE_FLAGS = new Set([
   "--contains",
+  "--no-contains",
   "--merged",
   "--no-merged",
+  "--points-at",
+  "--sort",
+  "--format",
+]);
+// Flags that make `git branch` list instead of create a branch from positional args.
+const GIT_BRANCH_LISTING_FLAGS = new Set([
+  "-a",
+  "--all",
+  "-r",
+  "--remotes",
+  "-l",
+  "--list",
+  "--contains",
+  "--no-contains",
+  "--merged",
+  "--no-merged",
+  "--points-at",
 ]);
 const SAFE_GIT_GLOBAL_FLAGS = new Set(["--no-pager", "--no-optional-locks"]);
 const SAFE_GIT_CONFIG_OVERRIDES = [
@@ -874,22 +902,27 @@ function getGitSubcommand(tokens: string[]): {
 function isSafeGitBranchCommand(tokens: string[], subcommandIndex: number): boolean {
   const args = tokens.slice(subcommandIndex + 1);
   if (args.length === 0) return true;
-  if (
-    args.some((arg) =>
-      /^(?:-(?:d|D|m|M|c|C|f)|--(?:delete|move|copy|force|set-upstream-to|unset-upstream))$/.test(
-        arg,
-      ),
-    )
-  ) {
+  let hasListingMode = false;
+  let hasPositional = false;
+  for (const arg of args) {
+    if (!arg.startsWith("-")) {
+      hasPositional = true;
+      continue;
+    }
+    const name = arg.split("=", 1)[0] ?? "";
+    const hasValue = arg.includes("=");
+    if (!hasValue && SAFE_GIT_BRANCH_FLAGS.has(arg)) {
+      if (GIT_BRANCH_LISTING_FLAGS.has(arg)) hasListingMode = true;
+      continue;
+    }
+    if (SAFE_GIT_BRANCH_VALUE_FLAGS.has(name)) {
+      if (GIT_BRANCH_LISTING_FLAGS.has(name)) hasListingMode = true;
+      continue;
+    }
     return false;
   }
-  return args.some(
-    (arg) =>
-      SAFE_GIT_BRANCH_FLAGS.has(arg) ||
-      arg.startsWith("--contains=") ||
-      arg.startsWith("--merged=") ||
-      arg.startsWith("--no-merged="),
-  );
+  if (args.includes("--show-current")) return !hasPositional;
+  return !hasPositional || hasListingMode;
 }
 
 function isSafeGitRemoteCommand(tokens: string[], subcommandIndex: number): boolean {

@@ -173,3 +173,34 @@ test("run details suffix is appended and empty output yields a failure summary",
   assert.match(report, /bash git diff/);
   assert.match(mod.__test__.appendRunDetails("", details), /no summary was produced/);
 });
+
+test("git branch guard uses a strict read-only flag allowlist", async (t) => {
+  const mod = await loadRuntime();
+  const root = await mkdtemp(path.join(os.tmpdir(), "diff-summarizer-branch-"));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const handlers = createGuardHandlers(
+    mod.__test__.createDiffSummarizerRuntimeGuardExtension({ cwd: root, maxTurns: 10 }),
+  );
+  const call = (command) => handlers.get("tool_call")({ toolName: "bash", input: { command } });
+  for (const command of [
+    "git branch -v -dv x",
+    "git branch -dv x",
+    "git branch --del x",
+    "git branch -Mv a b",
+    "git branch --mov a b",
+  ]) {
+    assert.equal((await call(command))?.block, true, command);
+  }
+  for (const command of [
+    "git branch",
+    "git branch -a",
+    "git branch -vv",
+    "git branch --show-current",
+    "git branch --contains HEAD",
+    "git branch --list 'feat/*'",
+  ]) {
+    assert.equal(await call(command), undefined, command);
+  }
+});

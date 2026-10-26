@@ -526,3 +526,26 @@ test("triage-comments runtime guard enforces read-only tools, default timeout, a
       "Tool use is disabled on final triage_comments turn 3/3. Answer now with the evidence already gathered.",
   });
 });
+
+test("triage-comments git branch guard uses a strict read-only flag allowlist", async () => {
+  const { getBlockedBashReason } = await loadTriageTestUtils();
+  for (const command of [
+    "git branch -v -dv x",
+    "git branch -dv x",
+    "git branch --del x",
+    "git branch -Mv a b",
+    "git branch --mov a b",
+  ]) {
+    assert.notEqual(getBlockedBashReason(command), undefined, command);
+  }
+  for (const command of [
+    "git branch",
+    "git branch -a",
+    "git branch -vv",
+    "git branch --show-current",
+    "git branch --contains HEAD",
+    "git branch --list 'feat/*'",
+  ]) {
+    assert.equal(getBlockedBashReason(command), undefined, command);
+  }
+});

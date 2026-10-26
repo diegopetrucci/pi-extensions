@@ -127,3 +127,26 @@ test("agent-workflow-audit runtime guard blocks unsafe calls, normalizes bash ti
       "Tool use is disabled on final agent-workflow-audit turn 2/2. Answer now with the evidence already gathered.",
   });
 });
+
+test("agent-workflow-audit git branch guard uses a strict read-only flag allowlist", async () => {
+  const { getBlockedBashReason } = await loadAuditTestUtils();
+  for (const command of [
+    "git branch -v -dv x",
+    "git branch -dv x",
+    "git branch --del x",
+    "git branch -Mv a b",
+    "git branch --mov a b",
+  ]) {
+    assert.notEqual(getBlockedBashReason(command, { planOnly: false }), undefined, command);
+  }
+  for (const command of [
+    "git branch",
+    "git branch -a",
+    "git branch -vv",
+    "git branch --show-current",
+    "git branch --contains HEAD",
+    "git branch --list 'feat/*'",
+  ]) {
+    assert.equal(getBlockedBashReason(command, { planOnly: false }), undefined, command);
+  }
+});
