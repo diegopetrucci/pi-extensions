@@ -24,6 +24,19 @@ const SUBAGENT_MCP_TOOLS = [
   "read_mcp_resource",
 ];
 
+const themeColorNames = `
+  accent border borderAccent borderMuted success error warning muted dim text
+  thinkingText selectedBg userMessageBg userMessageText customMessageBg customMessageText
+  customMessageLabel toolPendingBg toolSuccessBg toolErrorBg toolTitle toolOutput mdHeading
+  mdLink mdLinkUrl mdCode mdCodeBlock mdCodeBlockBorder mdQuote mdQuoteBorder mdHr
+  mdListBullet toolDiffAdded toolDiffRemoved toolDiffContext syntaxComment syntaxKeyword
+  syntaxFunction syntaxVariable syntaxString syntaxNumber syntaxType syntaxOperator
+  syntaxPunctuation thinkingOff thinkingMinimal thinkingLow thinkingMedium thinkingHigh
+  thinkingXhigh thinkingMax bashMode
+`
+  .trim()
+  .split(/\s+/);
+
 function createTool(
   name,
   execute = async () => ({ content: [{ type: "text", text: "fixture" }] }),
@@ -45,60 +58,6 @@ test("Pi 1.4.0 subagent allowlist: direct-exposure MCP tools are active/callable
   const promptDir = path.join(root, "fixture-prompts");
   const themeDir = path.join(root, "fixture-themes");
   await Promise.all([mkdir(skillDir), mkdir(promptDir), mkdir(themeDir)]);
-  const themeColorNames = [
-    "accent",
-    "border",
-    "borderAccent",
-    "borderMuted",
-    "success",
-    "error",
-    "warning",
-    "muted",
-    "dim",
-    "text",
-    "thinkingText",
-    "selectedBg",
-    "userMessageBg",
-    "userMessageText",
-    "customMessageBg",
-    "customMessageText",
-    "customMessageLabel",
-    "toolPendingBg",
-    "toolSuccessBg",
-    "toolErrorBg",
-    "toolTitle",
-    "toolOutput",
-    "mdHeading",
-    "mdLink",
-    "mdLinkUrl",
-    "mdCode",
-    "mdCodeBlock",
-    "mdCodeBlockBorder",
-    "mdQuote",
-    "mdQuoteBorder",
-    "mdHr",
-    "mdListBullet",
-    "toolDiffAdded",
-    "toolDiffRemoved",
-    "toolDiffContext",
-    "syntaxComment",
-    "syntaxKeyword",
-    "syntaxFunction",
-    "syntaxVariable",
-    "syntaxString",
-    "syntaxNumber",
-    "syntaxType",
-    "syntaxOperator",
-    "syntaxPunctuation",
-    "thinkingOff",
-    "thinkingMinimal",
-    "thinkingLow",
-    "thinkingMedium",
-    "thinkingHigh",
-    "thinkingXhigh",
-    "thinkingMax",
-    "bashMode",
-  ];
   const fixtureTheme = JSON.stringify({
     name: "fixture-theme",
     colors: Object.fromEntries(themeColorNames.map((name) => [name, "#00ff00"])),
@@ -405,19 +364,6 @@ const boundaryToolNames = [
   "custom_fixture_tool",
 ];
 
-const boundaryThemeColorNames = `
-  accent border borderAccent borderMuted success error warning muted dim text
-  thinkingText selectedBg userMessageBg userMessageText customMessageBg customMessageText
-  customMessageLabel toolPendingBg toolSuccessBg toolErrorBg toolTitle toolOutput mdHeading
-  mdLink mdLinkUrl mdCode mdCodeBlock mdCodeBlockBorder mdQuote mdQuoteBorder mdHr
-  mdListBullet toolDiffAdded toolDiffRemoved toolDiffContext syntaxComment syntaxKeyword
-  syntaxFunction syntaxVariable syntaxString syntaxNumber syntaxType syntaxOperator
-  syntaxPunctuation thinkingOff thinkingMinimal thinkingLow thinkingMedium thinkingHigh
-  thinkingXhigh thinkingMax bashMode
-`
-  .trim()
-  .split(/\s+/);
-
 function createBoundaryTool(
   name,
   {
@@ -456,7 +402,7 @@ async function createBoundaryResources(root) {
       path.join(themeDir, "boundary.json"),
       `${JSON.stringify({
         name: "boundary-theme",
-        colors: Object.fromEntries(boundaryThemeColorNames.map((name) => [name, "#00ff00"])),
+        colors: Object.fromEntries(themeColorNames.map((name) => [name, "#00ff00"])),
       })}\n`,
     ),
   ]);
@@ -877,10 +823,7 @@ test("Pi 1.4.0 subagent allowlists preserve explicit loadouts and restore defaul
       let created;
       let explicitRestored;
       let defaultRestored;
-      let absentTranscript;
-      let emptyTranscript;
-      let defaultAbsentTranscript;
-      let defaultEmptyTranscript;
+      const noTranscriptSessions = [];
       const extensionErrors = [];
       const captureExtensionError = (error) => extensionErrors.push(error);
       try {
@@ -1098,105 +1041,39 @@ test("Pi 1.4.0 subagent allowlists preserve explicit loadouts and restore defaul
           );
 
         if (scenario.positive) {
-          const absentResult = await createRestoredBoundarySession(environment, created.session, {
-            includeTranscript: false,
-            usesDefaultTools: false,
-            onExtensionError: captureExtensionError,
-          });
-          absentTranscript = absentResult.session;
-          assert.deepEqual(
-            absentResult.restorationToolNames,
-            [],
-            "explicit absent transcript must provide no restoration tools",
-          );
-          assertBoundarySurface(absentTranscript, scenario.allowlist, "absent transcript");
-          assertMcpPositiveControls(absentTranscript, scenario.allowlist, "absent transcript");
-          assertNoTranscriptBoundaryIsolation(
-            absentTranscript,
-            scenario.allowlist,
-            "absent transcript",
-          );
-
-          const emptyResult = await createRestoredBoundarySession(environment, created.session, {
-            transcriptTools: [],
-            usesDefaultTools: false,
-            onExtensionError: captureExtensionError,
-          });
-          emptyTranscript = emptyResult.session;
-          assert.deepEqual(
-            emptyResult.restorationToolNames,
-            [],
-            "explicit empty transcript must provide no restoration tools",
-          );
-          assertBoundarySurface(emptyTranscript, scenario.allowlist, "empty transcript");
-          assertMcpPositiveControls(emptyTranscript, scenario.allowlist, "empty transcript");
-          assertNoTranscriptBoundaryIsolation(
-            emptyTranscript,
-            scenario.allowlist,
-            "empty transcript",
-          );
-
-          const defaultAbsentResult = await createRestoredBoundarySession(
-            environment,
-            created.session,
+          const restorationCases = [
             {
+              label: "explicit absent transcript",
+              includeTranscript: false,
+              usesDefaultTools: false,
+            },
+            { label: "explicit empty transcript", transcriptTools: [], usesDefaultTools: false },
+            {
+              label: "default-tools absent transcript",
               includeTranscript: false,
               usesDefaultTools: true,
-              onExtensionError: captureExtensionError,
             },
-          );
-          defaultAbsentTranscript = defaultAbsentResult.session;
-          assert.deepEqual(
-            defaultAbsentResult.restorationToolNames,
-            [],
-            "default-tools absent transcript must provide no restoration tools",
-          );
-          assertBoundarySurface(
-            defaultAbsentTranscript,
-            scenario.allowlist,
-            "default-tools absent transcript",
-          );
-          assertMcpPositiveControls(
-            defaultAbsentTranscript,
-            scenario.allowlist,
-            "default-tools absent transcript",
-          );
-          assertNoTranscriptBoundaryIsolation(
-            defaultAbsentTranscript,
-            scenario.allowlist,
-            "default-tools absent transcript",
-          );
-
-          const defaultEmptyResult = await createRestoredBoundarySession(
-            environment,
-            created.session,
             {
+              label: "default-tools empty transcript",
               transcriptTools: [],
               usesDefaultTools: true,
-              onExtensionError: captureExtensionError,
             },
-          );
-          defaultEmptyTranscript = defaultEmptyResult.session;
-          assert.deepEqual(
-            defaultEmptyResult.restorationToolNames,
-            [],
-            "default-tools empty transcript must provide no restoration tools",
-          );
-          assertBoundarySurface(
-            defaultEmptyTranscript,
-            scenario.allowlist,
-            "default-tools empty transcript",
-          );
-          assertMcpPositiveControls(
-            defaultEmptyTranscript,
-            scenario.allowlist,
-            "default-tools empty transcript",
-          );
-          assertNoTranscriptBoundaryIsolation(
-            defaultEmptyTranscript,
-            scenario.allowlist,
-            "default-tools empty transcript",
-          );
+          ];
+          for (const { label, ...options } of restorationCases) {
+            const result = await createRestoredBoundarySession(environment, created.session, {
+              ...options,
+              onExtensionError: captureExtensionError,
+            });
+            noTranscriptSessions.push(result.session);
+            assert.deepEqual(
+              result.restorationToolNames,
+              [],
+              `${label} must provide no restoration tools`,
+            );
+            assertBoundarySurface(result.session, scenario.allowlist, label);
+            assertMcpPositiveControls(result.session, scenario.allowlist, label);
+            assertNoTranscriptBoundaryIsolation(result.session, scenario.allowlist, label);
+          }
         }
 
         assert.deepEqual(
@@ -1225,10 +1102,7 @@ test("Pi 1.4.0 subagent allowlists preserve explicit loadouts and restore defaul
           "restored loadout checks must not contact a provider",
         );
       } finally {
-        defaultEmptyTranscript?.dispose();
-        defaultAbsentTranscript?.dispose();
-        emptyTranscript?.dispose();
-        absentTranscript?.dispose();
+        for (const session of noTranscriptSessions.reverse()) session.dispose();
         defaultRestored?.dispose();
         explicitRestored?.dispose();
         created?.session.dispose();
