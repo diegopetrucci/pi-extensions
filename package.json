@@ -52,6 +52,8 @@
       "./extensions/context-cap/index.ts",
       "./extensions/context-inspector/index.ts",
       "./extensions/contrarian/index.ts",
+      "./extensions/developer/index.ts",
+      "./extensions/diff-summarizer/index.ts",
       "./extensions/dirty-repo-guard/index.ts",
       "./extensions/dynamic-context-pruning/index.ts",
       "./extensions/fast/index.ts",
@@ -64,9 +66,12 @@
       "./extensions/permission-gate/index.ts",
       "./extensions/project-mcp-json/index.ts",
       "./extensions/quiet-tools/index.ts",
+      "./extensions/repo-scout/index.ts",
       "./extensions/review/index.ts",
+      "./extensions/test-runner/index.ts",
       "./extensions/todo/index.ts",
-      "./extensions/triage-comments/index.ts"
+      "./extensions/triage-comments/index.ts",
+      "./extensions/web-scout/index.ts"
     ],
     "image": "https://raw.githubusercontent.com/diegopetrucci/pi-extensions/main/assets/oracle-preview.svg",
     "skills": [
