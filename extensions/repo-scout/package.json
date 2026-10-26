@@ -1,0 +1,40 @@
+{
+  "name": "@diegopetrucci/pi-repo-scout",
+  "version": "0.1.0",
+  "description": "A standalone pi extension that adds a read-only repo_scout subagent tool that scans a repository and reports stack, conventions, commands, and hotspots in an isolated child agent.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "repository",
+    "scout",
+    "subagent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/repo-scout"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

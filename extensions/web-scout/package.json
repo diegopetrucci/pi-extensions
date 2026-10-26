@@ -1,0 +1,41 @@
+{
+  "name": "@diegopetrucci/pi-web-scout",
+  "version": "0.1.0",
+  "description": "A standalone pi extension that adds a read-only web_scout subagent tool that researches a question on the web via Exa and returns citation-backed findings in an isolated child agent.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "web",
+    "scout",
+    "exa",
+    "subagent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/web-scout"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

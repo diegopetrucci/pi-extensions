@@ -1,0 +1,40 @@
+{
+  "name": "@diegopetrucci/pi-diff-summarizer",
+  "version": "0.1.0",
+  "description": "A standalone pi extension that adds a read-only diff_summarizer subagent tool that summarizes a diff and highlights review risk in an isolated child agent.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "diff",
+    "summary",
+    "subagent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegopetrucci/pi-extensions.git",
+    "directory": "extensions/diff-summarizer"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    ".pi-fleet-tested-version"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
