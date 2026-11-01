@@ -156,6 +156,22 @@ function setProcessPlatform(t, value) {
   });
 }
 
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+/** Asserts both OSC 99 chunks share one UUID id (optionally tmux-wrapped) and returns it. */
+function assertOsc99(writes, title, body, { tmux = false } = {}) {
+  assert.equal(writes.length, 2);
+  const wrap = (seq) => (tmux ? `\x1bPtmux;${seq.replaceAll("\x1b", "\x1b\x1b")}\x1b\\` : seq);
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const first = new RegExp(
+    `^${escape(wrap(`\x1b]99;i=@:d=0;${title}\x1b\\`)).replace("@", `(${UUID})`)}$`,
+  );
+  const m = writes[0].match(first);
+  assert.ok(m, `unexpected first chunk: ${JSON.stringify(writes[0])}`);
+  assert.equal(writes[1], wrap(`\x1b]99;i=${m[1]}:d=1:p=body;${body}\x1b\\`));
+  return m[1];
+}
+
 test("notify subscribes to settled runs instead of agent_end", async () => {
   const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
   const { pi, handlers } = createExtensionHarness();
@@ -233,10 +249,7 @@ test("notify uses trusted project config over global config and ignores untruste
     },
   );
 
-  assert.deepEqual(writes, [
-    "\x1b]99;i=1:d=0;Global Title\x1b\\",
-    "\x1b]99;i=1:p=body;Global Body\x1b\\",
-  ]);
+  assertOsc99(writes, "Global Title", "Global Body");
   assert.equal(execCalls.length, 0);
 });
 
@@ -419,10 +432,7 @@ test("notify auto-selects terminal backends and preserves OSC formatting", async
     },
   );
 
-  assert.deepEqual(writes, [
-    "\x1b]99;i=1:d=0;Edge Title\x1b\\",
-    "\x1b]99;i=1:p=body;Edge Body\x1b\\",
-  ]);
+  assertOsc99(writes, "Edge Title", "Edge Body");
 
   writes.length = 0;
   delete process.env.KITTY_WINDOW_ID;
@@ -523,10 +533,12 @@ test("notify wraps both OSC 99 writes and doubles their ESC terminators inside t
     },
   );
 
-  assert.deepEqual(writes, [
-    "\x1bPtmux;\x1b\x1b]99;i=1:d=0;Kitty Title\x1b\x1b\\\x1b\\",
-    "\x1bPtmux;\x1b\x1b]99;i=1:p=body;Kitty Body\x1b\x1b\\\x1b\\",
-  ]);
+  const firstId = assertOsc99(writes, "Kitty Title", "Kitty Body", { tmux: true });
+
+  writes.length = 0;
+  await handler({}, { cwd: projectDir, hasUI: true, isProjectTrusted: () => true });
+  const secondId = assertOsc99(writes, "Kitty Title", "Kitty Body", { tmux: true });
+  assert.notEqual(secondId, firstId);
 });
 
 test("notify honours tmuxPassthrough overrides in both directions", async (t) => {
