@@ -14,6 +14,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -168,8 +169,12 @@ function notifyOSC777(title: string, body: string, wrap: boolean): void {
 }
 
 function notifyOSC99(title: string, body: string, wrap: boolean): void {
-  writeTerminalSequence(`\x1b]99;i=1:d=0;${title}\x1b\\`, wrap);
-  writeTerminalSequence(`\x1b]99;i=1:p=body;${body}\x1b\\`, wrap);
+  // Kitty (>=0.36) treats a reused identifier as an update to the existing notification,
+  // which can suppress popups, so each notification needs a globally unique id. (Missing d=1
+  // was not the cause; a per-process counter would collide across restarts/sessions.)
+  const id = randomUUID();
+  writeTerminalSequence(`\x1b]99;i=${id}:d=0;${title}\x1b\\`, wrap);
+  writeTerminalSequence(`\x1b]99;i=${id}:d=1:p=body;${body}\x1b\\`, wrap);
 }
 
 function ringBell(): void {
