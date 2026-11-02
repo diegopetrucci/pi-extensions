@@ -1065,8 +1065,15 @@ function getBlockedBashReason(
     return "Local repo checkout cache is disabled for this Librarian call.";
   }
 
+  let pathScan = command
+    .replace(/\\\r?\n/g, "")
+    .split(options.workspace)
+    .join("<WORKSPACE>");
+  if (options.cacheEnabled) pathScan = pathScan.split(options.cacheRoot).join("<CACHE>");
+
   let scan = command
     .replace(/\\\r?\n/g, "")
+    .replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, (quoted) => (/[\s;&|()<>]/.test(quoted) ? "Q" : quoted))
     .replace(/['"]/g, "")
     // Prefixes must not hide the executable from any command-position check.
     .replace(
@@ -1097,7 +1104,7 @@ function getBlockedBashReason(
 
   if (
     /(^|[\s"'=])(?:~\/|\$HOME\b|\/etc\/|\/var\/|\/private\/|\/root\/|\/Users\/|\/home\/|\/opt\/)/.test(
-      scan,
+      pathScan,
     )
   ) {
     return "Librarian bash may only access its workspace and approved cache root.";

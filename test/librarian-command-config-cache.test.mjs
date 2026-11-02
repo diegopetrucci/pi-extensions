@@ -145,6 +145,7 @@ test("librarian bash blocks command substitution and unsafe command spellings", 
 
   for (const command of [
     'find . -name x "-delete"',
+    'find . -name "a;b" -delete',
     "find . '-exec' rm {} +",
     'find . -name x -"delete"',
     "find . -name x \\\n-delete",
@@ -155,6 +156,17 @@ test("librarian bash blocks command substitution and unsafe command spellings", 
       {
         block: true,
         reason: "Librarian bash blocks find actions that delete files or execute commands.",
+      },
+      command,
+    );
+  }
+
+  for (const command of ['cat "/etc/my file"', 'ls "$HOME/a b"']) {
+    assert.deepEqual(
+      await toolCall({ toolName: "bash", input: { command } }),
+      {
+        block: true,
+        reason: "Librarian bash may only access its workspace and approved cache root.",
       },
       command,
     );
@@ -188,6 +200,9 @@ test("librarian bash blocks command substitution and unsafe command spellings", 
     "find . -name '*.ts'",
     "gh search code 'createSession' --limit 5",
     'gh search code "rm -rf"',
+    'gh search code "foo; rm -rf x"',
+    "jq '(. // [])' result.json",
+    `jq 'map(. + {repo: "owner/repo"})' result.json`,
     "git add .",
     "ls .",
     'grep -r "find -delete" .',
