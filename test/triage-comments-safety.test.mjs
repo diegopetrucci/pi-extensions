@@ -399,6 +399,7 @@ test("triage-comments bash guard allows read-only inspection commands and blocks
     ["gh pr view 123 --web", /gh --web/],
     ["gh repo view -w", /gh --web/],
     ["gh pr view 123 -cw", /gh --web/],
+    ["gh pr view 123 -cw=true", /gh --web/],
     ["gh repo view -wb", /gh --web/],
     ["gh pr view 123 --web=true", /gh --web/],
     ["gh repo view -w=true", /gh --web/],
