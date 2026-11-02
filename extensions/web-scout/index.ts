@@ -416,12 +416,6 @@ function getModelRuntimeOption(ctx: {
   return modelRuntime ? { modelRuntime } : {};
 }
 
-function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
-  return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel)
-    ? (value as ThinkingLevel)
-    : undefined;
-}
-
 // Keep these local so the extension stays compatible with older pi peer installs that do not export clamp helpers.
 function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean {
   if (!model.reasoning) return level === "off";
@@ -975,7 +969,6 @@ export const __test__ = {
   createWebScoutCustomTools,
   buildSystemPrompt,
   buildUserPrompt,
-  normalizeThinkingLevel,
   resolveThinkingLevel,
   createEmptyUsage,
   addAssistantMessageUsage,

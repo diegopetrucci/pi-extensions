@@ -2,8 +2,7 @@
  * Parity tests: every local resolveToCwd mirror must produce the same result
  * as Pi's resolveToCwd for a fixed corpus of path inputs.
  *
- * Mirrors tested: permission-gate (exported directly), code-reviewer,
- * triage-comments, agent-workflow-audit, librarian (all via __test__).
+ * Mirrors are exported via __test__, except permission-gate's direct export.
  */
 
 import assert from "node:assert/strict";
@@ -35,13 +34,24 @@ const tcMod = await loadModule("extensions/triage-comments/index.ts");
 const awaMod = await loadModule("extensions/agent-workflow-audit/index.ts");
 const libMod = await loadModule("extensions/librarian/index.ts");
 
-/** All five mirrors keyed by name */
+const devMod = await loadModule("extensions/developer/index.ts");
+const dsMod = await loadModule("extensions/diff-summarizer/index.ts");
+const rsMod = await loadModule("extensions/repo-scout/index.ts");
+const trMod = await loadModule("extensions/test-runner/index.ts");
+const wsMod = await loadModule("extensions/web-scout/index.ts");
+
+/** Mirrors keyed by name */
 const mirrors = {
   "permission-gate": pgMod.resolveToCwd,
   "code-reviewer": crMod.__test__.resolveToCwd,
   "triage-comments": tcMod.__test__.resolveToCwd,
   "agent-workflow-audit": awaMod.__test__.resolveToCwd,
   librarian: libMod.__test__.resolveToCwd,
+  developer: devMod.__test__.resolveToCwd,
+  "diff-summarizer": dsMod.__test__.resolveToCwd,
+  "repo-scout": rsMod.__test__.resolveToCwd,
+  "test-runner": trMod.__test__.resolveToCwd,
+  "web-scout": wsMod.__test__.resolveToCwd,
 };
 
 const CWD = "/some/project";

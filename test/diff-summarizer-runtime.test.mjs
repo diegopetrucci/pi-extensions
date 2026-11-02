@@ -54,6 +54,11 @@ test("registers the diff_summarizer tool with the expected params", async () => 
   assert.equal(tools[0].parameters.required, undefined);
 });
 
+test("bash guard blocks grouped gh browser flags", async () => {
+  const { getBlockedBashReason } = (await loadRuntime()).__test__;
+  assert.match(getBlockedBashReason("gh pr view 1 -cw"), /blocks gh --web/);
+});
+
 test("runtime guard is read-only, blocks unsafe bash, and enforces turn budget", async (t) => {
   const mod = await loadRuntime();
   const { createDiffSummarizerRuntimeGuardExtension, SUBAGENT_MCP_TOOLS } = mod.__test__;
@@ -127,6 +132,7 @@ test("system prompt carries TLH diff collection and output format without superv
     "Appears violated",
     "Unclear from diff",
     "Report blockers in your final result",
+    "Do not modify files, install dependencies, or use the network except through read-only gh.",
   ]) {
     assert.ok(prompt.includes(needle), `prompt should include ${needle}`);
   }
