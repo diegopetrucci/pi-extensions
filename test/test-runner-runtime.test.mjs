@@ -74,9 +74,7 @@ test("exposes only bash plus MCP tools; bash is unrestricted with a default time
   assert.deepEqual([...BUILTIN_TOOL_NAMES], ["bash"]);
   assert.ok(SUBAGENT_MCP_TOOLS.includes("mcp__*"));
 
-  const handlers = createGuardHandlers(
-    createTestRunnerRuntimeGuardExtension({ cwd: "/repo", maxTurns: 5 }),
-  );
+  const handlers = createGuardHandlers(createTestRunnerRuntimeGuardExtension({ maxTurns: 5 }));
   const toolCall = handlers.get("tool_call");
   const call = (toolName, input = {}) => toolCall({ toolName, input });
 

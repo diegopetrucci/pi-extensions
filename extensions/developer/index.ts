@@ -672,6 +672,7 @@ export const __test__ = {
   resolveSubagentProjectTrusted,
   createMcpSubagentFactories,
   disposeSubagentSession,
+  resolveToCwd,
   createDeveloperRuntimeGuardExtension,
   assertMutationPathInsideCwd,
   buildSystemPrompt,

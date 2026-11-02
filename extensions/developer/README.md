@@ -55,7 +55,7 @@ The prompt preserves the TLH developer rules: implement exactly one task, stay i
 - `write` and `edit` paths must resolve inside the checkout, including through symlinks; other paths are rejected.
 - **`bash` is unrestricted and not sandboxed.** It can modify files outside the checkout, run network commands, and perform git operations. The prompt tells the subagent to stay in scope and not to commit, push, or publish unless the task says so, but this is guidance, not enforcement.
 - Runtime guards apply to built-in tools only; configured MCP tools run without confirmation and are limited only by prompt guidance.
-- The subagent has a 40-turn and 30-minute budget; tool use is disabled on the final turn so it can report.
+- The subagent has a 40-turn and 30-minute budget and a default 120-second timeout per `bash` call (applied when the model does not set one); tool use is disabled on the final turn so it can report.
 - The run is not transactional: if it fails or times out, files may already have been modified. Inspect the checkout.
 
 ## Example
