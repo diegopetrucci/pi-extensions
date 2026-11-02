@@ -179,12 +179,6 @@ function getModelRuntimeOption(ctx: {
   return modelRuntime ? { modelRuntime } : {};
 }
 
-function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
-  return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel)
-    ? (value as ThinkingLevel)
-    : undefined;
-}
-
 // Keep these local so the extension stays compatible with older pi peer installs that do not export clamp helpers.
 function isThinkingLevelSupported(model: PiModel, level: ThinkingLevel): boolean {
   if (!model.reasoning) return level === "off";
@@ -433,10 +427,7 @@ function resolveToCwd(rawPath: string, cwd: string): string {
   return path.isAbsolute(normalized) ? path.resolve(normalized) : path.resolve(base, normalized);
 }
 
-function createTestRunnerRuntimeGuardExtension(options: {
-  cwd: string;
-  maxTurns: number;
-}): ExtensionFactory {
+function createTestRunnerRuntimeGuardExtension(options: { maxTurns: number }): ExtensionFactory {
   return (pi) => {
     let currentTurn = 0;
 
@@ -557,10 +548,10 @@ export const __test__ = {
   resolveSubagentProjectTrusted,
   createMcpSubagentFactories,
   disposeSubagentSession,
+  resolveToCwd,
   createTestRunnerRuntimeGuardExtension,
   buildSystemPrompt,
   buildUserPrompt,
-  normalizeThinkingLevel,
   resolveThinkingLevel,
   createEmptyUsage,
   addAssistantMessageUsage,
@@ -594,12 +585,12 @@ export default function testRunnerExtension(pi: ExtensionAPI) {
     name: "test_runner",
     label: "Test Runner",
     description:
-      "Isolated test runner that executes exact shell validation steps in order using unrestricted bash and configured MCP tools, stops at the first failure, and reports PASS/FAIL per step without changing the repository.",
+      "Isolated test runner that executes exact shell validation steps in order using unrestricted bash and configured MCP tools, stops at the first failure, and reports PASS/FAIL per step.",
     promptSnippet:
       "Delegate exact validation commands to an isolated test-runner child agent that runs them in order, stops at the first failure, and reports PASS/FAIL per step with run details.",
     promptGuidelines: [
       "Use test_runner to run exact validation shell commands (for example npm ci, then npm test) in an isolated child agent; pass each command as one entry in steps, in order.",
-      "test_runner stops at the first failing step and never edits, fixes, installs, or commits on its own, but bash is unrestricted and not sandboxed: only pass commands you would run yourself.",
+      "test_runner is instructed to run assigned steps as given, stop at the first failure, and avoid extra edits, fixes, installs, or commits. This is prompt guidance, not enforcement; bash is unrestricted and not sandboxed, so only pass commands you would run yourself.",
     ],
     parameters: TestRunnerParams,
 
@@ -682,7 +673,7 @@ export default function testRunnerExtension(pi: ExtensionAPI) {
           noThemes: true,
           noContextFiles: true,
           extensionFactories: [
-            createTestRunnerRuntimeGuardExtension({ cwd, maxTurns: MAX_TURNS }),
+            createTestRunnerRuntimeGuardExtension({ maxTurns: MAX_TURNS }),
             ...createMcpSubagentFactories(),
           ],
           systemPromptOverride: () =>
