@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -176,14 +176,37 @@ test("context command offers flag completions and shows help without generating 
   assert.deepEqual(harness.execCalls, []);
 });
 
-test("context command writes a kept redacted report with --no-open and does not invoke pi.exec", async (t) => {
+for (const unknownFlags of ["--redct", "--redact=1", "-r", "--redct --redact=1"]) {
+  test(`context command rejects ${unknownFlags} without writing or opening a report`, async (t) => {
+    const harness = createExtensionHarness();
+    contextInspectorExtension(harness.pi);
+
+    const command = getCommand(harness, "context");
+    const commandContext = createCommandContext(t);
+
+    await command.handler(`--keep ${unknownFlags}`, commandContext.ctx);
+
+    assert.equal(commandContext.waitForIdleCalls, 0);
+    assert.equal(commandContext.notifications.length, 1);
+    const notification = commandContext.notifications[0];
+    assert.equal(notification.level, "error");
+    for (const flag of unknownFlags.split(" ")) {
+      assert.ok(notification.message.includes(flag));
+    }
+    assert.match(notification.message, /Usage: \/context /);
+    assert.deepEqual(readdirSync(commandContext.cwd), []);
+    assert.deepEqual(harness.execCalls, []);
+  });
+}
+
+test("context command writes a kept redacted report with --no-open and ignores non-flag words", async (t) => {
   const harness = createExtensionHarness();
   contextInspectorExtension(harness.pi);
 
   const command = getCommand(harness, "context");
   const commandContext = createCommandContext(t);
 
-  await command.handler("--no-open --keep --redact", commandContext.ctx);
+  await command.handler("notes --no-open --keep --redact only", commandContext.ctx);
 
   assert.equal(commandContext.waitForIdleCalls, 1);
   assert.equal(commandContext.notifications.at(-1).level, "info");
