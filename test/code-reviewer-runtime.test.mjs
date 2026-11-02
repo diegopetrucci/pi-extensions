@@ -390,6 +390,8 @@ test("blocks gh side-effecting flags on read-only commands", async () => {
   assert.match(getBlockedBashReason("gh api repos/owner/repo --cache=1h") ?? "", /gh api --cache/);
   assert.match(getBlockedBashReason("gh pr view 123 --web") ?? "", /gh --web/);
   assert.match(getBlockedBashReason("gh repo view -w") ?? "", /gh --web/);
+  assert.match(getBlockedBashReason("gh pr view 123 -cw") ?? "", /gh --web/);
+  assert.match(getBlockedBashReason("gh repo view -wb") ?? "", /gh --web/);
   assert.match(getBlockedBashReason("gh pr view 123 --web=true") ?? "", /gh --web/);
   assert.match(getBlockedBashReason("gh repo view -w=true") ?? "", /gh --web/);
   assert.equal(getBlockedBashReason("gh pr view 123"), undefined);
