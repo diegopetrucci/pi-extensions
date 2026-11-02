@@ -282,13 +282,14 @@ type AnalyzerState = {
   redact: boolean;
 };
 
-function parseArgs(args: string): CommandOptions {
-  const options: CommandOptions = {
+function parseArgs(args: string): CommandOptions & { unknownFlags: string[] } {
+  const options: CommandOptions & { unknownFlags: string[] } = {
     open: true,
     keep: false,
     redact: false,
     defaultDataset: "current",
     help: false,
+    unknownFlags: [],
   };
 
   for (const token of args
@@ -315,6 +316,9 @@ function parseArgs(args: string): CommandOptions {
       case "--help":
       case "-h":
         helpOption(options);
+        break;
+      default:
+        if (token.startsWith("-")) options.unknownFlags.push(token);
         break;
     }
   }
@@ -1729,6 +1733,10 @@ export default function contextInspectorExtension(pi: ExtensionAPI) {
     },
     handler: async (args, ctx) => {
       const options = parseArgs(args);
+      if (options.unknownFlags.length > 0) {
+        notify(ctx, `Unknown flags: ${options.unknownFlags.join(", ")}\n\n${usageText()}`, "error");
+        return;
+      }
       if (options.help) {
         notify(ctx, usageText(), "info");
         return;
