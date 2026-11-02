@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -7,7 +6,20 @@ import {
   type ExtensionAPI,
   type ToolExecutionMode,
 } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
+import { Type, type Static, type TUnsafe } from "typebox";
+
+// Local helper: pi-ai 1.5 StringEnum no longer returns a TypeBox schema, which breaks Static inference.
+function StringEnum<const T extends readonly string[]>(
+  values: T,
+  options: { description?: string; default?: T[number] } = {},
+): TUnsafe<T[number]> {
+  return Type.Unsafe<T[number]>({
+    type: "string",
+    enum: [...values],
+    ...(options.description !== undefined && { description: options.description }),
+    ...(options.default !== undefined && { default: options.default }),
+  });
+}
 
 const GNOSIS_TIMEOUT_MS = 30_000;
 

@@ -560,3 +560,37 @@ test("contrarian renderCall and renderResult cover fallback, collapsed error, an
   assert.match(expanded, /Strongest opposing case/);
   assert.match(expanded, /Usage/);
 });
+
+test("oracle, contrarian, and librarian collapsed results use host keyHint when provided", async () => {
+  const keyHint = (binding, description) => `[${binding}|CUSTOM+X ${description}]`;
+  const cases = [
+    ["extensions/oracle/index.ts", "oracle", createOracleDetails({ exitCode: 1 })],
+    ["extensions/contrarian/index.ts", "contrarian", createOracleDetails({ exitCode: 1 })],
+    [
+      "extensions/librarian/index.ts",
+      "librarian",
+      createLibrarianDetails({
+        status: "error",
+        error: Array.from({ length: 20 }, (_v, i) => `e${i}`).join("\n"),
+      }),
+    ],
+  ];
+  for (const [file, name, details] of cases) {
+    const tool = await getTool(file, name);
+    const output = renderLines(
+      tool.renderResult(
+        {
+          content: [
+            { type: "text", text: Array.from({ length: 20 }, (_v, i) => `l${i}`).join("\n") },
+          ],
+          details,
+        },
+        { expanded: false, isPartial: false },
+        plainTheme,
+        { keyHint },
+      ),
+    ).join("\n");
+    assert.match(output, /\(\[app\.tools\.expand\|CUSTOM\+X to expand\]\)/, name);
+    assert.doesNotMatch(output, /Ctrl\+O/, name);
+  }
+});

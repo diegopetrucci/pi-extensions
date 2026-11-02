@@ -1276,6 +1276,10 @@ function createEmptyUsage(): Usage {
   };
 }
 
+// Tracks whether every usage record added to an accumulator was provider-billed.
+// Absent entry = empty accumulator (flag omitted).
+const providerBilledCostState = new WeakMap<Usage, boolean>();
+
 function addUsage(total: Usage, usage: Usage): void {
   total.input += usage.input || 0;
   total.output += usage.output || 0;
@@ -1290,6 +1294,11 @@ function addUsage(total: Usage, usage: Usage): void {
   total.cost.cacheRead += usage.cost?.cacheRead || 0;
   total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
   total.cost.total += usage.cost?.total || 0;
+  const allProviderBilled =
+    (providerBilledCostState.get(total) ?? true) && usage.cost?.totalFromProvider === true;
+  providerBilledCostState.set(total, allProviderBilled);
+  if (allProviderBilled) total.cost.totalFromProvider = true;
+  else delete total.cost.totalFromProvider;
 }
 
 type AssistantLikeMessage = {
@@ -1504,6 +1513,14 @@ export const __test__ = {
   CLEANUP_LOCK_STALE_MS,
   CLEANUP_LOCK_MAX_LEASE_MS,
 };
+
+function formatExpandHint(
+  theme: { fg(color: any, text: string): string },
+  context?: { keyHint?: (keybinding: any, description: string) => string },
+): string {
+  if (typeof context?.keyHint !== "function") return theme.fg("muted", "(Ctrl+O to expand)");
+  return `${theme.fg("muted", "(")}${context.keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+}
 
 export default function librarianExtension(pi: ExtensionAPI) {
   let cachePreference: CacheMode = DEFAULT_CACHE_MODE;
@@ -2065,7 +2082,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
       );
     },
 
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as LibrarianDetails | undefined;
       if (!details) {
         const first = result.content[0];
@@ -2131,7 +2148,7 @@ export default function librarianExtension(pi: ExtensionAPI) {
           theme.fg("toolOutput", previewLines.join("\n")),
         ];
         if (answer.split("\n").length > previewLines.length)
-          parts.push(theme.fg("muted", "(Ctrl+O to expand)"));
+          parts.push(formatExpandHint(theme, context));
         if (toolLines.length) parts.push("", theme.fg("muted", "Tools:"), ...toolLines);
         return new Text(parts.join("\n"), 0, 0);
       }

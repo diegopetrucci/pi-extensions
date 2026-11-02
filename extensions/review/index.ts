@@ -1223,6 +1223,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
         container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
 
         return {
+          capturesViewportInput: true,
           render(width: number) {
             return container.render(width);
           },
@@ -1234,7 +1235,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
             tui.requestRender();
           },
         };
-      });
+      }, SELECTOR_BLOCKED_OPTIONS("Select a review preset"));
 
       if (!result) return null;
 
@@ -1305,6 +1306,10 @@ export default function reviewExtension(pi: ExtensionAPI) {
     }
   }
 
+  // Pi >= 1.5.0 reports "waiting for user" while this inline component is shown; older hosts ignore it.
+  const SELECTOR_BLOCKED_OPTIONS = (message: string) =>
+    ({ blocked: { kind: "question", message } }) as Record<string, unknown>;
+
   async function showSearchableSelect<T>(
     ctx: ExtensionContext,
     options: {
@@ -1370,6 +1375,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
       applyFilter();
 
       return {
+        capturesViewportInput: true,
         render(width: number) {
           return container.render(width);
         },
@@ -1378,6 +1384,8 @@ export default function reviewExtension(pi: ExtensionAPI) {
         },
         handleInput(data: string) {
           if (
+            keybindings.matches(data, "tui.select.pageUp") ||
+            keybindings.matches(data, "tui.select.pageDown") ||
             keybindings.matches(data, "tui.select.up") ||
             keybindings.matches(data, "tui.select.down") ||
             keybindings.matches(data, "tui.select.confirm") ||
@@ -1397,7 +1405,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
           tui.requestRender();
         },
       };
-    });
+    }, SELECTOR_BLOCKED_OPTIONS(title));
   }
 
   async function showBranchSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {

@@ -168,3 +168,37 @@ test("inline-bash keeps !{...} inside command output next to a later expansion",
     ["bash", ["-c", "uname"], { timeout: 30000, signal: undefined }],
   ]);
 });
+
+async function runWithResult(result) {
+  const { handler } = await loadInputHandler(async () => result);
+  const notes = [];
+  const out = await handler(
+    { type: "input", text: "x !{cmd} y", source: "rpc" },
+    { hasUI: true, ui: { notify: (m) => notes.push(m) } },
+  );
+  return { out, notes };
+}
+
+test("inline-bash reports nonzero exit with empty stderr as failure", async () => {
+  const { out, notes } = await runWithResult({ stdout: "partial\n", stderr: "", code: 2 });
+  assert.equal(out.text, "x partial y");
+  assert.match(notes[0], /\(exit code 2\)/);
+});
+
+test("inline-bash reports truncated output as failure", async () => {
+  const { out, notes } = await runWithResult({
+    stdout: "partial\n",
+    stderr: "",
+    code: 1,
+    truncated: true,
+  });
+  assert.match(out.text, /partial/);
+  assert.match(out.text, /output exceeded limit; command terminated/);
+  assert.match(notes[0], /output exceeded limit/);
+});
+
+test("inline-bash success and older-host result shape are not failures", async () => {
+  const { out, notes } = await runWithResult({ stdout: "ok\n", stderr: "", code: 0 });
+  assert.equal(out.text, "x ok y");
+  assert.doesNotMatch(notes[0], /\(exit code|exceeded/);
+});

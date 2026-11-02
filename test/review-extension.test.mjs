@@ -147,8 +147,8 @@ function createReviewCommandContext({
           editorCalls.push({ prompt, initialValue });
           return nextEditor(prompt, initialValue);
         },
-        async custom(renderer) {
-          customCalls.push({ renderer });
+        async custom(renderer, options) {
+          customCalls.push({ renderer, options });
           return nextCustom(renderer);
         },
         setEditorText(text) {
@@ -1137,3 +1137,86 @@ test(
     assert.equal(reviewTestApi.getReviewRuntimeState().reviewOriginId, "origin-cancelled-return");
   },
 );
+
+const pageKeybindings = {
+  matches(data, id) {
+    return (
+      (id === "tui.select.pageDown" && data === "\x1b[6~") ||
+      (id === "tui.select.pageUp" && data === "\x1b[5~") ||
+      (id === "tui.select.up" && data === "\x1b[A") ||
+      (id === "tui.select.down" && data === "\x1b[B") ||
+      (id === "tui.select.confirm" && data === "\r") ||
+      (id === "tui.select.cancel" && data === "\x1b")
+    );
+  },
+};
+const plainTheme = {
+  fg: (_key, text) => text,
+  bold: (text) => text,
+};
+
+test(
+  "review selector dialogs are blocked, capture viewport input, and page with PageUp/PageDown",
+  { concurrency: false },
+  async () => {
+    reviewTestApi.resetReviewRuntimeState();
+    const { setKeybindings, KeybindingsManager, TUI_KEYBINDINGS } =
+      await import("@earendil-works/pi-tui");
+    setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS));
+
+    const branches = ["feature/review-tests", "main"];
+    for (let i = 0; i < 30; i++) branches.push(`branch-${i}`);
+    const components = [];
+    const capture = (renderer) => {
+      const component = renderer({ requestRender() {} }, plainTheme, pageKeybindings, () => {});
+      components.push(component);
+      return null;
+    };
+
+    const harness = createReviewHarness({ execImpl: createCleanGitExec({ branches }) });
+    const context = createReviewCommandContext({ customResponses: [capture] });
+    await harness.reviewHandler("", context.ctx);
+    assert.deepEqual(context.customCalls[0].options, {
+      blocked: { kind: "question", message: "Select a review preset" },
+    });
+    assert.equal(components[0].capturesViewportInput, true);
+
+    const harness2 = createReviewHarness({ execImpl: createCleanGitExec({ branches }) });
+    const context2 = createReviewCommandContext({
+      customResponses: ["baseBranch", capture, null],
+    });
+    await harness2.reviewHandler("", context2.ctx);
+    const searchCall = context2.customCalls[1];
+    assert.equal(searchCall.options.blocked.kind, "question");
+    assert.ok(searchCall.options.blocked.message);
+    const searchable = components[1];
+    assert.equal(searchable.capturesViewportInput, true);
+    const selected = (c) => c.render(100).findIndex((line) => line.includes("→"));
+    const before = selected(searchable);
+    searchable.handleInput("\x1b[6~");
+    const afterDown = selected(searchable);
+    assert.ok(afterDown - before > 1, `PageDown should page (${before} -> ${afterDown})`);
+    searchable.handleInput("\x1b[5~");
+    assert.equal(selected(searchable), before);
+  },
+);
+
+test("summary navigation loader is not marked blocked", { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+  const branchEntries = [
+    { type: "custom", customType: "review-session", data: { active: true, originId: "origin-1" } },
+  ];
+  reviewTestApi.applyReviewState(createReviewStateContext({ branchEntries }).ctx);
+  const harness = createReviewHarness();
+  const context = createReviewCommandContext({
+    hasUI: true,
+    mode: "tui",
+    branchEntries,
+    selectResponses: ["Return and summarize"],
+    customResponses: [() => ({ status: "success" })],
+    navigateTreeImpl: async () => ({ cancelled: false }),
+  });
+  await harness.endReviewHandler("", context.ctx);
+  assert.equal(context.customCalls.length, 1);
+  assert.equal(context.customCalls[0].options?.blocked, undefined);
+});

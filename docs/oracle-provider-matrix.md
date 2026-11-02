@@ -7,41 +7,41 @@ Expected top-ranked oracle targets from the current hardcoded provider preferenc
 
 | Provider | Intended top pick | Notes |
 |---|---|---|
-| `amazon-bedrock` | `global.anthropic.claude-opus-5-5` | Prefers the stable global Bedrock alias, then the pinned canonical/regional Opus 5.5 IDs before generic availability fallback; older Opus/Fable, GPT-6 Astra, GPT-6.1 Sol regional/global IDs, GPT-5.6 tiers, Claude Sonnet, and Grok 4.6 remain below it. |
+| `amazon-bedrock` | `global.anthropic.claude-opus-5-5` | Prefers the stable global Bedrock alias, then the pinned canonical/regional Opus 5.5 IDs before generic availability fallback; older Opus/Fable, GPT-6 Astra, GPT-6.1 Sol regional/global IDs, GPT-6.1 Terra regional/global IDs, GPT-5.6 tiers, Claude Sonnet, and Grok 4.6 remain below it. |
 | `ant-ling` | `Ling-2.6-1T` | Then Ling 2.6 Flash. |
 | `anthropic` | `claude-opus-5-5` | Then Claude Opus 5, Fable, older Opus IDs, and Claude Sonnet 5 before Claude Sonnet 4. |
-| `azure` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol/Terra, GPT-6 Luna, GPT-5.6 Luna, current GPT-5 aliases, newer GPT-5.x releases, and o-series reasoning models. Legacy alias `azure-openai-responses` (Pi 1.0.0–1.0.2) carries identical patterns. |
+| `azure` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol, exact GPT-6.1 Terra, GPT-5.6 Terra, GPT-6 Luna, GPT-5.6 Luna, current GPT-5 aliases, newer GPT-5.x releases, and o-series reasoning models. Legacy alias `azure-openai-responses` (Pi 1.0.0–1.0.2) carries identical patterns. |
 | `baseten` | `moonshotai/Kimi-K3` | Then GLM 5.3, DeepSeek V4 Pro variants, GLM 5.2, Nemotron Ultra, GPT OSS 120B, DeepSeek V4 Flash 0731, and GLM 5.2 Fast. |
 | `cerebras` | `gpt-oss-120b` | Then Qwen3.8 27B. |
 | `cloudflare-ai-gateway` | `claude-fable-5` | Then current Claude Opus, GPT-6 Astra, GPT-5.x, and Workers AI Kimi K2.7, DeepSeek V4 Pro, GLM 5.3/5.2, Nemotron, and GPT OSS reasoning models. |
 | `cloudflare-workers-ai` | `@cf/moonshotai/kimi-k2.7-code` | Then DeepSeek V4 Pro, GLM 5.3/5.2, Kimi K2.6, Nemotron, GPT OSS, Qwen 3.8, and GLM fallbacks. |
 | `deepseek` | `deepseek-v4-pro` | Then DeepSeek V4.1 Flash. |
 | `fireworks` | `accounts/fireworks/models/kimi-k3` | Then Kimi K3 Fast, MiniMax M3, and GPT OSS 120B. Six Pi 0.99-unreachable legacy patterns were removed without activating a replacement; any future mapping is deferred policy. |
-| `github-copilot` | `claude-opus-5.5` | Then Claude Opus 5/Fable and Opus 4.8, GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 fallbacks, GPT-5.3 Codex, Claude Sonnet, Grok 4.7/4.6/4.5, and Kimi K3. |
+| `github-copilot` | `claude-opus-5.5` | Then Claude Opus 5/Fable and Opus 4.8, GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol/Luna with exact GPT-6.1 Terra and GPT-5.6 fallbacks, GPT-5.3 Codex, Claude Sonnet, Grok 4.7/4.6/4.5, and Kimi K3. |
 | `google` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.1 Pro, Gemini 3.5 Flash, Gemini 2.5 Pro/Flash, and Gemini 3.1/2.5 Flash Lite variants. |
 | `google-vertex` | `gemini-3.1-pro-preview-customtools` | Then Gemini 3.5 Flash, Gemini 3 Flash, and Gemini 2.5 Flash variants. |
 | `groq` | `openai/gpt-oss-120b` | Then Llama 3.3 70B, then GPT OSS 20B. |
 | `huggingface` | `moonshotai/Kimi-K3` | Then GLM 5.1/5.3 Flash and DeepSeek/Kimi/MiniMax/Qwen reasoning models. |
-| `kimi-coding` | `k3` | Then Kimi For Coding / HighSpeed. |
+| `kimi-coding` | `k3.1-pro` | Then Kimi K3.1 Pro HighSpeed, Kimi K3, and Kimi For Coding / HighSpeed. |
 | `meta` | `muse-spark-1.3` | Then the 1.3 Contributor tier, Muse Spark 1.2/Contributor, and Muse Spark 1.1. |
 | `minimax` | `MiniMax-M3` | Then MiniMax M2.7 HighSpeed / regular M2.7. |
 | `minimax-cn` | `MiniMax-M3` | Then MiniMax M2.7 HighSpeed / regular M2.7. |
 | `mistral` | `mistral-medium-2604` | Then Mistral Medium 3.5/latest, Magistral, and ZAI GLM 5.2. |
-| `moonshotai` | `kimi-k3` | Then Kimi K2.7 Code/HighSpeed and K2.6. |
-| `moonshotai-cn` | `kimi-k3` | Then Kimi K2.7 Code/HighSpeed and K2.6. |
+| `moonshotai` | `kimi-k3.1-pro` | Then Kimi K3.1 Pro HighSpeed, Kimi K3, Kimi K2.7 Code/HighSpeed and K2.6. |
+| `moonshotai-cn` | `kimi-k3.1-pro` | Then Kimi K3.1 Pro HighSpeed, Kimi K3, Kimi K2.7 Code/HighSpeed and K2.6. |
 | `nvidia` | `nvidia/nemotron-3-ultra-550b-a55b` | Then Kimi K2.6 and Nemotron Nano Omni reasoning. |
-| `openai` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol/Terra, GPT-6 Luna, GPT-5.6 Luna, current GPT-5 aliases, and o-series reasoning models. |
-| `openai-codex` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol/Terra, GPT-6 Luna, and GPT-5.6 Luna. |
+| `openai` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol, exact GPT-6.1 Terra, GPT-5.6 Terra, GPT-6 Luna, GPT-5.6 Luna, current GPT-5 aliases, and o-series reasoning models. |
+| `openai-codex` | `gpt-6-astra` | Then GPT-6.1 Sol, GPT-6 Sol, GPT-5.6 Sol, exact GPT-6.1 Terra, GPT-5.6 Terra, GPT-6 Luna, and GPT-5.6 Luna. |
 | `opencode` | `claude-opus-5-5` | Then Claude Opus 5/Fable, GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 fallbacks, GPT-5.5/5.4, older Claude Opus models, Grok 4.6/4.5, Gemini 3.5, GLM, Kimi, Qwen, and MiniMax. |
-| `opencode-go` | `deepseek-v4-pro` | Then GLM 5.3/5.2, Qwen 3.7 Plus, MiMo 2.5 Pro/2.5, MiniMax M3, Kimi K3/K2.7 Code, and Grok 4.7. Four Pi 0.99-unreachable legacy patterns were removed without replacement; future model policy is deferred. |
-| `openrouter` | `anthropic/claude-opus-5.5` | Prefers the exact base ID before `:batch`/pro aliases; aliases remain generic fallbacks. Then Claude Opus 5/Fable/latest, older Claude Opus models, GPT-6 Astra, normal GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 fallbacks, Gemini Pro/Gemini 3.5, Kimi K3/K2.7 Code/K2.6/K2 Thinking, Grok 4.7/4.6/4.5, DeepSeek, MiniMax, and GLM. |
+| `opencode-go` | `deepseek-v4-pro` | Then GLM 5.3/5.2, Qwen 3.7 Plus, MiMo 2.5 Pro/2.5, MiniMax M3, Kimi K3.1 Pro/K3/K2.7 Code, and Grok 4.7. Four Pi 0.99-unreachable legacy patterns were removed without replacement; future model policy is deferred. |
+| `openrouter` | `anthropic/claude-opus-5.5` | Prefers the exact base ID before `:batch`/pro aliases; aliases remain generic fallbacks. Then Claude Opus 5/Fable/latest, older Claude Opus models, GPT-6 Astra, normal GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 fallbacks (GPT-6.1 Terra Pro, then exact GPT-6.1 Terra, ahead of GPT-5.6 Terra), Gemini Pro/Gemini 3.5, Kimi K3.1 Pro/K3/K2.7 Code/K2.6/K2 Thinking, Grok 4.7/4.6/4.5, DeepSeek, MiniMax, and GLM. |
 | `qwen-token-plan` | `qwen3.8-max` | Then Qwen 3.7/3.6, DeepSeek V4 Pro, GLM 5.2, Kimi K2.7, and MiniMax fallbacks. |
 | `qwen-token-plan-cn` | `qwen3.8-max` | Then Qwen 3.7/3.6, DeepSeek V4 Pro, GLM 5.2, Kimi K2.7, and MiniMax fallbacks. |
 | `qwen-token-plan-individual` | `qwen3.8-max` | Then Qwen 3.7 Max/Plus, Qwen 3.6 Flash, DeepSeek V4 Pro, GLM 5.2, and DeepSeek V4 Flash 0731 fallbacks. |
 | `radius` | `gpt-6-astra` | Then Claude Opus 5.5/5, GPT-6 Sol with GPT-5.6 Sol/Terra, GPT-6 Luna with GPT-5.6 Luna, Claude Fable, current GPT/Claude fallbacks, Kimi K3, DeepSeek V4.1 Flash, GLM, and lower-cost reasoning tiers. Two Pi 0.99-unreachable legacy strings were removed without replacement; future model policy is deferred. |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | Then Kimi K3, GLM 5.3 Flash/5.2, Qwen 3.7/3.6, MiniMax M3, and GPT OSS 120B. Four Pi 0.99/1.0.4-unreachable legacy strings were removed without replacement; future model policy is deferred. |
 | `typesafe` | `—` | Pi 0.99 exposes TypeSafe here as a classifier-only provider; it has no chat model for Oracle/Contrarian preference selection. |
-| `vercel-ai-gateway` | `anthropic/claude-opus-5.5` | Prefers the exact base ID before `-fast` aliases; aliases remain generic fallbacks. Then Claude Opus 5/Fable and older Opus models, Claude Sonnet, GPT-6 Astra, normal GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 and Codex fallbacks, Kimi, DeepSeek, Qwen, Gemini, Grok 4.7/4.6/4.5, MiniMax, and GLM. |
+| `vercel-ai-gateway` | `anthropic/claude-opus-5.5` | Prefers the exact base ID before `-fast` aliases; aliases remain generic fallbacks. Then Claude Opus 5/Fable and older Opus models, Claude Sonnet, GPT-6 Astra, normal GPT-6.1 Sol, GPT-6 Sol/Luna with GPT-5.6 and Codex fallbacks (exact GPT-6.1 Terra ahead of GPT-5.6 Terra), Kimi K3.1 Pro/HighSpeed then K3 and older Kimi, DeepSeek, Qwen, Gemini, Grok 4.7/4.6/4.5, MiniMax, and GLM. |
 | `xai` | `grok-4.7` | Then Grok 4.6, 4.5, and 4.3. |
 | `xiaomi` | `mimo-v2.6-pro-ultraspeed` | Then MiMo 2.6 Pro and MiMo 2.6 Flash. |
 | `xiaomi-token-plan-ams` | `mimo-v2.6-pro` | Then MiMo 2.6 Flash. |

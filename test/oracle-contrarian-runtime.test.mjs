@@ -221,6 +221,7 @@ test("oracle aggregates usage across fallback attempts, exposes parent tool usag
     costOutput: 0.66,
     costCacheRead: 0.11,
     costCacheWrite: 0.13999999999999999,
+    costFromProvider: false,
     turns: 2,
     contextTokens: 32,
   });
@@ -328,6 +329,7 @@ test("contrarian aggregates usage across fallback attempts, exposes parent tool 
     costOutput: 0.22999999999999998,
     costCacheRead: 0.059000000000000004,
     costCacheWrite: 0.07,
+    costFromProvider: false,
     turns: 2,
     contextTokens: 18,
   });

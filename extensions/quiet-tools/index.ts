@@ -285,8 +285,15 @@ function formatMcpCallLine(toolName: string, args: unknown, theme: RenderTheme):
   return `${formatToolTitle(toolName, theme)}${argsStr ? ` ${theme.fg("toolOutput", argsStr)}` : ""}`;
 }
 
-function formatExpandHint(theme: RenderTheme): string {
-  return `${theme.fg("muted", "(")}${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+function formatExpandHint(
+  theme: RenderTheme,
+  context?: { keyHint?: (keybinding: any, description: string) => string },
+): string {
+  const hint =
+    typeof context?.keyHint === "function"
+      ? context.keyHint("app.tools.expand", "to expand")
+      : keyHint("app.tools.expand", "to expand");
+  return `${theme.fg("muted", "(")}${hint}${theme.fg("muted", ")")}`;
 }
 
 function formatFailedMarker(theme: RenderTheme): string {
@@ -401,7 +408,7 @@ export function createQuietResolver(): ToolRendererResolver {
           ? formatQuietCallLine(toolName, args, theme)
           : formatMcpCallLine(toolName, args, theme);
         const status = quietContext.isError ? formatFailedMarker(theme) : "";
-        const hint = formatExpandHint(theme);
+        const hint = formatExpandHint(theme, context);
         component.setLinesRenderer((width) => [
           truncateQuietCallLine(line, status, width),
           truncateToWidth(hint, width, "..."),

@@ -500,6 +500,10 @@ function createEmptyUsage(): Usage {
   };
 }
 
+// Tracks whether every usage record added to an accumulator was provider-billed.
+// Absent entry = empty accumulator (flag omitted).
+const providerBilledCostState = new WeakMap<Usage, boolean>();
+
 function addUsage(total: Usage, usage: Usage): void {
   total.input += usage.input || 0;
   total.output += usage.output || 0;
@@ -514,6 +518,11 @@ function addUsage(total: Usage, usage: Usage): void {
   total.cost.cacheRead += usage.cost?.cacheRead || 0;
   total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
   total.cost.total += usage.cost?.total || 0;
+  const allProviderBilled =
+    (providerBilledCostState.get(total) ?? true) && usage.cost?.totalFromProvider === true;
+  providerBilledCostState.set(total, allProviderBilled);
+  if (allProviderBilled) total.cost.totalFromProvider = true;
+  else delete total.cost.totalFromProvider;
 }
 
 type AssistantLikeMessage = {
