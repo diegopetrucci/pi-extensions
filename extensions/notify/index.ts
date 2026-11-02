@@ -86,11 +86,54 @@ const DEFAULT_CONFIG: NotifyConfig = {
   },
 };
 
+const CONFIG_ENUMS: Record<string, readonly string[]> = {
+  "terminal.backend": ["auto", "osc777", "osc99", "none"],
+  "terminal.tmuxPassthrough": ["auto", "always", "never"],
+  "desktop.backend": ["auto", "macos", "linux", "windows-toast", "none"],
+  "sound.backend": ["auto", "macos", "linux", "windows-beep", "command", "none"],
+};
+
+function validateConfig(
+  parsed: unknown,
+  defaults: object,
+  path: string,
+  prefix = "",
+): Record<string, unknown> {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    console.error(
+      `Warning: Invalid config in ${path}: expected an object${prefix ? ` for ${prefix}` : ""}.`,
+    );
+    return {};
+  }
+
+  const fields = parsed as Record<string, unknown>;
+  const config: Record<string, unknown> = {};
+  for (const [field, defaultValue] of Object.entries(defaults)) {
+    if (!Object.hasOwn(fields, field)) continue;
+    const value = fields[field];
+    const name = prefix ? `${prefix}.${field}` : field;
+    if (typeof defaultValue === "object") {
+      config[field] = validateConfig(value, defaultValue, path, name);
+    } else if (typeof value !== typeof defaultValue) {
+      console.error(`Warning: Invalid config in ${path}: wrong type for ${name}.`);
+    } else if (
+      (typeof value === "number" && !Number.isFinite(value)) ||
+      (CONFIG_ENUMS[name] && !CONFIG_ENUMS[name].includes(value as string))
+    ) {
+      console.error(`Warning: Invalid config in ${path}: invalid value for ${name}.`);
+    } else {
+      config[field] = value;
+    }
+  }
+  return config;
+}
+
 function readConfigFile(path: string): Partial<NotifyConfig> {
   if (!existsSync(path)) return {};
 
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as Partial<NotifyConfig>;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    return validateConfig(parsed, DEFAULT_CONFIG, path) as Partial<NotifyConfig>;
   } catch (error) {
     console.error(`Warning: Could not parse ${path}: ${error}`);
     return {};
@@ -183,7 +226,7 @@ function ringBell(): void {
 
 function runCommand(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
-    execFile(command, args, (error) => resolve(!error));
+    execFile(command, args, { timeout: 10_000 }, (error) => resolve(!error));
   });
 }
 

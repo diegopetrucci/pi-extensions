@@ -657,7 +657,7 @@ test("notify selects the expected desktop backend commands for auto detection", 
   assert.match(windowsCall?.args[2] ?? "", /ToastNotificationManager/);
   assert.match(windowsCall?.args[2] ?? "", /CreateTextNode\('Ready''s body'\)/);
   assert.match(windowsCall?.args[2] ?? "", /CreateToastNotifier\('Pi''s App'\)/);
-  assert.equal(windowsCall?.options, undefined);
+  assert.deepEqual(windowsCall?.options, { timeout: 10_000 });
 
   delete process.env.WT_SESSION;
   setProcessPlatform(t, "darwin");
@@ -673,7 +673,7 @@ test("notify selects the expected desktop backend commands for auto detection", 
   assert.deepEqual(execCalls.shift(), {
     command: "osascript",
     args: ["-e", 'display notification "Ready\'s body" with title "Pi\'s App"'],
-    options: undefined,
+    options: { timeout: 10_000 },
   });
 
   setProcessPlatform(t, "linux");
@@ -689,7 +689,7 @@ test("notify selects the expected desktop backend commands for auto detection", 
   assert.deepEqual(execCalls.shift(), {
     command: "notify-send",
     args: ["Pi's App", "Ready's body"],
-    options: undefined,
+    options: { timeout: 10_000 },
   });
   assert.equal(execCalls.length, 0);
 });
@@ -745,7 +745,7 @@ test("notify selects sound commands and falls back from canberra to paplay on li
   assert.deepEqual(execCalls.shift(), {
     command: "powershell.exe",
     args: ["-NoProfile", "-Command", "[console]::beep(880, 120)"],
-    options: undefined,
+    options: { timeout: 10_000 },
   });
 
   delete process.env.WT_SESSION;
@@ -762,12 +762,12 @@ test("notify selects sound commands and falls back from canberra to paplay on li
     {
       command: "canberra-gtk-play",
       args: ["-i", "complete"],
-      options: undefined,
+      options: { timeout: 10_000 },
     },
     {
       command: "paplay",
       args: ["/usr/share/sounds/freedesktop/stereo/complete.oga"],
-      options: undefined,
+      options: { timeout: 10_000 },
     },
   ]);
 });
@@ -824,3 +824,133 @@ test("notify falls back to valid config and warns when project config JSON is in
     ),
   );
 });
+
+for (const [name, config, warning] of [
+  ["numeric title", { title: 42 }, "wrong type for title"],
+  ["null body", { body: null }, "wrong type for body"],
+  ["string enabled", { enabled: "false" }, "wrong type for enabled"],
+  [
+    "string interactive flag",
+    { onlyWhenInteractive: "false" },
+    "wrong type for onlyWhenInteractive",
+  ],
+  ...["terminal", "desktop", "bell", "sound"].map((field) => [
+    `string channel ${field}`,
+    { channels: { [field]: "false" } },
+    `wrong type for channels.${field}`,
+  ]),
+  [
+    "string frequency",
+    { sound: { frequencyHz: "1000); Write-Output injected; #" } },
+    "wrong type for sound.frequencyHz",
+  ],
+  ["string duration", { sound: { durationMs: "250" } }, "wrong type for sound.durationMs"],
+  ...["name", "linuxSoundId", "command"].map((field) => [
+    `numeric sound ${field}`,
+    { sound: { [field]: 42 } },
+    `wrong type for sound.${field}`,
+  ]),
+  ...["terminal", "desktop", "sound"].map((section) => [
+    `invalid ${section} backend`,
+    { [section]: { backend: "invalid" } },
+    `invalid value for ${section}.backend`,
+  ]),
+  [
+    "invalid tmux passthrough",
+    { terminal: { tmuxPassthrough: "invalid" } },
+    "invalid value for terminal.tmuxPassthrough",
+  ],
+  ...[null, [], "invalid"].map((value) => [
+    `root ${JSON.stringify(value)}`,
+    value,
+    "expected an object.",
+  ]),
+  ...["channels", "terminal", "desktop", "sound"].flatMap((section) =>
+    [null, [], "invalid"].map((value) => [
+      `${section} ${JSON.stringify(value)}`,
+      { [section]: value },
+      `expected an object for ${section}`,
+    ]),
+  ),
+]) {
+  test(`notify ignores ${name} and warns`, async (t) => {
+    const { agentDir, projectDir } = setupTempDirs(t);
+    setAgentDirEnv(t, agentDir);
+    setEnvVar(t, "TMUX", undefined);
+    setEnvVar(t, "KITTY_WINDOW_ID", undefined);
+    setEnvVar(t, "WT_SESSION", "test-session");
+    writeNotifyConfig(path.join(agentDir, "extensions", "notify.json"), {
+      channels: { bell: false, sound: true },
+    });
+    const configPath = path.join(projectDir, CONFIG_DIR_NAME, "notify.json");
+    writeNotifyConfig(configPath, config);
+    const errors = captureConsoleErrors(t);
+    const writes = captureStdout(t);
+    const calls = patchExecFile(t, ({ callback }) => callback(null, "", ""));
+    const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
+    const { pi, handlers } = createExtensionHarness();
+    notifyExtension(pi);
+
+    await assert.doesNotReject(() =>
+      handlers.get("agent_settled")(
+        {},
+        {
+          cwd: projectDir,
+          hasUI: true,
+          isProjectTrusted: () => true,
+        },
+      ),
+    );
+
+    assert.deepEqual(writes, ["\x1b]777;notify;Pi;Ready for input\x07"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].command, "powershell.exe");
+    assert.match(calls[0].args[2], /CreateToastNotifier\('Pi'\)/);
+    assert.match(calls[0].args[2], /CreateTextNode\('Ready for input'\)/);
+    assert.deepEqual(calls[1], {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-Command", "[console]::beep(1000, 250)"],
+      options: { timeout: 10_000 },
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].includes(configPath));
+    assert.ok(errors[0].includes(warning), errors[0]);
+  });
+}
+
+for (const field of ["frequencyHz", "durationMs"]) {
+  test(`notify rejects non-finite ${field} and handles command timeouts`, async (t) => {
+    const { agentDir, projectDir } = setupTempDirs(t);
+    setAgentDirEnv(t, agentDir);
+    writeFileSync(
+      path.join(agentDir, "extensions", "notify.json"),
+      `{
+      "channels": { "terminal": false, "desktop": false, "bell": false, "sound": true },
+      "sound": { "backend": "windows-beep", "${field}": 1e400 }
+    }`,
+    );
+    const errors = captureConsoleErrors(t);
+    const calls = patchExecFile(t, ({ options, callback }) => {
+      assert.deepEqual(options, { timeout: 10_000 });
+      callback(Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" }));
+    });
+    const notifyExtension = await loadFreshExtension("extensions/notify/index.ts");
+    const { pi, handlers } = createExtensionHarness();
+    notifyExtension(pi);
+
+    await assert.doesNotReject(() =>
+      handlers.get("agent_settled")(
+        {},
+        {
+          cwd: projectDir,
+          hasUI: true,
+        },
+      ),
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args[2], "[console]::beep(1000, 250)");
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].includes(`invalid value for sound.${field}`));
+  });
+}
