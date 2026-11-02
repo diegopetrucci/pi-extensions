@@ -69,6 +69,6 @@ Use repo_scout to orient me in this repository before I add a new command:
 
 ## Limitations
 
-- The subagent has an 8-turn and 8-minute budget; tool use is disabled on the final turn so it can answer.
+- The subagent has an 8-turn and 8-minute budget and a default 30-second timeout per `bash` call (applied when the model does not set one); tool use is disabled on the final turn so it can answer.
 - The report samples representative files only; it is an orientation aid, not an exhaustive review.
 - `gh`-based inspection is available only when GitHub CLI is installed and authenticated; the tool works on local repositories without it.

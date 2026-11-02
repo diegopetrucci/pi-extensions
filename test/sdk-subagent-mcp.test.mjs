@@ -1,13 +1,12 @@
 /**
  * End-to-end integration test: MCP servers connect inside SDK subagent sessions.
  *
- * Each of the four SDK-session extensions (code-reviewer, librarian, triage-comments,
- * agent-workflow-audit) is loaded via ts.transpileModule, exactly as
+ * Each SDK-session extension in EXTENSIONS is loaded via ts.transpileModule, exactly as
  * code-reviewer-runtime.test.mjs does.  The real helpers exported through __test__ are
  * used for every scenario.
  *
  * Scenarios:
- *   A. resolveSubagentProjectTrusted unit tests (all 4 extensions)
+ *   A. resolveSubagentProjectTrusted unit tests (each extension in EXTENSIONS)
  *   B. trust integration (one extension end-to-end):
  *        host untrusted  → project mcp server NOT spawned; global server connects
  *        host trusted + same cwd → project server connects
@@ -103,6 +102,40 @@ const EXTENSIONS = [
       mod.__test__.createAuditRuntimeGuardExtension({ cwd, maxTurns: 5, planOnly: false }),
     baseTools: ["read", "grep", "find", "ls", "bash"],
   },
+  {
+    label: "developer",
+    source: "extensions/developer/index.ts",
+    makeGuard: (mod, cwd) =>
+      mod.__test__.createDeveloperRuntimeGuardExtension({ cwd, maxTurns: 5 }),
+    baseTools: ["read", "write", "edit", "grep", "find", "ls", "bash"],
+  },
+  {
+    label: "diff-summarizer",
+    source: "extensions/diff-summarizer/index.ts",
+    makeGuard: (mod, cwd) =>
+      mod.__test__.createDiffSummarizerRuntimeGuardExtension({ cwd, maxTurns: 5 }),
+    baseTools: ["read", "grep", "find", "ls", "bash"],
+  },
+  {
+    label: "repo-scout",
+    source: "extensions/repo-scout/index.ts",
+    makeGuard: (mod, cwd) =>
+      mod.__test__.createRepoScoutRuntimeGuardExtension({ cwd, maxTurns: 5 }),
+    baseTools: ["read", "grep", "find", "ls", "bash"],
+  },
+  {
+    label: "test-runner",
+    source: "extensions/test-runner/index.ts",
+    makeGuard: (mod, cwd) =>
+      mod.__test__.createTestRunnerRuntimeGuardExtension({ cwd, maxTurns: 5 }),
+    baseTools: ["bash"],
+  },
+  {
+    label: "web-scout",
+    source: "extensions/web-scout/index.ts",
+    makeGuard: (mod, cwd) => mod.__test__.createWebScoutRuntimeGuardExtension({ cwd, maxTurns: 5 }),
+    baseTools: ["read", "grep", "find", "ls", "web_search", "fetch_url"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -180,7 +213,7 @@ async function makeSession(mod, { cwd, agentDir, projectTrusted, guardFactory, t
 }
 
 // ============================================================================
-// A. resolveSubagentProjectTrusted — unit tests (all 4 extensions)
+// A. resolveSubagentProjectTrusted — unit tests (each extension in EXTENSIONS)
 // ============================================================================
 
 for (const ext of EXTENSIONS) {
@@ -514,8 +547,20 @@ for (const ext of EXTENSIONS) {
     );
 
     for (const blocked of ["write", "edit", "codemode"]) {
-      assert.equal(session.getActiveToolNames().includes(blocked), false, `${blocked} not active`);
-      assert.equal(session.getToolDefinition(blocked), undefined, `${blocked} no definition`);
+      await t.test(
+        `${blocked} absent`,
+        {
+          skip: ext.baseTools.includes(blocked) && `${ext.label} intentionally exposes ${blocked}`,
+        },
+        () => {
+          assert.equal(
+            session.getActiveToolNames().includes(blocked),
+            false,
+            `${blocked} not active`,
+          );
+          assert.equal(session.getToolDefinition(blocked), undefined, `${blocked} no definition`);
+        },
+      );
     }
 
     await waitUntil(() => existsSync(pidFile));
@@ -694,7 +739,7 @@ test("absent-factories fallback: session builds cleanly when namespace lacks MCP
 });
 
 // ============================================================================
-// F. isMcpCompatibleVersion — unit tests (all 4 extensions)
+// F. isMcpCompatibleVersion — unit tests (each extension in EXTENSIONS)
 //    Tests: 0.99.0, 1.0.3, 1.0.4, 1.1.0, 2.0.0, missing, garbage
 // ============================================================================
 
@@ -726,7 +771,7 @@ for (const ext of EXTENSIONS) {
 }
 
 // ============================================================================
-// G. Bind-failure cleanup (table-driven across all 4 extensions)
+// G. Bind-failure cleanup (table-driven across EXTENSIONS)
 //    Simulates a bind failure: MCP server is spawned, an extension factory's
 //    session_start throws, disposeSubagentSession must still clean up the server.
 //    Validates that assigning session BEFORE bindExtensions makes cleanup reachable.

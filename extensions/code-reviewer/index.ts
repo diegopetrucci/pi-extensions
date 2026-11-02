@@ -1562,9 +1562,11 @@ function getBlockedGhReason(command: string): string | undefined {
   if (
     tokens.some((token) => {
       const lowerToken = token.toLowerCase();
+      const cluster = /^-([a-z]{2,})(?:=|$)/i.exec(token);
       return (
         lowerToken === "--web" ||
         lowerToken === "-w" ||
+        (cluster && cluster[1].toLowerCase().includes("w")) ||
         lowerToken.startsWith("--web=") ||
         lowerToken.startsWith("-w=")
       );
