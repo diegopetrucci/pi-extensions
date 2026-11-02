@@ -55,17 +55,18 @@ export default function (pi: ExtensionAPI) {
         const output = bashResult.stdout || bashResult.stderr || "";
         const trimmed = trimAndLimit(output);
 
-        if (bashResult.code !== 0 && bashResult.stderr) {
-          expansions.push({
-            command,
-            output: trimmed,
-            error: `exit code ${bashResult.code}`,
-          });
-        } else {
-          expansions.push({ command, output: trimmed });
+        const truncated = (bashResult as { truncated?: boolean }).truncated === true;
+        let error: string | undefined;
+        if (truncated) {
+          error = `output exceeded limit; command terminated (exit code ${bashResult.code})`;
+        } else if (bashResult.killed) {
+          error = `command killed or timed out (exit code ${bashResult.code})`;
+        } else if (bashResult.code !== 0) {
+          error = `exit code ${bashResult.code}`;
         }
+        expansions.push(error ? { command, output: trimmed, error } : { command, output: trimmed });
 
-        parts.push(trimmed);
+        parts.push(truncated ? `${trimmed}\n[inline-bash: ${error}]` : trimmed);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         expansions.push({ command, output: "", error: errorMsg });

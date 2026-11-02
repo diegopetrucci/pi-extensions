@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   getMarkdownTheme,
@@ -11,7 +11,20 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type TUnsafe } from "typebox";
+
+// Local helper: pi-ai 1.5 StringEnum no longer returns a TypeBox schema, which breaks Static inference.
+function StringEnum<const T extends readonly string[]>(
+  values: T,
+  options: { description?: string; default?: T[number] } = {},
+): TUnsafe<T[number]> {
+  return Type.Unsafe<T[number]>({
+    type: "string",
+    enum: [...values],
+    ...(options.description !== undefined && { description: options.description }),
+    ...(options.default !== undefined && { default: options.default }),
+  });
+}
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 type ThinkingLevelMap = Partial<Record<ThinkingLevel, unknown | null>>;
@@ -64,6 +77,8 @@ interface UsageStats {
   costOutput: number;
   costCacheRead: number;
   costCacheWrite: number;
+  /** Undefined = no usage recorded; true only if every record was provider-billed. */
+  costFromProvider?: boolean;
   turns: number;
   contextTokens: number;
 }
@@ -133,6 +148,7 @@ const CONTRARIAN_MODEL_PREFERENCES = [
   "gpt-6-sol ",
   "gpt-6-sol",
   "gpt-5.6-sol",
+  "gpt-6.1-terra ",
   "gpt-5.6-terra",
   "openai/gpt-6-luna ",
   "gpt-6-luna ",
@@ -175,6 +191,7 @@ const AZURE_MODEL_PREFERENCES = [
   "gpt-6-sol ",
   "gpt-6-sol",
   "gpt-5.6-sol",
+  "gpt-6.1-terra ",
   "gpt-5.6-terra",
   "gpt-6-luna ",
   "gpt-6-luna",
@@ -220,6 +237,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "us.openai.gpt-6.1-sol ",
     "openai.gpt-6.1-sol ",
     "openai.gpt-5.6-sol",
+    "global.openai.gpt-6.1-terra ",
+    "us.openai.gpt-6.1-terra ",
+    "openai.gpt-6.1-terra ",
     "openai.gpt-5.6-terra",
     "openai.gpt-5.6-luna",
     "claude-sonnet-5",
@@ -309,6 +329,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -358,7 +379,13 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "MiniMaxAI/MiniMax-M2.5",
     "Qwen/Qwen3-Coder-Next",
   ],
-  "kimi-coding": ["k3", "kimi-for-coding ", "kimi-for-coding-highspeed"],
+  "kimi-coding": [
+    "k3.1-pro ",
+    "k3.1-pro-highspeed",
+    "k3",
+    "kimi-for-coding ",
+    "kimi-for-coding-highspeed",
+  ],
   meta: [
     "muse-spark-1.3 ",
     "muse-spark-1.3-contributor",
@@ -375,7 +402,6 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "magistral-medium-latest",
     "devstral-medium-latest",
     "mistral-large-latest",
-    "mistral-large-2411",
     "mistral-medium-2508",
     "mistral-small-2603",
     "devstral-2512",
@@ -388,6 +414,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -414,6 +441,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -469,6 +497,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "mimo-v2.5-pro",
     "mimo-v2.5",
     "minimax-m3",
+    "kimi-k3.1-pro ",
     "kimi-k3",
     "kimi-k2.7-code ",
     "grok-4.7 ",
@@ -492,6 +521,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-6-sol",
     "openai/gpt-5.6-sol-pro",
     "openai/gpt-5.6-sol",
+    "openai/gpt-6.1-terra-pro ",
+    "openai/gpt-6.1-terra ",
     "openai/gpt-5.6-terra-pro",
     "openai/gpt-5.6-terra",
     "openai/gpt-6-luna ",
@@ -506,6 +537,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "~google/gemini-pro-latest",
     "google/gemini-3.5-flash ",
     "google/gemini-2.5-pro",
+    "moonshotai/kimi-k3.1-pro ",
     "moonshotai/kimi-k3",
     "moonshotai/kimi-k2.7-code ",
     "~moonshotai/kimi-latest",
@@ -572,13 +604,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-sonnet-5",
-    "gpt-5.5",
-    "gpt-5.4 ",
-    "gpt-5.3-codex ",
     "kimi-k3",
     "glm-5.3 ",
     "deepseek-v4.1-flash",
-    "gpt-5.4-mini",
     "glm-5.3-flash",
   ],
   together: [
@@ -609,6 +637,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-6-sol ",
     "openai/gpt-6-sol",
     "openai/gpt-5.6-sol",
+    "openai/gpt-6.1-terra ",
     "openai/gpt-5.6-terra",
     "openai/gpt-6-luna ",
     "openai/gpt-6-luna",
@@ -621,6 +650,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-5.2-codex",
     "openai/gpt-5.1-codex",
     "openai/gpt-5-codex",
+    "moonshotai/kimi-k3.1-pro ",
+    "moonshotai/kimi-k3.1-pro-highspeed",
     "moonshotai/kimi-k3",
     "moonshotai/kimi-k2.7-code ",
     "moonshotai/kimi-k2.7-code-highspeed",
@@ -657,8 +688,22 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   ],
   zai: ["glm-5.3 ", "glm-5.2 ", "glm-5-turbo", "glm-4.7"],
   "zai-coding-cn": ["glm-5.3 ", "glm-5.3-highspeed", "glm-5.3-flash", "glm-4.6v"],
-  moonshotai: ["kimi-k3", "kimi-k2.7-code ", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
-  "moonshotai-cn": ["kimi-k3", "kimi-k2.7-code ", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
+  moonshotai: [
+    "kimi-k3.1-pro ",
+    "kimi-k3.1-pro-highspeed",
+    "kimi-k3",
+    "kimi-k2.7-code ",
+    "kimi-k2.7-code-highspeed",
+    "kimi-k2.6",
+  ],
+  "moonshotai-cn": [
+    "kimi-k3.1-pro ",
+    "kimi-k3.1-pro-highspeed",
+    "kimi-k3",
+    "kimi-k2.7-code ",
+    "kimi-k2.7-code-highspeed",
+    "kimi-k2.6",
+  ],
 };
 
 const CONTRARIAN_SYSTEM_PROMPT = [
@@ -746,6 +791,9 @@ function mergeUsageStats(target: UsageStats, source: UsageStats | undefined): Us
   target.costOutput += source.costOutput;
   target.costCacheRead += source.costCacheRead;
   target.costCacheWrite += source.costCacheWrite;
+  if (source.costFromProvider !== undefined) {
+    target.costFromProvider = (target.costFromProvider ?? true) && source.costFromProvider;
+  }
   target.turns += source.turns;
   target.contextTokens = source.contextTokens || target.contextTokens;
   return target;
@@ -766,6 +814,7 @@ function usageStatsToToolUsage(stats: UsageStats): Usage {
       cacheRead: stats.costCacheRead,
       cacheWrite: stats.costCacheWrite,
       total: stats.cost,
+      ...(stats.costFromProvider === true ? { totalFromProvider: true } : {}),
     },
   };
 }
@@ -793,6 +842,8 @@ function addUsageStats(
   target.costOutput += source.cost?.output || 0;
   target.costCacheRead += source.cost?.cacheRead || 0;
   target.costCacheWrite += source.cost?.cacheWrite || 0;
+  target.costFromProvider =
+    (target.costFromProvider ?? true) && source.cost?.totalFromProvider === true;
   if (options.updateContextTokens) {
     target.contextTokens = source.totalTokens || target.contextTokens;
   }
@@ -1580,6 +1631,10 @@ type ContrarianExtensionDeps = {
 };
 
 export const __test__ = {
+  addUsageStats,
+  createEmptyUsage,
+  mergeUsageStats,
+  usageStatsToToolUsage,
   buildSessionFallbackSelection,
   createContrarianExtension,
   findAvailableModel,
@@ -1589,6 +1644,14 @@ export const __test__ = {
   resolveThinkingLevel,
   selectContrarianModel,
 };
+
+function formatExpandHint(
+  theme: { fg(color: any, text: string): string },
+  context?: { keyHint?: (keybinding: any, description: string) => string },
+): string {
+  if (typeof context?.keyHint !== "function") return theme.fg("muted", "(Ctrl+O to expand)");
+  return `${theme.fg("muted", "(")}${context.keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+}
 
 export default function contrarianExtension(pi: ExtensionAPI) {
   createContrarianExtension(pi);
@@ -1972,7 +2035,7 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
       );
     },
 
-    renderResult(result, { expanded }, theme) {
+    renderResult(result, { expanded }, theme, context) {
       const details = result.details as ContrarianDetails | undefined;
       const body = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
       if (!details) return new Text(body, 0, 0);
@@ -1996,7 +2059,7 @@ function createContrarianExtension(pi: ExtensionAPI, deps: ContrarianExtensionDe
         if (usage) text += `\n\n${theme.fg("dim", usage)}`;
         if (isError && details.stderr)
           text += `\n${theme.fg("error", renderCollapsedText(details.stderr, 4))}`;
-        text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+        text += `\n${formatExpandHint(theme, context)}`;
         return new Text(text, 0, 0);
       }
 

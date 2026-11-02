@@ -575,6 +575,10 @@ function createEmptyUsage(): Usage {
   };
 }
 
+// Tracks whether every usage record added to an accumulator was provider-billed.
+// Absent entry = empty accumulator (flag omitted).
+const providerBilledCostState = new WeakMap<Usage, boolean>();
+
 function addUsage(total: Usage, usage: Usage): void {
   total.input += usage.input || 0;
   total.output += usage.output || 0;
@@ -589,6 +593,11 @@ function addUsage(total: Usage, usage: Usage): void {
   total.cost.cacheRead += usage.cost?.cacheRead || 0;
   total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
   total.cost.total += usage.cost?.total || 0;
+  const allProviderBilled =
+    (providerBilledCostState.get(total) ?? true) && usage.cost?.totalFromProvider === true;
+  providerBilledCostState.set(total, allProviderBilled);
+  if (allProviderBilled) total.cost.totalFromProvider = true;
+  else delete total.cost.totalFromProvider;
 }
 
 type AssistantLikeMessage = {
@@ -2692,6 +2701,14 @@ export const __test__ = {
   classifyRunFailure,
 };
 
+function formatExpandHint(
+  theme: { fg(color: any, text: string): string },
+  context?: { keyHint?: (keybinding: any, description: string) => string },
+): string {
+  if (typeof context?.keyHint !== "function") return theme.fg("muted", "(Ctrl+O to expand)");
+  return `${theme.fg("muted", "(")}${context.keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+}
+
 export default function triageCommentsExtension(pi: ExtensionAPI) {
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "triage_comments") return undefined;
@@ -2968,7 +2985,7 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
       );
     },
 
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as TriageDetails | undefined;
       if (!details) {
         const first = result.content[0];
@@ -3012,7 +3029,7 @@ export default function triageCommentsExtension(pi: ExtensionAPI) {
         const lines = answer.split("\n");
         const previewLines = lines.slice(0, COLLAPSED_PREVIEW_LINES);
         const parts = [header, cwdLine, "", theme.fg("toolOutput", previewLines.join("\n"))];
-        if (lines.length > previewLines.length) parts.push(theme.fg("muted", "(Ctrl+O to expand)"));
+        if (lines.length > previewLines.length) parts.push(formatExpandHint(theme, context));
         if (toolLines.length) parts.push("", theme.fg("muted", "Read-only checks:"), ...toolLines);
         return new Text(parts.join("\n"), 0, 0);
       }

@@ -538,3 +538,21 @@ test("delegated bash timers are cleared when a running row finishes collapsed", 
     );
   }
 });
+
+test("quiet resolver prefers host-injected keyHint and falls back to the import", () => {
+  const resolver = createQuietResolver();
+  const renderers = resolver("find", () => ({}));
+  const args = { pattern: "src/**/*.ts" };
+  const injected = renderers.renderCall(
+    args,
+    theme,
+    context({ keyHint: (binding, description) => `[${binding}|CUSTOM+X ${description}]` }),
+  );
+  assert.match(
+    injected.render(200)[1],
+    /<muted>\(<\/muted>\[app\.tools\.expand\|CUSTOM\+X to expand\]<muted>\)<\/muted>/,
+  );
+  const fallback = renderers.renderCall(args, theme, context());
+  assert.doesNotMatch(fallback.render(200)[1], /CUSTOM\+X/);
+  assert.match(fallback.render(200)[1], /to expand/);
+});

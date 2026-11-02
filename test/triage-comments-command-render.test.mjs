@@ -344,3 +344,31 @@ test("triage_comments renderResult covers fallback, partial, collapsed, and expa
   assert.match(expanded, /Heading/);
   assert.match(expanded, /Body paragraph/);
 });
+
+test("triage_comments collapsed result uses host keyHint when provided", async () => {
+  const harness = createTriageHarness();
+  triageCommentsExtension(harness.pi);
+  const tool = getTool(harness, "triage_comments");
+  const output = renderLines(
+    tool.renderResult(
+      {
+        content: [
+          { type: "text", text: Array.from({ length: 20 }, (_v, i) => `line ${i + 1}`).join("\n") },
+        ],
+        details: {
+          cwd: "/repo",
+          commentCount: 1,
+          turns: 1,
+          startedAt: 0,
+          toolCalls: [],
+          status: "done",
+        },
+      },
+      { expanded: false, isPartial: false },
+      plainTheme,
+      { keyHint: (binding, description) => `[${binding}|CUSTOM+X ${description}]` },
+    ),
+  ).join("\n");
+  assert.match(output, /\(\[app\.tools\.expand\|CUSTOM\+X to expand\]\)/);
+  assert.doesNotMatch(output, /Ctrl\+O/);
+});

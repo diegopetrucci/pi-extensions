@@ -52,7 +52,8 @@ test("Pi 0.87.1 Meta and Radius ladders prefer their current frontier models", (
     const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
     assert.equal(firstCatalogMatchId("meta", preferences.meta), "muse-spark-1.3");
     assert.equal(firstCatalogMatchId("radius", preferences.radius), "gpt-6-astra");
-    assert.ok(preferences.radius.includes("gpt-5.4-mini"));
+    assert.ok(preferences.radius.includes("kimi-k3"));
+    assert.equal(preferences.radius.includes("gpt-5.4-mini"), false);
   }
 });
 
@@ -277,6 +278,7 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "mimo-v2.5-pro",
       "mimo-v2.5",
       "minimax-m3",
+      "kimi-k3.1-pro ",
       "kimi-k3",
       "kimi-k2.7-code ",
       "grok-4.7 ",
@@ -299,13 +301,9 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "claude-fable-5",
       "claude-opus-4-8",
       "claude-sonnet-5",
-      "gpt-5.5",
-      "gpt-5.4 ",
-      "gpt-5.3-codex ",
       "kimi-k3",
       "glm-5.3 ",
       "deepseek-v4.1-flash",
-      "gpt-5.4-mini",
       "glm-5.3-flash",
     ],
     together: [
@@ -1013,5 +1011,118 @@ test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", 
       false,
       `extensions/fast/index.ts unexpectedly fast-enabled ${model}`,
     );
+  }
+});
+
+const TERRA_61_PATTERNS = {
+  azure: ["gpt-6.1-terra "],
+  "azure-openai-responses": ["gpt-6.1-terra "],
+  "github-copilot": ["gpt-6.1-terra "],
+  openai: ["gpt-6.1-terra "],
+  "openai-codex": ["gpt-6.1-terra "],
+  openrouter: ["openai/gpt-6.1-terra-pro ", "openai/gpt-6.1-terra "],
+  "vercel-ai-gateway": ["openai/gpt-6.1-terra "],
+};
+
+test("Pi 1.5.0 ranks exact GPT-6.1 Terra below every Sol and above GPT-5.6 Terra", () => {
+  const bedrockTerra = [
+    "global.openai.gpt-6.1-terra ",
+    "us.openai.gpt-6.1-terra ",
+    "openai.gpt-6.1-terra ",
+  ];
+  for (const role of ["oracle", "contrarian", "code-reviewer"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    // code-reviewer has no GPT-5.6 Terra sibling on Bedrock, so only oracle/contrarian carry it.
+    const terraCases =
+      role === "code-reviewer"
+        ? TERRA_61_PATTERNS
+        : { ...TERRA_61_PATTERNS, "amazon-bedrock": bedrockTerra };
+    if (role === "code-reviewer") {
+      assert.equal(
+        preferences["amazon-bedrock"].some((p) => p.includes("gpt-6.1-terra")),
+        false,
+      );
+    } else {
+      assert.equal(firstCatalogMatch("amazon-bedrock", bedrockTerra), bedrockTerra[0]);
+    }
+    for (const [provider, terraPatterns] of Object.entries(terraCases)) {
+      const ladder = preferences[provider];
+      assert.ok(ladder, `${role} is missing ${provider}`);
+      const terra56 = ladder.findIndex((pattern) => /gpt-5\.6-terra(-pro)?$/.test(pattern));
+      assert.notEqual(terra56, -1, `${role}/${provider} lost its GPT-5.6 Terra entry`);
+      const terra61 = terraPatterns.map((pattern) => ladder.indexOf(pattern));
+      assert.ok(
+        terra61.every((index) => index !== -1),
+        `${role}/${provider} missing 6.1 Terra`,
+      );
+      assert.deepEqual(
+        terra61,
+        [...terra61].sort((a, b) => a - b),
+      );
+      const sols = ladder
+        .map((pattern, index) => (/gpt-[\d.]+-sol/.test(pattern) ? index : -1))
+        .filter((index) => index !== -1);
+      assert.ok(sols.length > 0);
+      assert.ok(Math.max(...sols) < terra61[0], `${role}/${provider}: Sol must precede 6.1 Terra`);
+      assert.ok(terra61.at(-1) < terra56, `${role}/${provider}: 6.1 Terra must precede 5.6 Terra`);
+    }
+    // Exact-ID patterns must not select :batch / -fast aliases.
+    for (const [provider, id] of [
+      ["openrouter", "openai/gpt-6.1-terra:batch"],
+      ["openrouter", "openai/gpt-6.1-terra-pro:batch"],
+      ["vercel-ai-gateway", "openai/gpt-6.1-terra-fast"],
+    ]) {
+      const model = getBuiltinModels(provider).find((entry) => entry.id === id);
+      assert.ok(model, `${provider}/${id} missing from catalog`);
+      for (const pattern of TERRA_61_PATTERNS[provider]) {
+        assert.equal(matchesPreferencePattern(model, pattern), false, `${pattern} matched ${id}`);
+      }
+    }
+    // Every 6.1 Terra pattern resolves to a live catalog model.
+    for (const [provider, patterns] of Object.entries(terraCases)) {
+      if (LEGACY_PROVIDER_ALIAS_KEYS.has(provider)) continue;
+      for (const pattern of patterns) {
+        assert.equal(firstCatalogMatch(provider, [pattern]), pattern, `${provider}: ${pattern}`);
+      }
+    }
+  }
+});
+
+test("Pi 1.5.0 ranks Kimi K3.1 Pro above K3 on every provider that lists both", () => {
+  const expected = {
+    "kimi-coding": ["k3.1-pro ", "k3.1-pro-highspeed", "k3"],
+    moonshotai: ["kimi-k3.1-pro ", "kimi-k3.1-pro-highspeed", "kimi-k3"],
+    "moonshotai-cn": ["kimi-k3.1-pro ", "kimi-k3.1-pro-highspeed", "kimi-k3"],
+    openrouter: ["moonshotai/kimi-k3.1-pro ", "moonshotai/kimi-k3"],
+    "vercel-ai-gateway": [
+      "moonshotai/kimi-k3.1-pro ",
+      "moonshotai/kimi-k3.1-pro-highspeed",
+      "moonshotai/kimi-k3",
+    ],
+    "opencode-go": ["kimi-k3.1-pro ", "kimi-k3"],
+  };
+  for (const role of ["oracle", "contrarian"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    for (const [provider, patterns] of Object.entries(expected)) {
+      const indexes = patterns.map((pattern) => preferences[provider].indexOf(pattern));
+      assert.ok(
+        indexes.every((index) => index !== -1),
+        `${role}/${provider} missing K3.1 entry`,
+      );
+      assert.deepEqual(
+        indexes,
+        [...indexes].sort((a, b) => a - b),
+      );
+      for (const pattern of patterns) {
+        assert.equal(firstCatalogMatch(provider, [pattern]), pattern, `${provider}: ${pattern}`);
+      }
+    }
+  }
+  for (const [provider, pro, k3] of [
+    ["kimi-coding", "k3.1-pro", "k3"],
+    ["moonshotai", "kimi-k3.1-pro", "kimi-k3"],
+  ]) {
+    const models = getBuiltinModels(provider).filter((m) => [pro, k3].includes(m.id));
+    assert.equal(models.length, 2, `${provider} catalog must contain both ${pro} and ${k3}`);
   }
 });

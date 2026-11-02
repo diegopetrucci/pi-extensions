@@ -42,6 +42,7 @@ const CODE_REVIEWER_MODEL_PREFERENCES = [
   "gpt-6-sol ",
   "gpt-6-sol",
   "gpt-5.6-sol",
+  "gpt-6.1-terra ",
   "gpt-5.6-terra",
   "openai/gpt-6-luna ",
   "gpt-6-luna ",
@@ -83,6 +84,7 @@ const AZURE_MODEL_PREFERENCES = [
   "gpt-6-sol ",
   "gpt-6-sol",
   "gpt-5.6-sol",
+  "gpt-6.1-terra ",
   "gpt-5.6-terra",
   "gpt-6-luna ",
   "gpt-6-luna",
@@ -151,6 +153,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -194,6 +197,8 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-6-sol",
     "openai/gpt-5.6-sol-pro",
     "openai/gpt-5.6-sol",
+    "openai/gpt-6.1-terra-pro ",
+    "openai/gpt-6.1-terra ",
     "openai/gpt-5.6-terra-pro",
     "openai/gpt-5.6-terra",
     "openai/gpt-6-luna ",
@@ -220,13 +225,9 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-luna ",
     "gpt-6-luna",
     "gpt-5.6-luna",
-    "gpt-5.5",
     "claude-opus-5-5 ",
     "claude-opus-5-5",
     "claude-opus-5",
-    "gpt-5.4",
-    "gpt-5.3-codex ",
-    "gpt-5.4-mini",
   ],
   openai: [
     "gpt-6-astra ",
@@ -235,6 +236,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -252,6 +254,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-6-sol ",
     "gpt-6-sol",
     "gpt-5.6-sol",
+    "gpt-6.1-terra ",
     "gpt-5.6-terra",
     "gpt-6-luna ",
     "gpt-6-luna",
@@ -273,6 +276,7 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "openai/gpt-6-sol ",
     "openai/gpt-6-sol",
     "openai/gpt-5.6-sol",
+    "openai/gpt-6.1-terra ",
     "openai/gpt-5.6-terra",
     "openai/gpt-6-luna ",
     "openai/gpt-6-luna",
@@ -866,6 +870,10 @@ function createEmptyUsage(): Usage {
   };
 }
 
+// Tracks whether every usage record added to an accumulator was provider-billed.
+// Absent entry = empty accumulator (flag omitted).
+const providerBilledCostState = new WeakMap<Usage, boolean>();
+
 function addUsage(total: Usage, usage: Usage): void {
   total.input += usage.input || 0;
   total.output += usage.output || 0;
@@ -880,6 +888,11 @@ function addUsage(total: Usage, usage: Usage): void {
   total.cost.cacheRead += usage.cost?.cacheRead || 0;
   total.cost.cacheWrite += usage.cost?.cacheWrite || 0;
   total.cost.total += usage.cost?.total || 0;
+  const allProviderBilled =
+    (providerBilledCostState.get(total) ?? true) && usage.cost?.totalFromProvider === true;
+  providerBilledCostState.set(total, allProviderBilled);
+  if (allProviderBilled) total.cost.totalFromProvider = true;
+  else delete total.cost.totalFromProvider;
 }
 
 type AssistantLikeMessage = {
