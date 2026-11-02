@@ -30,6 +30,7 @@ const MAX_SEARCH_RESULTS = 100;
 const MAX_TURNS = 10;
 const MAX_TOOL_CALLS_TO_KEEP = 80;
 const DEFAULT_BASH_TIMEOUT_SECONDS = 60;
+const MAX_BASH_TIMEOUT_SECONDS = 300;
 const MAX_RUN_MS = 10 * 60 * 1000;
 const CACHE_TTL_DAYS = 7;
 const CACHE_TTL_MS = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
@@ -1064,12 +1065,28 @@ function getBlockedBashReason(
     return "Local repo checkout cache is disabled for this Librarian call.";
   }
 
-  let scan = command.split(options.workspace).join("<WORKSPACE>");
+  let pathScan = command
+    .replace(/\\\r?\n/g, "")
+    .split(options.workspace)
+    .join("<WORKSPACE>");
+  if (options.cacheEnabled) pathScan = pathScan.split(options.cacheRoot).join("<CACHE>");
+
+  let scan = command
+    .replace(/\\\r?\n/g, "")
+    .replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, (quoted) => (/[\s;&|()<>]/.test(quoted) ? "Q" : quoted))
+    .replace(/['"]/g, "")
+    // Prefixes must not hide the executable from any command-position check.
+    .replace(
+      /(^|[\n;&|()])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]*|command|builtin)\s+)+/g,
+      "$1",
+    )
+    .split(options.workspace)
+    .join("<WORKSPACE>");
   if (options.cacheEnabled) scan = scan.split(options.cacheRoot).join("<CACHE>");
   if (/(^|[\n;&|()])\s*\//.test(scan)) return "Librarian bash blocks absolute-path executables.";
 
   const destructiveLocal =
-    /(^|[\n;&|()])\s*(?:sudo|su|rm|rmdir|mv|cp|chmod|chown|dd|truncate|killall|pkill|launchctl|osascript|pbcopy|pbpaste|eval|exec|xargs)(?=$|[\s;&|()])/;
+    /(^|[\n;&|()])\s*(?:sudo|su|rm|rmdir|mv|cp|chmod|chown|dd|truncate|killall|pkill|launchctl|osascript|pbcopy|pbpaste|eval|exec|source|\.|xargs)(?=$|[\s;&|()])/;
   if (destructiveLocal.test(scan))
     return "Librarian bash blocks destructive/local side-effect commands.";
 
@@ -1087,7 +1104,7 @@ function getBlockedBashReason(
 
   if (
     /(^|[\s"'=])(?:~\/|\$HOME\b|\/etc\/|\/var\/|\/private\/|\/root\/|\/Users\/|\/home\/|\/opt\/)/.test(
-      scan,
+      pathScan,
     )
   ) {
     return "Librarian bash may only access its workspace and approved cache root.";
@@ -1191,6 +1208,11 @@ function createLibrarianRuntimeGuardExtension(options: {
       if (event.toolName === "bash") {
         const input = event.input as { command?: unknown; timeout?: unknown };
         if (typeof input.timeout !== "number") input.timeout = DEFAULT_BASH_TIMEOUT_SECONDS;
+        else
+          input.timeout = Math.min(
+            MAX_BASH_TIMEOUT_SECONDS,
+            Math.max(1, Math.floor(input.timeout)),
+          );
 
         const command = typeof input.command === "string" ? input.command : "";
         if (!options.cacheEnabled && /\b(?:git\s+clone|gh\s+repo\s+clone)\b/.test(command)) {
