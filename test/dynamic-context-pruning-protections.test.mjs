@@ -23,7 +23,19 @@ const {
 
 test("default protections include subagent/skill/todo-like tool names", () => {
   const protections = defaultConfig().protections;
-  for (const name of ["todo", "task", "subagent", "skill", "oracle", "librarian"]) {
+  for (const name of [
+    "todo",
+    "task",
+    "subagent",
+    "skill",
+    "oracle",
+    "librarian",
+    "developer",
+    "diff_summarizer",
+    "repo_scout",
+    "test_runner",
+    "web_scout",
+  ]) {
     assert.ok(isProtectedToolName(name, protections), `${name} should be protected by default`);
   }
   assert.equal(isProtectedToolName("bash", protections), false);

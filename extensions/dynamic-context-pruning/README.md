@@ -109,7 +109,8 @@ Before any strategy is allowed to propose a prune, several protections apply:
 
 - **Protected tool names** (case-insensitive, never pruned): `todo`, `task`,
   `subagent`, `agent`, `skill`, `oracle`, `librarian`, `contrarian`,
-  `code_reviewer`, `gnosis`, `triage_comments`.
+  `code_reviewer`, `gnosis`, `triage_comments`, `developer`, `diff_summarizer`,
+  `repo_scout`, `test_runner`, `web_scout`.
 - **Protected path globs** (never pruned if any string argument matches):
   `**/.env`, `**/.env.*`, `**/*.pem`, `**/*.key`, `**/id_rsa*`,
   `**/id_ed25519*`, `**/secrets/**`, `**/*.p12`, `**/*.pfx`.
@@ -118,6 +119,7 @@ Before any strategy is allowed to propose a prune, several protections apply:
   what they contain.
 
 All three lists/values are configurable (see [Configuration](#configuration)).
+A user-set `protections.toolNames` replaces the default list.
 
 ## Savings accounting and the net-benefit gate
 
@@ -219,7 +221,7 @@ never required to exist. Full shape, with defaults:
 {
   "enabled": true,
   "protections": {
-    "toolNames": ["todo", "task", "subagent", "agent", "skill", "oracle", "librarian", "contrarian", "code_reviewer", "gnosis", "triage_comments"],
+    "toolNames": ["todo", "task", "subagent", "agent", "skill", "oracle", "librarian", "contrarian", "code_reviewer", "gnosis", "triage_comments", "developer", "diff_summarizer", "repo_scout", "test_runner", "web_scout"],
     "pathGlobs": ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/secrets/**", "**/*.p12", "**/*.pfx"],
     "recentTurns": 4
   },
