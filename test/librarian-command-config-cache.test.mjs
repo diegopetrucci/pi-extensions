@@ -88,7 +88,7 @@ function completionValues(result) {
   return result?.map((entry) => entry.value) ?? [];
 }
 
-test("librarian bash blocks command substitution and unsafe find actions", async () => {
+test("librarian bash blocks command substitution and unsafe command spellings", async () => {
   const { createLibrarianRuntimeGuardExtension } = (
     await import(pathToFileURL(path.join(repoRoot, "extensions/librarian/index.ts")).href)
   ).__test__;
@@ -127,6 +127,10 @@ test("librarian bash blocks command substitution and unsafe find actions", async
       `ls . && ${findCommand}`,
       `ls . | ${findCommand}`,
       `(${findCommand})`,
+      `FOO=1 ${findCommand}`,
+      `command ${findCommand}`,
+      `builtin ${findCommand}`,
+      `FOO=1 command builtin ${findCommand}`,
     ]) {
       assert.deepEqual(
         await toolCall({ toolName: "bash", input: { command } }),
@@ -139,8 +143,92 @@ test("librarian bash blocks command substitution and unsafe find actions", async
     }
   }
 
-  for (const command of ["find . -name '*.ts'", "gh search code 'createSession' --limit 5"]) {
+  for (const command of [
+    'find . -name x "-delete"',
+    "find . '-exec' rm {} +",
+    'find . -name x -"delete"',
+    "find . -name x \\\n-delete",
+    "find . -name x -de\\\nlete",
+  ]) {
+    assert.deepEqual(
+      await toolCall({ toolName: "bash", input: { command } }),
+      {
+        block: true,
+        reason: "Librarian bash blocks find actions that delete files or execute commands.",
+      },
+      command,
+    );
+  }
+
+  for (const executable of [
+    "rm -rf x",
+    "rm x",
+    "eval true",
+    "exec ls",
+    "curl https://example.com",
+    "bash ./x.sh",
+    "/bin/ls",
+    "source ./x.sh",
+    ". ./x.sh",
+    "printenv",
+  ]) {
+    for (const prefix of ["", "FOO=1 ", "command ", "builtin ", "FOO=1 BAR=2 command builtin "]) {
+      for (const boundary of ["", "ls . && ", "ls .\n", "ls . | "]) {
+        const command = `${boundary}${prefix}${executable}`;
+        assert.equal(
+          (await toolCall({ toolName: "bash", input: { command } }))?.block,
+          true,
+          command,
+        );
+      }
+    }
+  }
+
+  for (const command of [
+    "find . -name '*.ts'",
+    "gh search code 'createSession' --limit 5",
+    'gh search code "rm -rf"',
+    "git add .",
+    "ls .",
+    'grep -r "find -delete" .',
+    "FOO=1 command ls .",
+    "command find . -name '*.ts'",
+  ]) {
     assert.equal(await toolCall({ toolName: "bash", input: { command } }), undefined, command);
+  }
+});
+
+test("librarian bash defaults and clamps timeouts", async () => {
+  const { createLibrarianRuntimeGuardExtension } = (
+    await import(pathToFileURL(path.join(repoRoot, "extensions/librarian/index.ts")).href)
+  ).__test__;
+  const handlers = new Map();
+  createLibrarianRuntimeGuardExtension({
+    maxTurns: 5,
+    workspace: "/tmp/librarian-workspace",
+    cacheRoot: "/tmp/librarian-cache",
+    cacheEnabled: false,
+  })({ on: (name, handler) => handlers.set(name, handler) });
+  const toolCall = handlers.get("tool_call");
+
+  for (const [timeout, expected] of [
+    [undefined, 60],
+    ["30", 60],
+    [null, 60],
+    [0, 1],
+    [-10, 1],
+    [0.5, 1],
+    [12.9, 12],
+    [60, 60],
+    [300, 300],
+    [301, 300],
+    [Number.MAX_VALUE, 300],
+    [Infinity, 300],
+    [-Infinity, 1],
+  ]) {
+    const input = { command: "ls .", timeout };
+    assert.equal(await toolCall({ toolName: "bash", input }), undefined);
+    assert.equal(input.timeout, expected, `timeout ${timeout}`);
   }
 });
 
