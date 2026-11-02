@@ -29,9 +29,9 @@ Pi 0.84.3–0.84.4 changed prompt lifecycle events, terminal capability override
    PASS: the selected authenticated model follows the curated provider ladder, the child response streams incrementally, and the final assembled answer is complete.<br>
    FAIL: a catalog pattern matches no pinned model, Oracle escapes the session model scope, or only delta fragments appear.
 
-6. **Shell permission gate** — Exercise a benign command, a denied recursive Bash removal, and, on native Windows, representative PowerShell removals/wrappers under both PowerShell 7 and Windows PowerShell 5.1.<br>
-   PASS: benign commands proceed; destructive, malformed, dynamic, nested, splatted, oversized, and unanalyzable forms prompt interactively or fail closed headlessly. Literal quoted/commented text, literal here-strings, and definitely enabled `-WhatIf` removals stay benign.<br>
-   FAIL: a destructive form bypasses the prompt, or benign literal text is treated as destructive.
+6. **Shell permission gate** — Exercise a benign Bash command, a denied recursive Bash removal, and a named `powershell` tool call on each platform.<br>
+   PASS: the benign Bash command proceeds; the denied recursive Bash removal prompts interactively or fails closed headlessly; any named `powershell` tool call is blocked with "Unsupported powershell tool blocked" regardless of platform or UI availability.<br>
+   FAIL: the benign Bash command is blocked, the denied recursive Bash removal bypasses the prompt or runs headlessly, or any named `powershell` tool call is allowed.
 
 7. **Root Markdown skills** — In an isolated skills directory, include root `README.md`/`AGENTS.md`, one valid root skill Markdown file, and one valid grouped nested skill.<br>
    PASS: both valid skills load; documentation files are ignored silently unless they contain valid skill frontmatter.<br>
