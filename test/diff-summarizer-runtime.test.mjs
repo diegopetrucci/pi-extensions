@@ -57,6 +57,7 @@ test("registers the diff_summarizer tool with the expected params", async () => 
 test("bash guard blocks grouped gh browser flags", async () => {
   const { getBlockedBashReason } = (await loadRuntime()).__test__;
   assert.match(getBlockedBashReason("gh pr view 1 -cw"), /blocks gh --web/);
+  assert.match(getBlockedBashReason("gh pr view 123 -cw=true"), /blocks gh --web/);
 });
 
 test("runtime guard is read-only, blocks unsafe bash, and enforces turn budget", async (t) => {
