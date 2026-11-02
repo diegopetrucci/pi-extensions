@@ -177,6 +177,11 @@ const DEFAULT_PROTECTED_TOOL_NAMES = [
   "code_reviewer",
   "gnosis",
   "triage_comments",
+  "developer",
+  "diff_summarizer",
+  "repo_scout",
+  "test_runner",
+  "web_scout",
 ];
 
 /** File globs never pruned by default: secrets/credential-shaped paths. */
