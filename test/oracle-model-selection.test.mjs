@@ -316,3 +316,38 @@ test("oracle anchored preferences keep stronger ids ahead of weaker siblings", a
     );
   }
 });
+
+test("Oracle picks Claude Fable 5.1 over Fable 5 on anthropic when Opus models are unavailable", async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  const models = getBuiltinModels("anthropic").filter((model) =>
+    ["claude-fable-5", "claude-fable-5-1"].includes(model.id),
+  );
+  assert.equal(models.length, 2, "expected both Fable models in the pinned catalog");
+  for (const available of [models, [...models].reverse()]) {
+    const result = await selectOracleModel(
+      createModelSelectionContext({ model: available[0], available }),
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.selection.modelRef, "anthropic/claude-fable-5-1");
+  }
+});
+
+test("Oracle picks GPT-6.1 Sol on cloudflare-ai-gateway when Astra is unavailable", async () => {
+  const { selectOracleModel } = await loadOracleTestUtils();
+  const models = getBuiltinModels("cloudflare-ai-gateway").filter((model) =>
+    /^(?:openai\/)?gpt-(?:6\.1-sol|6-sol|5\.6-sol|6\.1-terra|5\.6-terra|6-luna|5\.6-luna)$/.test(
+      model.id,
+    ),
+  );
+  assert.ok(
+    models.some((model) => /gpt-6\.1-sol$/.test(model.id)),
+    "expected GPT-6.1 Sol in the pinned cloudflare-ai-gateway catalog",
+  );
+  for (const available of [models, [...models].reverse()]) {
+    const result = await selectOracleModel(
+      createModelSelectionContext({ model: available[0], available }),
+    );
+    assert.equal(result.ok, true);
+    assert.match(result.selection.modelRef, /^cloudflare-ai-gateway\/(?:openai\/)?gpt-6\.1-sol$/);
+  }
+});

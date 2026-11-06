@@ -57,6 +57,16 @@ test("Pi 0.87.1 Meta and Radius ladders prefer their current frontier models", (
   }
 });
 
+test("Pi 1.5.0 Gemini 4 Argon and Mistral Large 4 lead their provider ladders", () => {
+  for (const role of ["oracle", "contrarian"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    for (const provider of ["google", "google-vertex", "opencode-go"]) {
+      assert.equal(firstCatalogMatchId(provider, preferences[provider]), "gemini-4-argon");
+    }
+    assert.equal(firstCatalogMatchId("mistral", preferences.mistral), "mistral-large-4-0-8");
+  }
+});
+
 test("oracle and contrarian hardcoded provider coverage matches the built-in provider catalog", () => {
   const builtinProviders = getBuiltinProviders().sort();
   for (const fixture of PROVIDER_POLICY_CONTRACT.catalogParity.providerPreferenceConstants) {
@@ -87,6 +97,24 @@ test("oracle and contrarian hardcoded provider coverage matches the built-in pro
       );
     }
   }
+});
+
+test("code-reviewer hardcoded provider coverage matches the built-in provider catalog", () => {
+  const preferences = extractConst(
+    "extensions/code-reviewer/index.ts",
+    "PROVIDER_MODEL_PREFERENCES",
+  );
+  const keys = Object.keys(preferences);
+  assert.deepEqual(
+    keys.filter((k) => !LEGACY_PROVIDER_ALIAS_KEYS.has(k)).sort(),
+    getBuiltinProviders().sort(),
+    "code-reviewer provider coverage drifted from the built-in catalog",
+  );
+  assert.deepEqual(
+    keys.filter((k) => LEGACY_PROVIDER_ALIAS_KEYS.has(k)).sort(),
+    [...LEGACY_PROVIDER_ALIAS_KEYS].sort(),
+    "code-reviewer has unexpected or missing legacy alias keys",
+  );
 });
 
 test("hardcoded provider preference patterns still match the pinned built-in catalog", () => {
@@ -271,10 +299,16 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "accounts/fireworks/models/gpt-oss-120b",
     ],
     "opencode-go": [
+      "gemini-4-argon ",
+      "gpt-6-luna ",
+      "gpt-6-luna",
+      "gpt-5.6-luna",
       "deepseek-v4-pro",
       "glm-5.3 ",
       "glm-5.2",
+      "qwen3.8-max ",
       "qwen3.7-plus",
+      "mimo-v2.6-pro",
       "mimo-v2.5-pro",
       "mimo-v2.5",
       "minimax-m3",
@@ -300,6 +334,7 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "claude-fable-5-1",
       "claude-fable-5",
       "claude-opus-4-8",
+      "claude-sonnet-5-5 ",
       "claude-sonnet-5",
       "kimi-k3",
       "glm-5.3 ",
