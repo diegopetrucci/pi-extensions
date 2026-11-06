@@ -14,10 +14,12 @@
     "url": "git+https://github.com/diegopetrucci/pi-extensions.git"
   },
   "scripts": {
-    "ci": "npm run preflight:install-state && npm run format:check && npm run typecheck && npm test",
-    "format": "oxfmt extensions scripts test",
-    "format:check": "oxfmt --check extensions scripts test",
+    "ci": "npm run preflight:install-state && npm run sync:shared:check && npm run format:check && npm run typecheck && npm test",
+    "format": "oxfmt extensions scripts shared test",
+    "format:check": "oxfmt --check extensions scripts shared test",
     "preflight:install-state": "node scripts/check-install-state.mjs",
+    "sync:shared": "node scripts/sync-shared.mjs",
+    "sync:shared:check": "node scripts/sync-shared.mjs --check",
     "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "prepare-release": "node scripts/prepare-release.mjs"
