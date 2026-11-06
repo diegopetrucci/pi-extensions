@@ -17,6 +17,7 @@
   },
   "files": [
     "index.ts",
+    "git-status.ts",
     "README.md",
     ".pi-fleet-tested-version"
   ],

@@ -220,6 +220,88 @@ test("footer git status args disable fsmonitor", () => {
   }
 });
 
+test("footer caches share the documented defaults and keep instances isolated", async (t) => {
+  for (const { name, testing } of suites) {
+    await t.test(name, async () => {
+      assert.equal(testing.DEFAULT_REFRESH_INTERVAL_MS, 8_000);
+      assert.equal(testing.DEFAULT_GIT_TIMEOUT_MS, 1_500);
+      assert.equal(testing.DEFAULT_GH_TIMEOUT_MS, 3_000);
+
+      const firstClock = createFakeClock();
+      const secondClock = createFakeClock();
+      const first = new testing.GitFooterCache({
+        cwd: () => "/tmp/footer-first",
+        clock: firstClock.clock,
+        runner: createScriptedRunner([
+          {
+            command: "git",
+            result: {
+              stdout: createStatusOutput({ branch: "feature/first", ahead: 1 }),
+              stderr: "",
+              exitCode: 0,
+            },
+          },
+          {
+            command: "gh",
+            result: { stdout: '{"number":11}', stderr: "", exitCode: 0 },
+          },
+        ]).runner,
+      });
+      const second = new testing.GitFooterCache({
+        cwd: () => "/tmp/footer-second",
+        clock: secondClock.clock,
+        runner: createScriptedRunner([
+          {
+            command: "git",
+            result: {
+              stdout: createStatusOutput({ branch: "feature/second", behind: 2 }),
+              stderr: "",
+              exitCode: 0,
+            },
+          },
+          {
+            command: "gh",
+            result: { stdout: '{"number":22}', stderr: "", exitCode: 0 },
+          },
+        ]).runner,
+      });
+
+      try {
+        await Promise.all([first.refresh(), second.refresh()]);
+        assert.equal(firstClock.handles[0].ms, testing.DEFAULT_REFRESH_INTERVAL_MS);
+        assert.equal(secondClock.handles[0].ms, testing.DEFAULT_REFRESH_INTERVAL_MS);
+        assert.deepEqual(first.getStatusSnapshot(), {
+          branch: "feature/first",
+          staged: 0,
+          unstaged: 0,
+          untracked: 0,
+          conflict: 0,
+          ahead: 1,
+          behind: 0,
+        });
+        assert.deepEqual(first.getPullRequestSnapshot(), { number: 11 });
+        assert.deepEqual(second.getStatusSnapshot(), {
+          branch: "feature/second",
+          staged: 0,
+          unstaged: 0,
+          untracked: 0,
+          conflict: 0,
+          ahead: 0,
+          behind: 2,
+        });
+        assert.deepEqual(second.getPullRequestSnapshot(), { number: 22 });
+
+        first.dispose();
+        assert.equal(firstClock.handles[0].cleared, true);
+        assert.equal(secondClock.handles[0].cleared, false);
+      } finally {
+        first.dispose();
+        second.dispose();
+      }
+    });
+  }
+});
+
 test("footer status helpers parse porcelain v2 output for git-footer and minimal-footer", async (t) => {
   for (const { name, testing } of suites) {
     await t.test(name, () => {
