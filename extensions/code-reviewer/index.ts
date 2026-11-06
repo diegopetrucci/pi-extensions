@@ -63,6 +63,8 @@ const CODE_REVIEWER_MODEL_PREFERENCES = [
   "claude-opus-5",
   "claude-opus-4-8",
   "claude-opus-4.8",
+  "claude-sonnet-5-5",
+  "claude-sonnet-5.5",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-sonnet-4.6",
@@ -75,6 +77,7 @@ const CODE_REVIEWER_MODEL_PREFERENCES = [
   "grok-4.7",
   "grok-4.6",
   "grok-4.5",
+  "gemini-4-argon ",
   "gemini-3.5-flash",
 ];
 const AZURE_MODEL_PREFERENCES = [
@@ -115,12 +118,14 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "anthropic.claude-opus-5-5 ",
     "claude-opus-5-5",
     "claude-opus-5",
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-4-8",
     "global.openai.gpt-6-astra ",
     "us.openai.gpt-6-astra ",
     "openai.gpt-6-astra ",
     "gpt-6-astra",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
@@ -129,8 +134,10 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "claude-opus-5-5 ",
     "claude-opus-5-5",
     "claude-opus-5",
+    "claude-fable-5-1 ",
     "claude-fable-5",
     "claude-opus-4-8",
+    "claude-sonnet-5-5 ",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
@@ -139,10 +146,20 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
   // Legacy alias for Pi 1.0.0–1.0.2 hosts (renamed to `azure` in Pi 1.0.3).
   "azure-openai-responses": AZURE_MODEL_PREFERENCES,
   "cloudflare-ai-gateway": [
+    "claude-fable-5-1 ",
     "claude-fable-5",
     "claude-opus-5",
     "gpt-6-astra ",
     "gpt-6-astra",
+    "gpt-6.1-sol ",
+    "gpt-6-sol ",
+    "gpt-6-sol",
+    "gpt-5.6-sol",
+    "gpt-6.1-terra ",
+    "gpt-5.6-terra",
+    "gpt-6-luna ",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.4",
   ],
@@ -188,7 +205,26 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "gpt-5.4",
     "gpt-5.3-codex ",
   ],
-  "opencode-go": ["grok-4.7 ", "grok-4.7"],
+  "opencode-go": [
+    "gemini-4-argon ",
+    "gpt-6-luna ",
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "deepseek-v4-pro",
+    "glm-5.3 ",
+    "glm-5.2",
+    "qwen3.8-max ",
+    "qwen3.7-plus",
+    "mimo-v2.6-pro",
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "minimax-m3",
+    "kimi-k3.1-pro ",
+    "kimi-k3",
+    "kimi-k2.7-code ",
+    "grok-4.7 ",
+    "grok-4.7",
+  ],
   openrouter: [
     "openai/gpt-6-astra ",
     "openai/gpt-6-astra",
@@ -265,10 +301,12 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "anthropic/claude-opus-5.5 ",
     "anthropic/claude-opus-5.5",
     "anthropic/claude-opus-5",
+    "anthropic/claude-fable-5.1 ",
     "anthropic/claude-fable-5",
     "anthropic/claude-opus-4.8",
     "anthropic/claude-opus-4.7",
     "anthropic/claude-opus-4.6",
+    "anthropic/claude-sonnet-5.5 ",
     "anthropic/claude-sonnet-5",
     "openai/gpt-6-astra ",
     "openai/gpt-6-astra",
@@ -286,7 +324,181 @@ const PROVIDER_MODEL_PREFERENCES: Record<string, string[]> = {
     "spacexai/grok-4.7",
     "spacexai/grok-4.6",
     "xai/grok-4.5",
+    "google/gemini-4-argon ",
     "google/gemini-3.5-flash ",
+  ],
+  "ant-ling": ["Ling-2.6-1T", "Ling-2.6-flash"],
+  baseten: [
+    "moonshotai/Kimi-K3",
+    "zai-org/GLM-5.3 ",
+    "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "deepseek-ai/DeepSeek-V4-Pro",
+    "zai-org/GLM-5.2 ",
+    "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+    "openai/gpt-oss-120b",
+    "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "zai-org/GLM-5.2-Fast",
+  ],
+  cerebras: ["gpt-oss-120b", "qwen-3.8-27b"],
+  "cloudflare-workers-ai": [
+    "@cf/moonshotai/kimi-k2.7-code",
+    "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    "@cf/zai-org/glm-5.3 ",
+    "@cf/zai-org/glm-5.2",
+    "@cf/moonshotai/kimi-k2.6",
+    "@cf/nvidia/nemotron-3-120b-a12b",
+    "@cf/openai/gpt-oss-120b",
+    "@cf/qwen/qwen3.8-27b",
+    "@cf/qwen/qwen3-30b-a3b-fp8",
+    "@cf/zai-org/glm-4.7-flash",
+  ],
+  deepseek: ["deepseek-v4-pro", "deepseek-flash"],
+  fireworks: [
+    "accounts/fireworks/models/kimi-k3",
+    "accounts/fireworks/routers/kimi-k3-fast",
+    "accounts/fireworks/models/minimax-m3",
+    "accounts/fireworks/models/gpt-oss-120b",
+  ],
+  google: [
+    "gemini-4-argon ",
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3.1-pro-preview",
+    "gemini-3.8-flash ",
+    "gemini-3.7-flash ",
+    "gemini-3.6-flash ",
+    "gemini-3.5-flash ",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash ",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+  ],
+  "google-vertex": [
+    "gemini-4-argon ",
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3.1-pro-preview",
+    "gemini-3.8-flash ",
+    "gemini-3.7-flash ",
+    "gemini-3.6-flash ",
+    "gemini-3.5-flash ",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash ",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+  ],
+  groq: ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
+  huggingface: [
+    "moonshotai/Kimi-K3",
+    "zai-org/GLM-5.1",
+    "zai-org/GLM-5.3-Flash",
+    "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "deepseek-ai/DeepSeek-V4-Pro",
+    "moonshotai/Kimi-K2.6",
+    "MiniMaxAI/MiniMax-M2.7",
+    "Qwen/Qwen3.5-397B-A17B",
+    "Qwen/Qwen3-235B-A22B-Thinking-2507",
+    "moonshotai/Kimi-K2.5",
+    "deepseek-ai/DeepSeek-V3.2",
+    "MiniMaxAI/MiniMax-M2.5",
+    "Qwen/Qwen3-Coder-Next",
+  ],
+  "kimi-coding": [
+    "k3.1-pro ",
+    "k3.1-pro-highspeed",
+    "k3",
+    "kimi-for-coding ",
+    "kimi-for-coding-highspeed",
+  ],
+  meta: [
+    "muse-spark-1.3 ",
+    "muse-spark-1.3-contributor",
+    "muse-spark-1.2 ",
+    "muse-spark-1.2-contributor",
+    "muse-spark-1.1",
+  ],
+  minimax: ["MiniMax-M3", "MiniMax-M2.7-highspeed", "MiniMax-M2.7"],
+  "minimax-cn": ["MiniMax-M3", "MiniMax-M2.7-highspeed", "MiniMax-M2.7"],
+  mistral: [
+    "mistral-large-4-0-8",
+    "mistral-large-4 ",
+    "mistral-medium-2604",
+    "mistral-medium-3.5",
+    "mistral-medium-latest",
+    "magistral-medium-latest",
+    "devstral-medium-latest",
+    "mistral-large-latest",
+    "mistral-medium-2508",
+    "mistral-small-2603",
+    "devstral-2512",
+    "zai-glm-5-2",
+  ],
+  "qwen-token-plan": [
+    "qwen3.8-max",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-plus",
+    "deepseek-v4-pro",
+    "glm-5.2",
+    "kimi-k2.7-code ",
+    "minimax-m2.5",
+  ],
+  "qwen-token-plan-cn": [
+    "qwen3.8-max",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-plus",
+    "deepseek-v4-pro",
+    "glm-5.2",
+    "kimi-k2.7-code ",
+    "minimax-m2.5",
+  ],
+  "qwen-token-plan-individual": [
+    "qwen3.8-max",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-flash",
+    "deepseek-v4-pro",
+    "glm-5.2",
+    "deepseek-v4-flash-0731",
+  ],
+  together: [
+    "deepseek-ai/DeepSeek-V4-Pro",
+    "moonshotai/Kimi-K3",
+    "zai-org/GLM-5.3-Flash",
+    "zai-org/GLM-5.2",
+    "Qwen/Qwen3.7-Max",
+    "Qwen/Qwen3.6-Plus",
+    "MiniMaxAI/MiniMax-M3",
+    "openai/gpt-oss-120b",
+  ],
+  typesafe: [],
+  xiaomi: ["mimo-v2.6-pro-ultraspeed", "mimo-v2.6-pro", "mimo-v2.6-flash"],
+  "xiaomi-token-plan-ams": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+  "xiaomi-token-plan-cn": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+  "xiaomi-token-plan-sgp": ["mimo-v2.6-pro", "mimo-v2.6-flash"],
+  nvidia: [
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "moonshotai/kimi-k2.6",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+  ],
+  zai: ["glm-5.3 ", "glm-5.2 ", "glm-5-turbo", "glm-4.7"],
+  "zai-coding-cn": ["glm-5.3 ", "glm-5.3-highspeed", "glm-5.3-flash", "glm-4.6v"],
+  moonshotai: [
+    "kimi-k3.1-pro ",
+    "kimi-k3.1-pro-highspeed",
+    "kimi-k3",
+    "kimi-k2.7-code ",
+    "kimi-k2.7-code-highspeed",
+    "kimi-k2.6",
+  ],
+  "moonshotai-cn": [
+    "kimi-k3.1-pro ",
+    "kimi-k3.1-pro-highspeed",
+    "kimi-k3",
+    "kimi-k2.7-code ",
+    "kimi-k2.7-code-highspeed",
+    "kimi-k2.6",
   ],
 };
 
@@ -666,6 +878,14 @@ function getProviderPreferenceList(provider: string | undefined): string[] | und
   return PROVIDER_MODEL_PREFERENCES[provider.toLowerCase()];
 }
 
+function matchesPreferencePattern(haystack: string, pattern: string): boolean {
+  const needle = pattern.toLowerCase();
+  if (!needle.endsWith(" ")) return haystack.includes(needle);
+  const separator = haystack.indexOf(" ");
+  const id = separator === -1 ? haystack : haystack.slice(0, separator);
+  return `${id} `.includes(needle);
+}
+
 function selectPreferredModel(
   models: PiModel[],
   provider: string | undefined,
@@ -677,7 +897,7 @@ function selectPreferredModel(
     haystack: `${model.id} ${model.name ?? ""}`.toLowerCase(),
   }));
   for (const pattern of preferences) {
-    const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+    const match = lowered.find((entry) => matchesPreferencePattern(entry.haystack, pattern));
     if (match) return match.model;
   }
   return undefined;
@@ -689,12 +909,12 @@ function selectPreferredAcrossProviders(models: PiModel[]): PiModel | undefined 
     haystack: `${model.id} ${model.name ?? ""}`.toLowerCase(),
   }));
   for (const pattern of CODE_REVIEWER_MODEL_PREFERENCES) {
-    const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+    const match = lowered.find((entry) => matchesPreferencePattern(entry.haystack, pattern));
     if (match) return match.model;
   }
   for (const preferences of Object.values(PROVIDER_MODEL_PREFERENCES)) {
     for (const pattern of preferences) {
-      const match = lowered.find((entry) => entry.haystack.includes(pattern.toLowerCase()));
+      const match = lowered.find((entry) => matchesPreferencePattern(entry.haystack, pattern));
       if (match) return match.model;
     }
   }
@@ -1795,6 +2015,7 @@ export const __test__ = {
   normalizeThinkingLevel,
   resolveThinkingLevel,
   selectCodeReviewerModel,
+  matchesPreferencePattern,
   createEmptyUsage,
   addAssistantMessageUsage,
   addSessionEventUsage,
