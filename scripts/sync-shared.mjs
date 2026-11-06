@@ -9,6 +9,14 @@ export const REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 // Keep this allowlist explicit: only these package-local copies are generated.
 export const SYNC_PAIRS = Object.freeze([
   Object.freeze({
+    source: "shared/footer/git-status.ts",
+    destination: "extensions/git-footer/git-status.ts",
+  }),
+  Object.freeze({
+    source: "shared/footer/git-status.ts",
+    destination: "extensions/minimal-footer/git-status.ts",
+  }),
+  Object.freeze({
     source: "shared/glimpse/quiet-glimpse.ts",
     destination: "extensions/annotate-git-diff/quiet-glimpse.ts",
   }),

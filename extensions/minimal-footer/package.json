@@ -16,6 +16,7 @@
   },
   "files": [
     "index.ts",
+    "git-status.ts",
     "openai-usage.ts",
     "minimal-footer.example.json",
     "README.md",
