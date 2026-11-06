@@ -177,6 +177,38 @@ test("code_reviewer anchored preferences keep stronger ids ahead of weaker sibli
   }
 });
 
+test("code_reviewer selects the refreshed frontier model on providers it newly covers", async () => {
+  const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
+  for (const [provider, expectedId] of [
+    ["deepseek", "deepseek-v4-pro"],
+    ["google", "gemini-4-argon"],
+    ["kimi-coding", "k3.1-pro"],
+  ]) {
+    const models = getBuiltinModels(provider);
+    const expected = models.find((model) => model.id === expectedId);
+    assert.ok(expected, `expected ${provider}/${expectedId} in the pinned catalog`);
+    for (const available of [models, [...models].reverse()]) {
+      const result = await selectCodeReviewerModel(
+        createModelSelectionContext({ model: available[0], available }),
+      );
+      assert.equal(result.ok, true);
+      assert.equal(
+        `${result.selection.provider}/${result.selection.id}`,
+        `${provider}/${expectedId}`,
+      );
+    }
+  }
+});
+
+test("code_reviewer trailing-space preference patterns match only the model id", async () => {
+  const { matchesPreferencePattern } = await loadCodeReviewerTestUtils();
+  assert.equal(matchesPreferencePattern("gpt-6-astra gpt-6 astra", "gpt-6-astra "), true);
+  assert.equal(matchesPreferencePattern("gpt-6-astra", "gpt-6-astra "), true);
+  assert.equal(matchesPreferencePattern("gpt-6-astra:batch gpt-6 astra", "gpt-6-astra "), false);
+  assert.equal(matchesPreferencePattern("gpt-6-astra-fast gpt-6 astra", "gpt-6-astra "), false);
+  assert.equal(matchesPreferencePattern("gpt-6-astra-fast gpt-6 astra", "gpt-6-astra"), true);
+});
+
 test("code_reviewer auto-selection prefers an opposite provider and model family when available", async () => {
   const { selectCodeReviewerModel } = await loadCodeReviewerTestUtils();
   const result = await selectCodeReviewerModel(
