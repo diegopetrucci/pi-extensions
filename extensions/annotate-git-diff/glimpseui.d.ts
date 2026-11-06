@@ -1,3 +1,6 @@
+// Generated copy of shared/glimpse/glimpseui.d.ts.
+// Edit the canonical source, then run `npm run sync:shared`.
+// Do not edit this package-local copy directly.
 declare module "glimpseui" {
   export type FollowMode = "snap" | "spring";
   export type CursorAnchor =

@@ -84,3 +84,5 @@ Then reload pi:
 ## Development
 
 Run `npm run format` for the supported source and test files; CI runs `npm run format:check`.
+
+The shared Glimpse implementation and declarations live in `shared/glimpse/`. Edit those canonical files, then run `npm run sync:shared` to update the standalone package-local copies in the two annotate extensions. `npm run sync:shared:check` verifies that the copies are present and current without writing; CI runs this check. To undo a canonical edit, restore the file under `shared/glimpse/` and run the sync command again. To undo only generated output, restore the package-local copies without editing them directly. To retire this arrangement, keep those package-local files and imports as standalone sources, then remove `shared/glimpse/`, `scripts/sync-shared.mjs`, the `sync:shared*` scripts, the CI drift check, and `shared` from the format commands; do not introduce a runtime dependency.

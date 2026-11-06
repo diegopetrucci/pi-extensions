@@ -1,3 +1,6 @@
+// Generated copy of shared/glimpse/quiet-glimpse.ts.
+// Edit the canonical source, then run `npm run sync:shared`.
+// Do not edit this package-local copy directly.
 /// <reference path="./glimpseui.d.ts" />
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
