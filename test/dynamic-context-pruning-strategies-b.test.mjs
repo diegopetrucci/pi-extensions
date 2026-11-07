@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createReadToolDefinition } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -52,6 +55,71 @@ let ts = 0;
 function nextTs() {
   ts += 1;
   return ts;
+}
+
+function sdkReadMessages(earlierArgs, earlierResult, laterArgs, laterResult) {
+  return [
+    userMsg("inspect the file", nextTs()),
+    assistantToolCall("earlier", "read", earlierArgs, nextTs()),
+    {
+      role: "toolResult",
+      toolCallId: "earlier",
+      toolName: "read",
+      isError: false,
+      ...earlierResult,
+    },
+    userMsg("continue", nextTs()),
+    assistantToolCall("later", "read", laterArgs, nextTs()),
+    { role: "toolResult", toolCallId: "later", toolName: "read", isError: false, ...laterResult },
+  ];
+}
+
+function noProtectionPruningConfig() {
+  const config = defaultConfig();
+  return {
+    ...config,
+    protections: { ...config.protections, recentTurns: 0 },
+    thresholds: { ...config.thresholds, minCharsSaved: 0 },
+    gate: { ...config.gate, mode: "off" },
+    strategies: { ...config.strategies, dedupe: { ...config.strategies.dedupe, enabled: false } },
+  };
+}
+
+function toolResultText(message) {
+  return message.content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function assertEarlierReadPreserved(
+  earlierArgs,
+  earlierResult,
+  laterResult,
+  earlierMarker,
+  laterArgs,
+) {
+  assert.ok(earlierResult.content.some((part) => part.type === "text"));
+  assert.ok(laterResult.details?.truncation?.truncated);
+  assert.ok(laterResult.details.truncation.outputLines > 0);
+  assert.equal(toolResultText(laterResult).includes(earlierMarker), false);
+  const messages = sdkReadMessages(earlierArgs, earlierResult, laterArgs, laterResult);
+  const result = runDynamicContextPruningPipeline({
+    messages,
+    config: noProtectionPruningConfig(),
+    persistedDecisions: [],
+    knownIdempotencyKeys: new Set(),
+    cwd: "/fixture",
+  });
+  const retained = result.messages.find(
+    (message) => message.role === "toolResult" && message.toolCallId === "earlier",
+  );
+  assert.ok(retained);
+  assert.ok(toolResultText(retained).includes(earlierMarker));
+  assert.equal(
+    result.newlyAppliedDecisions.some((decision) => decision.correlation.toolCallId === "earlier"),
+    false,
+  );
 }
 
 /** A single turn: user message, then an assistant tool call + its result. */
@@ -149,6 +217,155 @@ test("readRangeCovers: conservative skip when earlier is unbounded but later is 
     false,
     "cannot prove the bounded later read reaches EOF",
   );
+});
+
+test("installed read line truncation preserves an earlier range for unbounded and bounded rereads", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "dcp-line-truncation-"));
+  try {
+    const lines = Array.from(
+      { length: 3000 },
+      (_, index) => `line ${String(index + 1).padStart(4, "0")} data`,
+    );
+    await writeFile(path.join(cwd, "large.txt"), lines.join("\n"));
+    const read = createReadToolDefinition(cwd);
+    const earlierArgs = { path: "large.txt", offset: 1001, limit: 2000 };
+    const earlier = await read.execute("earlier", earlierArgs);
+
+    for (const laterArgs of [
+      { path: "large.txt" },
+      { path: "large.txt", offset: 1, limit: 3000 },
+    ]) {
+      const later = await read.execute("later", laterArgs);
+      assert.equal(later.details.truncation.truncatedBy, "lines");
+      assertEarlierReadPreserved(earlierArgs, earlier, later, "line 2500 data", laterArgs);
+    }
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("installed truncated read that covers an earlier range still supersedes it", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "dcp-covering-truncation-"));
+  try {
+    const lines = Array.from(
+      { length: 3000 },
+      (_, index) => `line ${String(index + 1).padStart(4, "0")} data`,
+    );
+    await writeFile(path.join(cwd, "large.txt"), lines.join("\n"));
+    const read = createReadToolDefinition(cwd);
+    const earlierArgs = { path: "large.txt", offset: 100, limit: 200 };
+    const laterArgs = { path: "large.txt" };
+    const earlier = await read.execute("earlier", earlierArgs);
+    const later = await read.execute("later", laterArgs);
+
+    assert.equal(later.details.truncation.truncated, true);
+    assert.equal(later.details.truncation.truncatedBy, "lines");
+    assert.equal(later.details.truncation.outputLines, 2000);
+    assert.equal(toolResultText(later).includes("line 2000 data"), true);
+    assert.equal(toolResultText(later).includes("line 2001 data"), false);
+
+    const result = runDynamicContextPruningPipeline({
+      messages: sdkReadMessages(earlierArgs, earlier, laterArgs, later),
+      config: noProtectionPruningConfig(),
+      persistedDecisions: [],
+      knownIdempotencyKeys: new Set(),
+      cwd: "/fixture",
+    });
+    assert.equal(result.newlyAppliedDecisions.length, 1);
+    assert.equal(result.newlyAppliedDecisions[0].correlation.toolCallId, "earlier");
+    const earlierMessage = result.messages.find(
+      (message) => message.role === "toolResult" && message.toolCallId === "earlier",
+    );
+    assert.match(toolResultText(earlierMessage), /superseded by newer read/);
+    assert.match(toolResultText(earlierMessage), /call later/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("installed read byte truncation preserves an earlier range for unbounded and bounded rereads", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "dcp-byte-truncation-"));
+  try {
+    const lines = Array.from(
+      { length: 300 },
+      (_, index) => `line ${String(index + 1).padStart(4, "0")} ${"x".repeat(400)}`,
+    );
+    await writeFile(path.join(cwd, "large.txt"), lines.join("\n"));
+    const read = createReadToolDefinition(cwd);
+    const earlierArgs = { path: "large.txt", offset: 151, limit: 100 };
+    const earlier = await read.execute("earlier", earlierArgs);
+
+    for (const laterArgs of [{ path: "large.txt" }, { path: "large.txt", offset: 1, limit: 300 }]) {
+      const later = await read.execute("later", laterArgs);
+      assert.equal(later.details.truncation.truncatedBy, "bytes");
+      assertEarlierReadPreserved(earlierArgs, earlier, later, "line 0180 ", laterArgs);
+    }
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("installed untruncated rereads retain their existing supersession behavior", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "dcp-untruncated-read-"));
+  try {
+    const lines = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`);
+    await writeFile(path.join(cwd, "small.txt"), lines.join("\n"));
+    const read = createReadToolDefinition(cwd);
+    const earlierArgs = { path: "small.txt", offset: 20, limit: 10 };
+    const laterArgs = { path: "small.txt", offset: 1, limit: 100 };
+    const earlier = await read.execute("earlier", earlierArgs);
+    const later = await read.execute("later", laterArgs);
+
+    assert.equal(later.details, undefined);
+    const result = runDynamicContextPruningPipeline({
+      messages: sdkReadMessages(earlierArgs, earlier, laterArgs, later),
+      config: noProtectionPruningConfig(),
+      persistedDecisions: [],
+      knownIdempotencyKeys: new Set(),
+      cwd: "/fixture",
+    });
+    const earlierMessage = result.messages.find(
+      (message) => message.role === "toolResult" && message.toolCallId === "earlier",
+    );
+    assert.ok(toolResultText(earlierMessage).includes("pruned by dynamic-context-pruning"));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("malformed installed read truncation metadata does not claim coverage", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "dcp-malformed-truncation-"));
+  try {
+    const lines = Array.from({ length: 3000 }, (_, index) => `line ${index + 1}`);
+    await writeFile(path.join(cwd, "large.txt"), lines.join("\n"));
+    const read = createReadToolDefinition(cwd);
+    const earlierArgs = { path: "large.txt", offset: 1001, limit: 2000 };
+    const laterArgs = { path: "large.txt", offset: 1, limit: 3000 };
+    const earlier = await read.execute("earlier", earlierArgs);
+    const validLater = await read.execute("later", laterArgs);
+
+    for (const truncation of [
+      { truncated: true, outputLines: 0 },
+      { truncated: true, outputLines: -1 },
+      { truncated: true, outputLines: "2000" },
+    ]) {
+      const later = { ...validLater, details: { truncation } };
+      const result = runDynamicContextPruningPipeline({
+        messages: sdkReadMessages(earlierArgs, earlier, laterArgs, later),
+        config: noProtectionPruningConfig(),
+        persistedDecisions: [],
+        knownIdempotencyKeys: new Set(),
+        cwd: "/fixture",
+      });
+      assert.deepEqual(result.newlyAppliedDecisions, [], JSON.stringify(truncation));
+      const earlierMessage = result.messages.find(
+        (message) => message.role === "toolResult" && message.toolCallId === "earlier",
+      );
+      assert.ok(toolResultText(earlierMessage).includes("line 2500"));
+    }
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
