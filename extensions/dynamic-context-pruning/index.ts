@@ -1658,6 +1658,37 @@ export function readRangeCovers(later: FileReadRange, earlier: FileReadRange): b
   return later.end >= earlier.end;
 }
 
+/**
+ * Derive the range delivered by a read result. Successful untruncated results
+ * retain the request-derived range; a truncated result is limited to the
+ * positive line count reported by the SDK. Unknown truncation metadata is
+ * treated as unprovable so it cannot establish read coverage.
+ */
+function computeDeliveredFileReadRange(
+  args: Record<string, unknown> | undefined,
+  resultMessage: MinimalToolResultMessage,
+): FileReadRange | undefined {
+  const requestedRange = computeFileReadRange(args);
+  const details = resultMessage.details;
+  if (!isRecord(details) || !("truncation" in details)) return requestedRange;
+
+  const truncation = details.truncation;
+  if (!isRecord(truncation)) return undefined;
+  if (truncation.truncated === false) return requestedRange;
+  if (truncation.truncated !== true) return undefined;
+
+  const outputLines = truncation.outputLines;
+  if (typeof outputLines !== "number" || !Number.isSafeInteger(outputLines) || outputLines <= 0)
+    return undefined;
+  const deliveredEnd = requestedRange.start + outputLines - 1;
+  if (!Number.isSafeInteger(deliveredEnd)) return undefined;
+  return {
+    start: requestedRange.start,
+    end:
+      requestedRange.end === undefined ? deliveredEnd : Math.min(requestedRange.end, deliveredEnd),
+  };
+}
+
 interface FileOpOccurrence {
   toolCallId: string;
   kind: FileOpKind;
@@ -1685,7 +1716,10 @@ function collectFileOpOccurrences(
       toolCallId: occurrence.toolCallId,
       kind: kind as FileOpKind,
       normalizedPath,
-      range: kind === "read" ? computeFileReadRange(occurrence.arguments) : undefined,
+      range:
+        kind === "read"
+          ? computeDeliveredFileReadRange(occurrence.arguments, resultMessage)
+          : undefined,
       isError: occurrence.isError,
       resultTextLength: contentTextLength(resultMessage.content),
       assistantIndex: occurrence.assistantIndex,
