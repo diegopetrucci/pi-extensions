@@ -6,6 +6,7 @@ import test from "node:test";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { streamSimple as streamAnthropicSimple } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as streamOpenAIResponsesSimple } from "@earendil-works/pi-ai/api/openai-responses";
+import { ANTHROPIC_MODELS as CATALOG_ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { createExtensionHarness, loadExtension } from "./extension-test-helpers.mjs";
 
 const OPENAI_CANONICAL_BASE_URL = "https://api.openai.com/v1";
@@ -1128,4 +1129,110 @@ test("fast reports unsupported models, respects headless mode, and rejects comma
     message: "Usage: /fast [ultrafast]",
     level: "warning",
   });
+});
+
+test("fast preserves installed Anthropic provider betas across supported models and auth paths", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const command = getCommand(harness);
+  const transcript = {
+    messages: [
+      {
+        role: "system",
+        content: "Diagnostic",
+        toolsAdded: [
+          {
+            name: "read",
+            description: "read",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+        timestamp: 0,
+      },
+      { role: "user", content: "hello", timestamp: 0 },
+      { role: "system", content: "", toolsAdded: [], timestamp: 1 },
+      { role: "user", content: "continue", timestamp: 2 },
+    ],
+  };
+
+  async function capture(model, context, { apiKey, headers } = {}) {
+    let request;
+    const stream = streamAnthropicSimple(model, transcript, {
+      apiKey: apiKey ?? "sk-ant-api-capture-test",
+      headers,
+      onPayload: (payload) => beforeRequest({ payload }, context.ctx),
+      fetch: async (_url, init) => {
+        request = {
+          headers: Object.fromEntries(new Headers(init.headers)),
+          body: JSON.parse(String(init.body)),
+        };
+        return new Response(JSON.stringify({ error: { message: "capture" } }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    await stream.result();
+    assert.ok(request, "request must reach fake fetch");
+    return { betas: betaValues(request.headers), body: request.body };
+  }
+
+  for (const id of ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"]) {
+    const catalogModel = Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === id);
+    assert.ok(catalogModel, `model ${id} must exist in the installed catalog`);
+    const model = { ...catalogModel, baseUrl: "https://capture.invalid" };
+    const context = createContext({ cwd: projectDir, model });
+    await sessionStart({}, context.ctx);
+
+    const fastOff = await capture(model, context);
+    assert.equal(fastOff.body.speed, undefined, `${id} Fast-off request must not set speed`);
+    assert.equal(fastOff.betas.includes(ANTHROPIC_FAST_BETA), false);
+
+    await command.handler("", context.ctx);
+    const fastOn = await capture(model, context);
+    assert.equal(fastOn.body.speed, "fast", `${id} Fast-on request must set speed`);
+    assert.equal(
+      fastOn.betas.filter((beta) => beta === ANTHROPIC_FAST_BETA).length,
+      1,
+      `${id} must contain the Fast beta exactly once`,
+    );
+    for (const beta of fastOff.betas) {
+      assert.ok(
+        fastOn.betas.includes(beta),
+        `${id} must preserve provider beta ${JSON.stringify(beta)} when Fast is enabled`,
+      );
+    }
+  }
+
+  const oauthModel = {
+    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-4-8"),
+    baseUrl: "https://capture.invalid",
+  };
+  const oauthContext = createContext({ cwd: projectDir, model: oauthModel, oauth: true });
+  await sessionStart({}, oauthContext.ctx);
+  await command.handler("", oauthContext.ctx);
+  const oauth = await capture(oauthModel, oauthContext, {
+    apiKey: "sk-ant-oat-oauth-capture-test",
+  });
+  assert.ok(oauth.betas.includes("claude-code-20250219"));
+  assert.ok(oauth.betas.includes("oauth-2025-04-20"));
+  assert.equal(oauth.betas.filter((beta) => beta === ANTHROPIC_FAST_BETA).length, 1);
+
+  const explicitHeaderModel = {
+    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-4-8"),
+    baseUrl: "https://capture.invalid",
+  };
+  const explicitHeaderContext = createContext({ cwd: projectDir, model: explicitHeaderModel });
+  await sessionStart({}, explicitHeaderContext.ctx);
+  await command.handler("", explicitHeaderContext.ctx);
+  const explicitHeader = await capture(explicitHeaderModel, explicitHeaderContext, {
+    headers: { "Anthropic-Beta": "user-beta-A,User-Beta-B" },
+  });
+  assert.deepEqual(explicitHeader.betas, ["user-beta-A", "User-Beta-B", ANTHROPIC_FAST_BETA]);
 });

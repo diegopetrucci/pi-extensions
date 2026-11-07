@@ -1,6 +1,6 @@
 import { lstatSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extname, relative, resolve } from "node:path";
+import { extname, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type {
   ChangeStatus,
@@ -147,35 +147,46 @@ async function findReviewBase(pi: ExtensionAPI, repoRoot: string): Promise<Revie
   return null;
 }
 
-function parseNameStatusLine(parts: string[]): ChangedPath | null {
-  const code = (parts[0] ?? "")[0];
-
-  if (code === "R") {
-    const oldPath = parts[1] ?? null;
-    const newPath = parts[2] ?? null;
-    if (oldPath == null || newPath == null) return null;
-    return { status: "renamed", oldPath, newPath };
-  }
-
-  const path = parts[1] ?? null;
-  if (path == null) return null;
-
-  if (code === "M") return { status: "modified", oldPath: path, newPath: path };
-  if (code === "A") return { status: "added", oldPath: null, newPath: path };
-  if (code === "D") return { status: "deleted", oldPath: path, newPath: null };
-  return null;
-}
-
-function parseNameStatus(output: string): ChangedPath[] {
-  const lines = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
+function parseNameStatusZ(output: string): ChangedPath[] {
+  const tokens = output.split("\0");
   const changes: ChangedPath[] = [];
-  for (const line of lines) {
-    const change = parseNameStatusLine(line.split("\t"));
-    if (change != null) changes.push(change);
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index] ?? "";
+    if (token.length === 0) {
+      index += 1;
+      continue;
+    }
+
+    const code = token[0] ?? "";
+    if (code === "R" || code === "C") {
+      const oldPath = tokens[index + 1] ?? null;
+      const newPath = tokens[index + 2] ?? null;
+      if (oldPath != null && oldPath.length > 0 && newPath != null && newPath.length > 0) {
+        changes.push({ status: "renamed", oldPath, newPath });
+      }
+      index += 3;
+    } else if (code === "M") {
+      const filePath = tokens[index + 1] ?? null;
+      if (filePath != null && filePath.length > 0) {
+        changes.push({ status: "modified", oldPath: filePath, newPath: filePath });
+      }
+      index += 2;
+    } else if (code === "A") {
+      const filePath = tokens[index + 1] ?? null;
+      if (filePath != null && filePath.length > 0) {
+        changes.push({ status: "added", oldPath: null, newPath: filePath });
+      }
+      index += 2;
+    } else if (code === "D") {
+      const filePath = tokens[index + 1] ?? null;
+      if (filePath != null && filePath.length > 0) {
+        changes.push({ status: "deleted", oldPath: filePath, newPath: null });
+      }
+      index += 2;
+    } else {
+      index += 2;
+    }
   }
   return changes;
 }
@@ -291,11 +302,12 @@ function inspectWorkingTreePath(repoRoot: string, path: string): WorkingTreeEntr
   const repoBase = resolve(repoRoot);
   const candidate = resolve(repoBase, path);
   const relativePath = relative(repoBase, candidate);
-  if (relativePath.length === 0 || /^(\.\.(?:[/\\]|$))/.test(relativePath)) {
+  // Backslash is a path separator only on Windows; on POSIX it is a valid filename character.
+  const separators = sep === "\\" ? /[\\/]+/ : new RegExp("/+");
+  const parts = relativePath.split(separators).filter(Boolean);
+  if (relativePath.length === 0 || parts[0] === "..") {
     return { kind: "unsafe" };
   }
-
-  const parts = relativePath.split(/[\\/]+/).filter(Boolean);
   let currentPath = repoBase;
   for (let index = 0; index < parts.length; index += 1) {
     currentPath = resolve(currentPath, parts[index]);
@@ -505,12 +517,13 @@ async function getTrackedBranchReviewChanges(
   repoRoot: string,
   branchComparisonBase: string,
 ): Promise<ChangedPath[]> {
-  return parseNameStatus(
+  return parseNameStatusZ(
     await runGitAllowFailure(pi, repoRoot, [
       "diff",
       "--find-renames",
       "-M",
       "--name-status",
+      "-z",
       branchComparisonBase,
       "--",
     ]),
@@ -536,11 +549,11 @@ async function getWorkingTreeSnapshotChanges(
   scriptLines.push("git add -A -- .");
   scriptLines.push(
     baseRevision != null
-      ? `git diff --cached --find-renames -M --name-status ${shellQuote(baseRevision)} --`
-      : "git diff --cached --find-renames -M --name-status --root --",
+      ? `git diff --cached --find-renames -M --name-status -z ${shellQuote(baseRevision)} --`
+      : "git diff --cached --find-renames -M --name-status -z --root --",
   );
   const output = await runBashAllowFailure(pi, repoRoot, scriptLines.join("\n"));
-  return parseNameStatus(output);
+  return parseNameStatusZ(output);
 }
 
 async function getBranchReviewChanges(
@@ -754,18 +767,40 @@ export async function getCommitFiles(
       .sort(compareReviewFiles);
   }
 
-  const output = await runGitAllowFailure(pi, repoRoot, [
-    "diff-tree",
-    "--root",
-    "--find-renames",
-    "-M",
-    "--name-status",
-    "--no-commit-id",
-    "-r",
-    "--end-of-options",
-    sha,
-  ]);
-  const changes = parseNameStatus(output).filter((change) =>
+  // Compare commits with their first parent so merge commits expose the merge result.
+  // Root commits retain the empty-tree comparison used by the previous behavior.
+  const firstParentResult = await pi.exec(
+    "git",
+    ["rev-parse", "--verify", "--end-of-options", `${sha}^1`],
+    { cwd: repoRoot },
+  );
+  const hasFirstParent = firstParentResult.code === 0;
+  const gitArgs = hasFirstParent
+    ? [
+        "diff-tree",
+        "--find-renames",
+        "-M",
+        "--name-status",
+        "-z",
+        "-r",
+        "--end-of-options",
+        `${sha}^1`,
+        sha,
+      ]
+    : [
+        "diff-tree",
+        "--root",
+        "--find-renames",
+        "-M",
+        "--name-status",
+        "-z",
+        "--no-commit-id",
+        "-r",
+        "--end-of-options",
+        sha,
+      ];
+  const output = await runGitAllowFailure(pi, repoRoot, gitArgs);
+  const changes = parseNameStatusZ(output).filter((change) =>
     isIncludedReviewPath(change.newPath ?? change.oldPath ?? ""),
   );
   return changes
@@ -862,7 +897,19 @@ export async function loadReviewFileContents(
       };
     }
 
-    if (!branchMergeBaseSha) return emptyBinaryContents;
+    if (!branchMergeBaseSha) {
+      // An unborn repository has no comparison base; read the modified side directly.
+      const modifiedSide = file.hasWorkingTreeFile
+        ? await loadBinarySideFromWorkingTree(repoRoot, comparison.newPath, file.mimeType)
+        : { exists: false, previewUrl: null };
+      return {
+        ...emptyBinaryContents,
+        originalExists: false,
+        modifiedExists: modifiedSide.exists,
+        originalPreviewUrl: null,
+        modifiedPreviewUrl: modifiedSide.previewUrl,
+      };
+    }
     const originalSide = await loadBinarySideFromRevision(
       pi,
       repoRoot,
@@ -978,13 +1025,23 @@ export async function loadReviewFileContents(
   }
 
   if (!branchMergeBaseSha) {
+    const modifiedExists =
+      comparison.newPath != null && file.hasWorkingTreeFile
+        ? hasWorkingTreeFile(repoRoot, comparison.newPath)
+        : false;
+    const modifiedContent =
+      comparison.newPath == null
+        ? ""
+        : file.hasWorkingTreeFile
+          ? await getWorkingTreeContent(repoRoot, comparison.newPath)
+          : "";
     return {
       originalContent: "",
-      modifiedContent: "",
+      modifiedContent,
       kind: file.kind,
       mimeType: file.mimeType,
       originalExists: false,
-      modifiedExists: false,
+      modifiedExists,
       originalPreviewUrl: null,
       modifiedPreviewUrl: null,
     };
@@ -1017,7 +1074,7 @@ export async function loadReviewFileContents(
 }
 
 export const __testing = {
-  parseNameStatus,
+  parseNameStatusZ,
   parseStatusPorcelainZ,
   shouldNormalizeBranchChanges,
 };
