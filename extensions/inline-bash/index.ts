@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
-  const PATTERN = /!\{([^}]+)\}/g;
   const TIMEOUT_MS = 30000;
   const MAX_OUTPUT_CHARS = 50000;
 
@@ -9,6 +8,55 @@ export default function (pi: ExtensionAPI) {
     const trimmed = output.trim();
     if (trimmed.length <= MAX_OUTPUT_CHARS) return trimmed;
     return `${trimmed.slice(0, MAX_OUTPUT_CHARS)}\n[inline-bash output truncated after ${MAX_OUTPUT_CHARS} characters]`;
+  };
+
+  const scanUntil = (text: string, from: number, close: string): number => {
+    let i = from;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "\\") {
+        i += 2;
+      } else if (c === "'") {
+        const end = text.indexOf("'", i + 1);
+        if (end === -1) return -1;
+        i = end + 1;
+      } else if (c === '"') {
+        i = scanDoubleQuoted(text, i + 1);
+        if (i === -1) return -1;
+      } else if (c === close) {
+        return i;
+      } else if (c === "$" && (text[i + 1] === "{" || text[i + 1] === "(")) {
+        const end = scanUntil(text, i + 2, text[i + 1] === "{" ? "}" : ")");
+        if (end === -1) return -1;
+        i = end + 1;
+      } else if (c === "{" || c === "(") {
+        const end = scanUntil(text, i + 1, c === "{" ? "}" : ")");
+        if (end === -1) return -1;
+        i = end + 1;
+      } else {
+        i++;
+      }
+    }
+    return -1;
+  };
+
+  const scanDoubleQuoted = (text: string, from: number): number => {
+    let i = from;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "\\") {
+        i += 2;
+      } else if (c === '"') {
+        return i + 1;
+      } else if (c === "$" && (text[i + 1] === "{" || text[i + 1] === "(")) {
+        const end = scanUntil(text, i + 2, text[i + 1] === "{" ? "}" : ")");
+        if (end === -1) return -1;
+        i = end + 1;
+      } else {
+        i++;
+      }
+    }
+    return -1;
   };
 
   pi.on("input", async (event, ctx) => {
@@ -24,16 +72,26 @@ export default function (pi: ExtensionAPI) {
       return { action: "continue" };
     }
 
-    PATTERN.lastIndex = 0;
     const matches: Array<{ start: number; end: number; command: string }> = [];
-    let match = PATTERN.exec(text);
-    while (match) {
+    let unmatched = false;
+    let searchFrom = 0;
+    for (let start = text.indexOf("!{"); start !== -1; start = text.indexOf("!{", searchFrom)) {
+      const close = scanUntil(text, start + 2, "}");
+      searchFrom = start + 2;
+      if (close === -1) {
+        unmatched = true;
+        break;
+      }
+      if (close === start + 2) continue;
       matches.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        command: match[1],
+        start,
+        end: close + 1,
+        command: text.slice(start + 2, close),
       });
-      match = PATTERN.exec(text);
+      searchFrom = close + 1;
+    }
+    if (unmatched && ctx.hasUI) {
+      ctx.ui.notify("inline-bash: found !{ without a matching }; left as literal text.", "warning");
     }
     if (matches.length === 0) {
       return { action: "continue" };

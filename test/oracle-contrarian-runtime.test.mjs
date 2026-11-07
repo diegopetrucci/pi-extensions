@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import test from "node:test";
 
 import { createExtensionHarness } from "./extension-test-helpers.mjs";
@@ -743,4 +744,363 @@ test("contrarian cancellation only escalates to SIGKILL when the child stays ali
     assert.deepEqual(forced.calls[0].killSignals, ["SIGTERM", "SIGKILL"]);
     assert.equal(timers[1].cleared, true);
   });
+});
+
+test("oracle and contrarian decode stdout correctly when multibyte UTF-8 is split across chunks", async () => {
+  const expected = "caf\u00e9 \u6771\u4eac \ud83d\udd2e";
+  const selection = {
+    modelRef: "fixture/test",
+    provider: "fixture",
+    modelId: "test",
+    thinkingLevel: "off",
+    autoSelected: false,
+    selectionReason: "diagnostic",
+  };
+
+  function makeMessageEnd(text) {
+    return {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        stopReason: "stop",
+      },
+    };
+  }
+
+  const payload = Buffer.from(JSON.stringify(makeMessageEnd(expected)) + "\n");
+
+  // Locate multibyte sequences in the serialised payload.
+  // \u00e9 = 0xC3 0xA9  (2 bytes)
+  // \u6771 = 0xE6 0x9D 0xB1  (3 bytes)
+  // \ud83d\udd2e = 0xF0 0x9F 0x94 0xAE  (4 bytes)
+  const ePos = payload.indexOf(Buffer.from([0xc3, 0xa9]));
+  const higashiPos = payload.indexOf(Buffer.from([0xe6, 0x9d, 0xb1]));
+  const crystalBallPos = payload.indexOf(Buffer.from([0xf0, 0x9f, 0x94, 0xae]));
+
+  assert.ok(ePos >= 0, "\u00e9 bytes found in payload");
+  assert.ok(higashiPos >= 0, "\u6771 bytes found in payload");
+  assert.ok(crystalBallPos >= 0, "\ud83d\udd2e bytes found in payload");
+
+  const splits = [
+    { label: "2-byte char", at: ePos + 1 },
+    { label: "3-byte char", at: higashiPos + 1 },
+    { label: "4-byte char", at: crystalBallPos + 1 },
+  ];
+
+  for (const { label, at } of splits) {
+    for (const role of ["oracle", "contrarian"]) {
+      const utils = await loadRoleTestUtils(role);
+      const runner = role === "oracle" ? utils.runOracle : utils.runContrarian;
+
+      const { spawnImpl } = createSpawnQueue([
+        {
+          start(proc) {
+            proc.stdout.emit("data", payload.subarray(0, at));
+            proc.stdout.emit("data", payload.subarray(at));
+            endProcess(proc, { code: 0 });
+          },
+        },
+      ]);
+
+      const result = await runner(
+        selection,
+        { task: "test" },
+        undefined,
+        undefined,
+        "/repo",
+        spawnImpl,
+      );
+      assert.equal(result.ok, true, `${role} split within ${label}: ok`);
+      assert.equal(result.output, expected, `${role} split within ${label}: text preserved`);
+    }
+  }
+
+  // Multiple messages: the second message_end should win and its multibyte text must survive the split.
+  const event1 = {
+    type: "message_start",
+    message: { role: "assistant", content: [] },
+  };
+  const event2 = makeMessageEnd("first \u00fcber message");
+  const event3 = {
+    type: "message_start",
+    message: { role: "assistant", content: [] },
+  };
+  const event4 = makeMessageEnd(expected);
+  const multiPayload = Buffer.from(
+    [event1, event2, event3, event4].map((e) => JSON.stringify(e)).join("\n") + "\n",
+  );
+  const multiCrystalBallPos = multiPayload.indexOf(Buffer.from([0xf0, 0x9f, 0x94, 0xae]));
+  assert.ok(multiCrystalBallPos >= 0, "\ud83d\udd2e bytes found in multi-message payload");
+
+  for (const role of ["oracle", "contrarian"]) {
+    const utils = await loadRoleTestUtils(role);
+    const runner = role === "oracle" ? utils.runOracle : utils.runContrarian;
+
+    const { spawnImpl } = createSpawnQueue([
+      {
+        start(proc) {
+          const splitAt = multiCrystalBallPos + 1;
+          proc.stdout.emit("data", multiPayload.subarray(0, splitAt));
+          proc.stdout.emit("data", multiPayload.subarray(splitAt));
+          endProcess(proc, { code: 0 });
+        },
+      },
+    ]);
+
+    const result = await runner(
+      selection,
+      { task: "test" },
+      undefined,
+      undefined,
+      "/repo",
+      spawnImpl,
+    );
+    assert.equal(result.ok, true, `${role} multiple messages: ok`);
+    assert.equal(result.output, expected, `${role} multiple messages: last message text preserved`);
+  }
+});
+
+test("oracle and contrarian process unterminated final JSONL line when multibyte UTF-8 is split across chunks", async () => {
+  const expected = "caf\u00e9 \u6771\u4eac \ud83d\udd2e";
+  const selection = {
+    modelRef: "fixture/test",
+    provider: "fixture",
+    modelId: "test",
+    thinkingLevel: "off",
+    autoSelected: false,
+    selectionReason: "diagnostic",
+  };
+
+  // No trailing newline; the close handler must flush the remaining buffer.
+  const payload = Buffer.from(
+    JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: expected }],
+        stopReason: "stop",
+      },
+    }),
+  );
+
+  // Split 2 bytes into the 4-byte emoji sequence.
+  const crystalBallPos = payload.indexOf(Buffer.from([0xf0, 0x9f, 0x94, 0xae]));
+  assert.ok(crystalBallPos >= 0, "\ud83d\udd2e bytes found in unterminated payload");
+  const splitAt = crystalBallPos + 2;
+
+  for (const role of ["oracle", "contrarian"]) {
+    const utils = await loadRoleTestUtils(role);
+    const runner = role === "oracle" ? utils.runOracle : utils.runContrarian;
+
+    const { spawnImpl } = createSpawnQueue([
+      {
+        start(proc) {
+          proc.stdout.emit("data", payload.subarray(0, splitAt));
+          proc.stdout.emit("data", payload.subarray(splitAt));
+          endProcess(proc, { code: 0 });
+        },
+      },
+    ]);
+
+    const result = await runner(
+      selection,
+      { task: "test" },
+      undefined,
+      undefined,
+      "/repo",
+      spawnImpl,
+    );
+    assert.equal(result.ok, true, `${role} unterminated final line: ok`);
+    assert.equal(result.output, expected, `${role} unterminated final line: text preserved`);
+  }
+});
+
+test("oracle and contrarian decode stderr correctly when multibyte UTF-8 is split across chunks", async () => {
+  const expectedStderr = "error: \u00fcberfall\n";
+  const selection = {
+    modelRef: "fixture/test",
+    provider: "fixture",
+    modelId: "test",
+    thinkingLevel: "off",
+    autoSelected: false,
+    selectionReason: "diagnostic",
+  };
+
+  const stderrPayload = Buffer.from(expectedStderr);
+  // \u00fc = 0xC3 0xBC (2 bytes) -- split after first byte
+  const umlautPos = stderrPayload.indexOf(Buffer.from([0xc3, 0xbc]));
+  assert.ok(umlautPos >= 0, "\u00fc bytes found in stderr payload");
+
+  // stdout needs a valid message_end so the runner succeeds.
+  const stdoutPayload = Buffer.from(
+    JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        stopReason: "stop",
+      },
+    }) + "\n",
+  );
+
+  for (const role of ["oracle", "contrarian"]) {
+    const utils = await loadRoleTestUtils(role);
+    const runner = role === "oracle" ? utils.runOracle : utils.runContrarian;
+
+    const { spawnImpl } = createSpawnQueue([
+      {
+        start(proc) {
+          proc.stdout.emit("data", stdoutPayload);
+          proc.stderr.emit("data", stderrPayload.subarray(0, umlautPos + 1));
+          proc.stderr.emit("data", stderrPayload.subarray(umlautPos + 1));
+          endProcess(proc, { code: 0 });
+        },
+      },
+    ]);
+
+    const result = await runner(
+      selection,
+      { task: "test" },
+      undefined,
+      undefined,
+      "/repo",
+      spawnImpl,
+    );
+    assert.equal(result.ok, true, `${role} stderr split: ok`);
+    assert.equal(
+      result.details.stderr,
+      expectedStderr.trim(),
+      `${role} stderr split: text preserved`,
+    );
+  }
+});
+
+// Spawns a real node child that writes each chunk to stdout/stderr and waits for
+// an IPC ack from the parent (sent after the parent receives the previous chunk)
+// before writing the next, so chunk boundaries are delivered deterministically.
+function createRealChildSpawn(chunks) {
+  const script = `
+    const chunks = JSON.parse(process.argv[1]).map((c) => [c[0], Buffer.from(c[1], "base64")]);
+    let i = 0;
+    const next = () => {
+      if (i >= chunks.length) { process.disconnect(); return; }
+      const [stream, buf] = chunks[i++];
+      process[stream].write(buf);
+    };
+    process.on("message", next);
+    next();
+  `;
+  const encoded = JSON.stringify(chunks.map(([stream, buf]) => [stream, buf.toString("base64")]));
+  return (_command, _args, options) => {
+    const proc = spawn(process.execPath, ["-e", script, encoded], {
+      ...options,
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    });
+    const ack = () => {
+      if (proc.connected) proc.send("ack");
+    };
+    proc.stdout.on("data", ack);
+    proc.stderr.on("data", ack);
+    return proc;
+  };
+}
+
+test("oracle and contrarian decode split multibyte UTF-8 from a real child process", async () => {
+  const expected = "caf\u00e9 \u6771\u4eac \ud83d\udd2e";
+  const selection = {
+    modelRef: "fixture/test",
+    provider: "fixture",
+    modelId: "test",
+    thinkingLevel: "off",
+    autoSelected: false,
+    selectionReason: "diagnostic",
+  };
+  const messageEnd = (text) => ({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stopReason: "stop",
+    },
+  });
+  const assistantStart = {
+    type: "message_start",
+    message: { role: "assistant", content: [] },
+  };
+  const lines = (events) => events.map((e) => JSON.stringify(e)).join("\n");
+  const splitInside = (buf, seq, offset) => {
+    const pos = buf.indexOf(Buffer.from(seq));
+    assert.ok(pos >= 0, "sequence found");
+    return [buf.subarray(0, pos + offset), buf.subarray(pos + offset)];
+  };
+  const seqs = {
+    "2-byte": [[0xc3, 0xa9], 1],
+    "3-byte": [[0xe6, 0x9d, 0xb1], 1],
+    "3-byte (after 2)": [[0xe6, 0x9d, 0xb1], 2],
+    "4-byte": [[0xf0, 0x9f, 0x94, 0xae], 1],
+    "4-byte (after 3)": [[0xf0, 0x9f, 0x94, 0xae], 3],
+  };
+
+  const scenarios = [];
+  for (const [label, [seq, offset]] of Object.entries(seqs)) {
+    const buf = Buffer.from(lines([messageEnd(expected)]) + "\n");
+    scenarios.push({
+      label: `split in ${label}`,
+      chunks: splitInside(buf, seq, offset),
+      expected,
+    });
+  }
+  const multi = Buffer.from(
+    lines([assistantStart, messageEnd("first \u00fcber"), assistantStart, messageEnd(expected)]) +
+      "\n",
+  );
+  scenarios.push({
+    label: "multiple messages",
+    chunks: splitInside(multi, [0xf0, 0x9f, 0x94, 0xae], 2),
+    expected,
+  });
+  const unterminated = Buffer.from(lines([messageEnd(expected)]));
+  scenarios.push({
+    label: "unterminated final line",
+    chunks: splitInside(unterminated, [0xf0, 0x9f, 0x94, 0xae], 2),
+    expected,
+  });
+
+  for (const role of ["oracle", "contrarian"]) {
+    const utils = await loadRoleTestUtils(role);
+    const runner = role === "oracle" ? utils.runOracle : utils.runContrarian;
+    for (const scenario of scenarios) {
+      const spawnImpl = createRealChildSpawn(scenario.chunks.map((c) => ["stdout", c]));
+      const result = await runner(
+        selection,
+        { task: "test" },
+        undefined,
+        undefined,
+        process.cwd(),
+        spawnImpl,
+      );
+      assert.equal(result.ok, true, `${role} ${scenario.label}: ok`);
+      assert.equal(result.output, scenario.expected, `${role} ${scenario.label}: text`);
+    }
+
+    // stderr split inside a 2-byte character, with a valid stdout message.
+    const stderrBuf = Buffer.from("error: \u00fcberfall");
+    const [e1, e2] = splitInside(stderrBuf, [0xc3, 0xbc], 1);
+    const okLine = Buffer.from(lines([messageEnd("ok")]) + "\n");
+    const result = await runner(
+      selection,
+      { task: "test" },
+      undefined,
+      undefined,
+      process.cwd(),
+      createRealChildSpawn([
+        ["stdout", okLine],
+        ["stderr", e1],
+        ["stderr", e2],
+      ]),
+    );
+    assert.equal(result.ok, true, `${role} real stderr: ok`);
+    assert.equal(result.details.stderr, "error: \u00fcberfall", `${role} real stderr: text`);
+  }
 });

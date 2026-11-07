@@ -202,3 +202,202 @@ test("inline-bash success and older-host result shape are not failures", async (
   assert.equal(out.text, "x ok y");
   assert.doesNotMatch(notes[0], /\(exit code|exceeded/);
 });
+
+test("inline-bash extracts a command past a brace inside double quotes", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    return { stdout: "a}b", stderr: "", code: 0 };
+  });
+
+  const result = await handler(
+    { text: 'Check !{printf "%s" "a}b"}', source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(capturedCommands, ['printf "%s" "a}b"']);
+  assert.deepEqual(result, {
+    action: "transform",
+    text: "Check a}b",
+    images: undefined,
+  });
+});
+
+test("inline-bash extracts a command past a brace in parameter expansion", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    return { stdout: "fixed", stderr: "", code: 0 };
+  });
+
+  const result = await handler(
+    { text: 'Check !{printf "%s" "${PROBE_VALUE}"}', source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(capturedCommands, ['printf "%s" "${PROBE_VALUE}"']);
+  assert.deepEqual(result, {
+    action: "transform",
+    text: "Check fixed",
+    images: undefined,
+  });
+});
+
+test("inline-bash extracts nested command substitutions", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    return { stdout: "nested", stderr: "", code: 0 };
+  });
+
+  const result = await handler(
+    { text: "Run !{echo $(echo nested)}", source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(capturedCommands, ["echo $(echo nested)"]);
+  assert.deepEqual(result, {
+    action: "transform",
+    text: "Run nested",
+    images: undefined,
+  });
+});
+
+test("inline-bash ignores an escaped closing brace while scanning", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    return { stdout: "}", stderr: "", code: 0 };
+  });
+
+  const result = await handler(
+    { text: "Literal !{printf '\\}'}", source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(capturedCommands, ["printf '\\}'"]);
+  assert.deepEqual(result, {
+    action: "transform",
+    text: "Literal }",
+    images: undefined,
+  });
+});
+
+test("inline-bash extracts multiple quoted-brace expansions independently", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    if (args[1] === 'echo "a}b"') return { stdout: "a}b", stderr: "", code: 0 };
+    if (args[1] === "echo end") return { stdout: "end", stderr: "", code: 0 };
+    throw new Error(`unexpected command: ${args[1]}`);
+  });
+
+  const result = await handler(
+    { text: 'First !{echo "a}b"} second !{echo end}', source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(capturedCommands, ['echo "a}b"', "echo end"]);
+  assert.deepEqual(result, {
+    action: "transform",
+    text: "First a}b second end",
+    images: undefined,
+  });
+});
+
+test("inline-bash leaves an unmatched opener literal without executing it", async () => {
+  const { handler, harness } = await loadInputHandler(async () => {
+    throw new Error("unmatched opener must not execute bash");
+  });
+
+  const result = await handler(
+    { text: "Unmatched !{echo no closing brace", source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(harness.execCalls, []);
+  assert.deepEqual(result, { action: "continue" });
+});
+
+test("inline-bash warns when an unmatched opener is found with UI", async () => {
+  const { handler, harness } = await loadInputHandler(async () => {
+    throw new Error("unmatched opener must not execute bash");
+  });
+
+  const notifications = [];
+  const result = await handler(
+    { text: "Unmatched !{echo no closing brace", source: "rpc" },
+    {
+      hasUI: true,
+      ui: { notify: (msg, level) => notifications.push({ msg, level }) },
+    },
+  );
+
+  assert.deepEqual(harness.execCalls, []);
+  assert.equal(result.action, "continue");
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].level, "warning");
+  assert.match(notifications[0].msg, /!\{/);
+});
+
+test("inline-bash handles nested quotes, groups, a literal suffix, and extension input", async () => {
+  const capturedCommands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    capturedCommands.push(args[1]);
+    return { stdout: "X", stderr: "", code: 0 };
+  });
+
+  const cases = [
+    ["A !{echo 'it'\\''s }'} tail", "echo 'it'\\''s }'"],
+    ['A !{echo "$(echo \"}\" ${V:-\"}\"})"} tail', 'echo "$(echo "}" ${V:-"}"})"'],
+    ["A !{f() { echo hi; }; f} tail", "f() { echo hi; }; f"],
+  ];
+  for (const [text, command] of cases) {
+    capturedCommands.length = 0;
+    const result = await handler({ text, source: "rpc" }, { hasUI: false });
+    assert.deepEqual(capturedCommands, [command]);
+    assert.equal(result.text, "A X tail");
+  }
+
+  const extensionResult = await handler(
+    { text: 'x !{echo "a}b"}', source: "extension" },
+    { hasUI: false },
+  );
+  assert.deepEqual(extensionResult, { action: "continue" });
+});
+
+test("inline-bash stops scanning after an unmatched opener and keeps its suffix literal", async () => {
+  const commands = [];
+  const { handler } = await loadInputHandler(async (_cmd, args) => {
+    commands.push(args[1]);
+    return { stdout: "ok", stderr: "", code: 0 };
+  });
+
+  const result = await handler(
+    { text: '!{echo a} then !{echo "oops !{printf nested} then !{echo after}', source: "rpc" },
+    { hasUI: false },
+  );
+
+  assert.deepEqual(commands, ["echo a"]);
+  assert.equal(result.text, 'ok then !{echo "oops !{printf nested} then !{echo after}');
+});
+
+test("inline-bash leaves an unmatched nested opener unchanged and executes nothing", async () => {
+  const { handler, harness } = await loadInputHandler(async () => {
+    throw new Error("unmatched opener must not execute bash");
+  });
+  const notifications = [];
+
+  const result = await handler(
+    { text: 'x !{echo "oops !{printf nested} y', source: "rpc" },
+    {
+      hasUI: true,
+      ui: { notify: (msg, level) => notifications.push({ msg, level }) },
+    },
+  );
+
+  assert.deepEqual(harness.execCalls, []);
+  assert.deepEqual(result, { action: "continue" });
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].level, "warning");
+});

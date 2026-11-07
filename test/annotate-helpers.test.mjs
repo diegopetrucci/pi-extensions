@@ -57,7 +57,7 @@ const { findLastAssistantMessage } = await importTsModule(
 );
 
 const { clipboardReadCommands, clipboardWriteCommands } = clipboardTesting;
-const { parseNameStatus, parseStatusPorcelainZ, shouldNormalizeBranchChanges } = gitTesting;
+const { parseNameStatusZ, parseStatusPorcelainZ, shouldNormalizeBranchChanges } = gitTesting;
 const { isIgnoredWatchPath } = watchTesting;
 
 function createAssistantEntry({ stopReason = "stop", content = [] } = {}) {
@@ -174,9 +174,9 @@ test("annotate-git-diff watch helper ignores generated and editor-temporary path
 });
 
 test("annotate-git-diff git helpers parse change outputs and decide when branch diffs need normalization", async (t) => {
-  await t.test("parseNameStatus keeps supported changes and rename paths", () => {
-    const parsed = parseNameStatus(
-      "M\tsrc/app.ts\r\nA\tsrc/new.ts\nD\tsrc/old.ts\nR100\tsrc/before.ts\tsrc/after.ts\nX\tsrc/ignored.ts\n",
+  await t.test("parseNameStatusZ parses NUL-delimited output without trimming path bytes", () => {
+    const parsed = parseNameStatusZ(
+      "M\0src/app.ts\0A\0src/new.ts\0D\0src/old.ts\0R100\0src/before.ts\0src/after.ts\0X\0src/ignored.ts\0",
     );
 
     assert.deepEqual(parsed, [
@@ -186,6 +186,32 @@ test("annotate-git-diff git helpers parse change outputs and decide when branch 
       { status: "renamed", oldPath: "src/before.ts", newPath: "src/after.ts" },
     ]);
   });
+
+  await t.test("parseNameStatusZ preserves non-ASCII paths and trailing spaces", () => {
+    const parsed = parseNameStatusZ("M\0caf\u00e9.txt\0M\0trail .txt \0");
+
+    assert.deepEqual(parsed, [
+      { status: "modified", oldPath: "caf\u00e9.txt", newPath: "caf\u00e9.txt" },
+      { status: "modified", oldPath: "trail .txt ", newPath: "trail .txt " },
+    ]);
+  });
+
+  await t.test("parseNameStatusZ handles copy status the same as rename", () => {
+    const parsed = parseNameStatusZ("C75\0src/original.ts\0src/copy.ts\0");
+
+    assert.deepEqual(parsed, [
+      { status: "renamed", oldPath: "src/original.ts", newPath: "src/copy.ts" },
+    ]);
+  });
+
+  await t.test(
+    "parseNameStatusZ stays aligned after unknown status (T record whose path starts with M)",
+    () => {
+      const parsed = parseNameStatusZ("T\0Makefile\0M\0b.txt\0");
+
+      assert.deepEqual(parsed, [{ status: "modified", oldPath: "b.txt", newPath: "b.txt" }]);
+    },
+  );
 
   await t.test("parseStatusPorcelainZ tracks reviewable untracked files and renames", () => {
     const status = parseStatusPorcelainZ(
@@ -386,22 +412,27 @@ test("annotate-git-diff commit file helper sorts files and preserves rename meta
     async exec(command, args, options) {
       execCalls.push({ command, args, options });
       assert.equal(command, "git");
+      assert.deepEqual(options, { cwd: "/repo" });
+      if (args[0] === "rev-parse") {
+        assert.deepEqual(args, ["rev-parse", "--verify", "--end-of-options", "abc123^1"]);
+        return { code: 1, stdout: "", stderr: "" };
+      }
       assert.deepEqual(args, [
         "diff-tree",
         "--root",
         "--find-renames",
         "-M",
         "--name-status",
+        "-z",
         "--no-commit-id",
         "-r",
         "--end-of-options",
         "abc123",
       ]);
-      assert.deepEqual(options, { cwd: "/repo" });
       return {
         code: 0,
         stdout:
-          "D\tsrc/z-last.ts\nR100\tsrc/old-name.ts\tsrc/new-name.ts\nA\tsrc/a-first.ts\nX\tsrc/ignored.ts\n",
+          "D\0src/z-last.ts\0R100\0src/old-name.ts\0src/new-name.ts\0A\0src/a-first.ts\0X\0ignored.ts\0",
       };
     },
   };
@@ -461,7 +492,7 @@ test("annotate-git-diff commit file helper sorts files and preserves rename meta
       mimeType: null,
     },
   ]);
-  assert.equal(execCalls.length, 1);
+  assert.equal(execCalls.length, 2);
 });
 
 test("annotate-last-message session helper reports missing, incomplete, empty, and successful assistant lookups", async (t) => {

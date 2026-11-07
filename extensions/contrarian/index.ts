@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
@@ -1508,6 +1509,8 @@ async function runContrarian(
       stdio: ["ignore", "pipe", "pipe"],
     });
     let buffer = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
 
     const processLine = (line: string) => {
       if (!line.trim()) return;
@@ -1558,14 +1561,14 @@ async function runContrarian(
     };
 
     proc.stdout.on("data", (data) => {
-      buffer += data.toString();
+      buffer += stdoutDecoder.write(data);
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       for (const line of lines) processLine(line);
     });
 
     proc.stderr.on("data", (data) => {
-      stderr += data.toString();
+      stderr += stderrDecoder.write(data);
       emit();
     });
 
@@ -1595,6 +1598,8 @@ async function runContrarian(
     proc.on("close", (code) => {
       closed = true;
       cleanup();
+      buffer += stdoutDecoder.end();
+      stderr += stderrDecoder.end();
       if (buffer.trim()) processLine(buffer);
       resolve(code ?? 0);
     });
