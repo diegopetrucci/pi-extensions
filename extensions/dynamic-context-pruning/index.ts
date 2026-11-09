@@ -303,21 +303,19 @@ function asStringArray(value: unknown, fallback: string[]): string[] {
 }
 
 function asNonNegativeInt(value: unknown, fallback: number): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return Math.floor(parsed);
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return fallback;
+  return Math.floor(value);
 }
 
 function asNonNegativeNumber(value: unknown, fallback: number): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return fallback;
+  return value;
 }
 
 function asRatio(value: unknown, fallback: number): number {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return fallback;
-  return parsed;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
+    return fallback;
+  return value;
 }
 
 function asGateMode(value: unknown, fallback: GateMode): GateMode {
@@ -1639,17 +1637,8 @@ export function computeFileReadRange(args: Record<string, unknown> | undefined):
 }
 
 /**
- * Conservative range-coverage check: does `later` fully cover `earlier`?
- * Implements rules 1+2 above via one unified representation (a full-file
- * read is just the range [1, EOF)):
- *   - `later` must start at or before `earlier` (later.start <= earlier.start).
- *   - If `later` has no end (reads to EOF), it covers any bounded-or-unbounded
- *     earlier range that starts at/after it (the earlier read already proved
- *     the file has at least `earlier.end` lines, if bounded).
- *   - If `later` IS bounded but `earlier` is unbounded (reads to EOF),
- *     coverage can't be reliably determined (later might stop short of the
- *     file's actual end) — conservatively return false (skip).
- *   - Otherwise (both bounded), `later` covers `earlier` iff later.end >= earlier.end.
+ * Implements README rules 1-2: does `later` fully cover `earlier`?
+ * An undefined end means EOF; a bounded range cannot prove coverage to EOF.
  */
 export function readRangeCovers(later: FileReadRange, earlier: FileReadRange): boolean {
   if (later.start > earlier.start) return false;
@@ -1856,7 +1845,7 @@ export const supersededFileOpsStrategy: PruneStrategy = {
         // Fold this occurrence into the tracking state for the next (earlier) iteration.
         if (occurrence.kind !== "read") {
           if (!occurrence.isError) nearestLaterSuccessfulWrite = occurrence;
-        } else if (occurrence.range !== undefined) {
+        } else if (!occurrence.isError && occurrence.range !== undefined) {
           const occurrenceRange = occurrence.range;
           for (let j = nearestCoveringReads.length - 1; j >= 0; j--) {
             const existing = nearestCoveringReads[j];
