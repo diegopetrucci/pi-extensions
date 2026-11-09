@@ -35,6 +35,7 @@ const { getCommitFiles, getReviewWindowData, loadReviewFileContents } = await im
 async function createRealGitPi() {
   return {
     async exec(command, args, options) {
+      assert.ok(options?.timeout > 0);
       try {
         const result = await execFileAsync(command, args, {
           cwd: options?.cwd,
@@ -129,6 +130,7 @@ async function createIsolatedGitFixture(scratchDir) {
 
   const pi = {
     async exec(command, args, options) {
+      assert.ok(options?.timeout > 0);
       const effectiveArgs =
         command === "bash" && args[0] === "-lc" ? ["--noprofile", "--norc", "-c", args[1]] : args;
       try {

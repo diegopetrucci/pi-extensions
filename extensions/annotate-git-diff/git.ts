@@ -30,6 +30,8 @@ interface WorkingTreeStatusInfo {
   untrackedPaths: string[];
 }
 
+const GIT_COMMAND_TIMEOUT_MS = 30_000;
+
 const WORKING_TREE_COMMIT_SHA = "__tlh_working_tree__";
 const WORKING_TREE_COMMIT_SHORT_SHA = "WT";
 const WORKING_TREE_COMMIT_SUBJECT = "Uncommitted changes";
@@ -54,8 +56,8 @@ async function runGitAllowFailure(
   repoRoot: string,
   args: string[],
 ): Promise<string> {
-  const result = await pi.exec("git", args, { cwd: repoRoot });
-  if (result.code !== 0) {
+  const result = await pi.exec("git", args, { cwd: repoRoot, timeout: GIT_COMMAND_TIMEOUT_MS });
+  if (result.killed || result.code !== 0) {
     return "";
   }
   return result.stdout;
@@ -66,29 +68,41 @@ async function runBashAllowFailure(
   repoRoot: string,
   script: string,
 ): Promise<string> {
-  const result = await pi.exec("bash", ["-lc", script], { cwd: repoRoot });
-  if (result.code !== 0) {
+  const result = await pi.exec("bash", ["-lc", script], {
+    cwd: repoRoot,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+  if (result.killed || result.code !== 0) {
     return "";
   }
   return result.stdout;
 }
 
 async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
-  const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd });
-  if (result.code !== 0) {
+  const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+  if (result.killed || result.code !== 0) {
     throw new Error("Not inside a git repository.");
   }
   return result.stdout.trim();
 }
 
 async function hasHead(pi: ExtensionAPI, repoRoot: string): Promise<boolean> {
-  const result = await pi.exec("git", ["rev-parse", "--verify", "HEAD"], { cwd: repoRoot });
-  return result.code === 0;
+  const result = await pi.exec("git", ["rev-parse", "--verify", "HEAD"], {
+    cwd: repoRoot,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+  return !result.killed && result.code === 0;
 }
 
 async function currentBranch(pi: ExtensionAPI, repoRoot: string): Promise<string> {
-  const result = await pi.exec("git", ["branch", "--show-current"], { cwd: repoRoot });
-  return result.code === 0 ? result.stdout.trim() || "HEAD" : "HEAD";
+  const result = await pi.exec("git", ["branch", "--show-current"], {
+    cwd: repoRoot,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
+  });
+  return !result.killed && result.code === 0 ? result.stdout.trim() || "HEAD" : "HEAD";
 }
 
 async function getUpstreamRef(pi: ExtensionAPI, repoRoot: string): Promise<string | null> {
@@ -284,8 +298,9 @@ async function getRevisionContent(
 ): Promise<string> {
   const result = await pi.exec("git", ["show", "--end-of-options", `${revision}:${path}`], {
     cwd: repoRoot,
+    timeout: GIT_COMMAND_TIMEOUT_MS,
   });
-  if (result.code !== 0) {
+  if (result.killed || result.code !== 0) {
     return "";
   }
   return result.stdout;
@@ -367,9 +382,9 @@ async function getRevisionBytes(
   const result = await pi.exec(
     "bash",
     ["-lc", `git show --end-of-options ${spec} | base64 | tr -d '\\n'`],
-    { cwd: repoRoot },
+    { cwd: repoRoot, timeout: GIT_COMMAND_TIMEOUT_MS },
   );
-  if (result.code !== 0) return null;
+  if (result.killed || result.code !== 0) return null;
   const encoded = (result.stdout ?? "").trim();
   try {
     return Buffer.from(encoded, "base64");
@@ -772,9 +787,9 @@ export async function getCommitFiles(
   const firstParentResult = await pi.exec(
     "git",
     ["rev-parse", "--verify", "--end-of-options", `${sha}^1`],
-    { cwd: repoRoot },
+    { cwd: repoRoot, timeout: GIT_COMMAND_TIMEOUT_MS },
   );
-  const hasFirstParent = firstParentResult.code === 0;
+  const hasFirstParent = !firstParentResult.killed && firstParentResult.code === 0;
   const gitArgs = hasFirstParent
     ? [
         "diff-tree",

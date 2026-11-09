@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 
+const CLIPBOARD_COMMAND_TIMEOUT_MS = 5_000;
 const MAX_CLIPBOARD_BYTES = 16 * 1024 * 1024;
 
 type ClipboardPlatform = NodeJS.Platform;
@@ -29,7 +30,7 @@ interface ClipboardOptions {
 }
 
 const defaultRunner: ClipboardCommandRunner = (command, args, options) =>
-  spawnSync(command, args, options);
+  spawnSync(command, args, { ...options, timeout: CLIPBOARD_COMMAND_TIMEOUT_MS });
 
 function clipboardReadCommands(platform: ClipboardPlatform): ClipboardCommand[] {
   switch (platform) {

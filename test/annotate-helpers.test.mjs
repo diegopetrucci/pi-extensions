@@ -412,7 +412,7 @@ test("annotate-git-diff commit file helper sorts files and preserves rename meta
     async exec(command, args, options) {
       execCalls.push({ command, args, options });
       assert.equal(command, "git");
-      assert.deepEqual(options, { cwd: "/repo" });
+      assert.deepEqual(options, { cwd: "/repo", timeout: 30000 });
       if (args[0] === "rev-parse") {
         assert.deepEqual(args, ["rev-parse", "--verify", "--end-of-options", "abc123^1"]);
         return { code: 1, stdout: "", stderr: "" };
