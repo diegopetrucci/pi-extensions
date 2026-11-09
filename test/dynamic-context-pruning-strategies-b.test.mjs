@@ -521,6 +521,14 @@ test("supersededFileOpsStrategy: an errored later write does NOT supersede an ea
   assert.deepEqual(propose(messages), []);
 });
 
+test("supersededFileOpsStrategy: an errored later read does NOT supersede an earlier successful read", () => {
+  const messages = [
+    ...toolCallTurn("r1", "read", { path: "a.txt" }, "x".repeat(500)),
+    ...toolCallTurn("r2", "read", { path: "a.txt" }, "Error: permission denied", true),
+  ];
+  assert.deepEqual(propose(messages), []);
+});
+
 test("supersededFileOpsStrategy: zero-length write output is never proposed even if a later successful write exists", () => {
   const messages = [
     ...toolCallTurn("w1", "write", { path: "a.txt", content: "v1" }, ""),
