@@ -61,6 +61,24 @@ test("readConfig falls back to defaults when no config file exists", async (t) =
   assert.deepEqual(config, dcp.defaultConfig());
 });
 
+test("normalizeConfig falls back to numeric defaults for non-number values", async () => {
+  const dcp = await import(pathToFileURL(modulePath).href);
+  const defaults = dcp.defaultConfig();
+
+  for (const value of [null, false, "", "5"]) {
+    const config = dcp.normalizeConfig({
+      protections: { recentTurns: value },
+      thresholds: { minCharsSaved: value },
+      gate: { cachedPriceRatio: value, breakEvenThreshold: value },
+    });
+    const label = JSON.stringify(value);
+    assert.equal(config.protections.recentTurns, defaults.protections.recentTurns, label);
+    assert.equal(config.thresholds.minCharsSaved, defaults.thresholds.minCharsSaved, label);
+    assert.equal(config.gate.cachedPriceRatio, defaults.gate.cachedPriceRatio, label);
+    assert.equal(config.gate.breakEvenThreshold, defaults.gate.breakEvenThreshold, label);
+  }
+});
+
 test("normalizeConfig then resolveBreakEvenThreshold preserves state defaults and legacy fallback semantics", async () => {
   const dcp = await import(pathToFileURL(modulePath).href);
   const cases = [
