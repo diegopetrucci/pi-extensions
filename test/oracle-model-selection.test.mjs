@@ -172,16 +172,20 @@ test("Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupp
   }
 });
 
-test("Oracle does not apply the GPT-6.1 Sol high-thinking exception to Pro/Fast variants", async () => {
+test("Oracle does not apply the GPT Sol high-thinking exception to Pro/Fast variants", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
-  const pro = getBuiltinModels("openrouter").find((model) => model.id === "openai/gpt-6.1-sol-pro");
-  const fast = getBuiltinModels("vercel-ai-gateway").find(
-    (model) => model.id === "openai/gpt-6.1-sol-fast",
-  );
-  assert.ok(pro && fast, "expected Pi 1.0 GPT-6.1 Sol Pro/Fast variants in the pinned catalog");
-
-  assert.equal(resolveThinkingLevel(pro, undefined).requested, "xhigh");
-  assert.equal(resolveThinkingLevel(fast, undefined).requested, "xhigh");
+  for (const [provider, id] of [
+    ["openrouter", "openai/gpt-5.6-sol-pro"],
+    ["openrouter", "openai/gpt-6-sol-pro"],
+    ["openrouter", "openai/gpt-6.1-sol-pro"],
+    ["vercel-ai-gateway", "openai/gpt-5.6-sol-fast"],
+    ["vercel-ai-gateway", "openai/gpt-6-sol-fast"],
+    ["vercel-ai-gateway", "openai/gpt-6.1-sol-fast"],
+  ]) {
+    const model = getBuiltinModels(provider).find((model) => model.id === id);
+    assert.ok(model, `expected ${id} in the pinned ${provider} catalog`);
+    assert.equal(resolveThinkingLevel(model, undefined).requested, "xhigh", `${provider}/${id}`);
+  }
 });
 
 test("oracle thinking-level resolution clamps unsupported levels for matched models", async () => {

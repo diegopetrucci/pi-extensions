@@ -11,7 +11,7 @@ It adds an `oracle` tool that spins up a separate pi subprocess with read-only b
 - creates an isolated subprocess with read-only built-in tools (read, grep, find, ls) and any configured MCP tools
 - auto-picks the strongest reasoning model on the current provider
 - uses provider-specific hardcoded rankings first, then a heuristic fallback
-- requests `xhigh` by default for reasoning models, then clamps to the model-supported thinking level
+- requests `xhigh` by default for reasoning models (base GPT-5.6/6/6.1 Sol models request `high` instead), then clamps to the model-supported thinking level
 - defaults to `read,grep,find,ls`
 - can optionally allow non-mutating `bash` inspection
 - shows a live oracle status line and widget while the subprocess is running
@@ -35,7 +35,7 @@ If no reasoning model exists on the current provider, it falls back to the best 
 
 Yes — the extension explicitly sets the oracle reasoning level.
 
-- reasoning models request `xhigh` by default, then use the Pi-compatible effective thinking level supported by the matched model
+- reasoning models request `xhigh` by default (base GPT-5.6/6/6.1 Sol models request `high` instead), then use the Pi-compatible effective thinking level supported by the matched model
 - non-reasoning models default to `off`
 - you can override it with the tool's optional `thinkingLevel` parameter; matched models still clamp unsupported overrides and report the effective level
 - you can persist a default thinking level with `/oracle thinking <level>` so future automatic oracle tool calls use it when the agent does not pass a per-call override

@@ -731,7 +731,7 @@ const OracleParams = Type.Object({
   thinkingLevel: Type.Optional(
     StringEnum(THINKING_LEVELS, {
       description:
-        "Optional reasoning level override for the oracle subprocess. Defaults request xhigh for reasoning models and off for non-reasoning models, then clamp to matched model capabilities.",
+        "Optional reasoning level override for the oracle subprocess. Defaults request xhigh for reasoning models (base GPT-5.6/6/6.1 Sol models request high instead) and off for non-reasoning models, then clamp to matched model capabilities.",
     }),
   ),
   cwd: Type.Optional(
@@ -1106,9 +1106,7 @@ function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingL
 
 function isGptSolModel(model: PiModel | undefined): boolean {
   if (!model) return false;
-  return /(?:\bgpt-(?:5\.6|6)-sol\b|\bgpt-6\.1-sol(?:\s|$))/i.test(
-    `${model.id} ${model.name ?? ""}`,
-  );
+  return /\bgpt-(?:5\.6|6|6\.1)-sol(?:\s|$)/i.test(`${model.id} ${model.name ?? ""}`);
 }
 
 function resolveThinkingLevel(
@@ -1782,7 +1780,7 @@ function createOracleExtension(pi: ExtensionAPI, deps: OracleExtensionDeps = {})
       "The oracle tool exposes read-only built-in tools (read, grep, find, and ls) plus any configured MCP tools; oracle includeBash adds the bash inspection tool.",
       "Set oracle includeBash only when the extra bash inspection tool is genuinely useful; keep oracle relying on read, grep, find, and ls otherwise.",
       "Configured MCP tools are available to oracle and run without confirmation inside the subagent; they may have side effects — use them only for gathering evidence, not for state-changing actions unless the task explicitly asks. MCP access requires host Pi >=1.0.4; older hosts degrade to no MCP, no error.",
-      "The oracle tool requests xhigh by default for reasoning models; oracle defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
+      "The oracle tool requests xhigh by default for reasoning models (base GPT-5.6/6/6.1 Sol models request high instead); oracle defaults and explicit thinkingLevel overrides are clamped to the effective model-supported level when the model is matched.",
     ],
     parameters: OracleParams,
 
