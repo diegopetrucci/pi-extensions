@@ -82,13 +82,15 @@ When the same file path is read and/or written more than once, older
 strategy is deliberately conservative — it only proposes a prune when it can
 prove the older output is stale, never on a guess:
 
-1. A **full-file read** (no `offset`/`limit`) is superseded by a **later**
-   full-file read of the same normalized path.
-2. A **partial read** (has `offset`/`limit`) is *not* superseded by a later
-   partial read unless the later read's range fully covers the earlier one.
-   If range coverage can't be reliably determined from the arguments (e.g. the
-   earlier read has no `limit` — reads to EOF — but the later read is
-   bounded), the strategy skips it rather than guessing.
+1. A read is superseded by a **later, successful** read of the same normalized
+   path only when the later delivered range fully covers the earlier one.
+   An errored read never supersedes anything; a bounded range cannot prove
+   coverage of a read to EOF.
+2. With no truncation metadata or `truncated: false`, the delivered range keeps
+   the argument range (`offset`/`limit`, or the whole file if omitted).
+   With `truncated: true` and a positive integer `outputLines`, its end is
+   limited to the delivered lines. Any other truncation metadata cannot
+   establish coverage, so the strategy skips it.
 3. **Any** read of a path (full or partial) is superseded once a **later,
    successful** (non-error) write/edit to that path occurs — the old read is
    now known-stale regardless of range comparisons. An errored later
