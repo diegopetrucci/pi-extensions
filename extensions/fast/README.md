@@ -108,10 +108,10 @@ Anthropic Fast mode requires all of the following:
 
 - Provider `anthropic`.
 - API `anthropic-messages`.
-- Model `claude-opus-4-8`, `claude-opus-5`, `claude-opus-5-5`, or `claude-fable-5-2`.
+- Model `claude-opus-5`, `claude-opus-5-5`, or `claude-fable-5-2`.
 - No existing `speed` field in the request payload.
 
-Anthropic Fast mode supports both API-key and Claude Code OAuth access. Fast mode on Claude Opus 5.5 and Claude Fable 5.2 is generally available, subject to the account usage tier. Fast mode on Claude Opus 5 and Claude Opus 4.8 is a research preview and requires research-preview access. On Claude subscriptions (OAuth), Fast usage draws from usage credits.
+Anthropic Fast mode supports both API-key and Claude Code OAuth access. Fast mode on Claude Opus 5.5 and Claude Fable 5.2 is generally available, subject to the account usage tier. Fast mode on Claude Opus 5 is a research preview and requires research-preview access. On Claude subscriptions (OAuth), Fast usage draws from usage credits.
 
 ## Commands
 
