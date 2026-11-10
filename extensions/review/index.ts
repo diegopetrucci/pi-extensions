@@ -26,6 +26,9 @@ import {
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+const GIT_GH_COMMAND_TIMEOUT_MS = 30_000;
+const PR_CHECKOUT_TIMEOUT_MS = 120_000;
+
 // State to track fresh session review (where we branched from).
 // Module-level state means only one review can be active at a time.
 // This is intentional - the UI and /end-review command assume a single active review.
@@ -554,25 +557,35 @@ async function loadProjectReviewGuidelines(cwd: string): Promise<string | null> 
 
 async function getMergeBase(pi: ExtensionAPI, branch: string): Promise<string | null> {
   try {
-    const { stdout: upstream, code: upstreamCode } = await pi.exec("git", [
-      "rev-parse",
-      "--abbrev-ref",
-      `${branch}@{upstream}`,
-    ]);
+    const {
+      stdout: upstream,
+      code: upstreamCode,
+      killed: upstreamKilled,
+    } = await pi.exec("git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], {
+      timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+    });
 
-    if (upstreamCode === 0 && upstream.trim()) {
-      const { stdout: mergeBase, code } = await pi.exec("git", [
-        "merge-base",
-        "HEAD",
-        upstream.trim(),
-      ]);
-      if (code === 0 && mergeBase.trim()) {
+    if (!upstreamKilled && upstreamCode === 0 && upstream.trim()) {
+      const {
+        stdout: mergeBase,
+        code,
+        killed,
+      } = await pi.exec("git", ["merge-base", "HEAD", upstream.trim()], {
+        timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+      });
+      if (!killed && code === 0 && mergeBase.trim()) {
         return mergeBase.trim();
       }
     }
 
-    const { stdout: mergeBase, code } = await pi.exec("git", ["merge-base", "HEAD", branch]);
-    if (code === 0 && mergeBase.trim()) {
+    const {
+      stdout: mergeBase,
+      code,
+      killed,
+    } = await pi.exec("git", ["merge-base", "HEAD", branch], {
+      timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+    });
+    if (!killed && code === 0 && mergeBase.trim()) {
       return mergeBase.trim();
     }
 
@@ -583,8 +596,10 @@ async function getMergeBase(pi: ExtensionAPI, branch: string): Promise<string | 
 }
 
 async function getLocalBranches(pi: ExtensionAPI): Promise<string[]> {
-  const { stdout, code } = await pi.exec("git", ["branch", "--format=%(refname:short)"]);
-  if (code !== 0) return [];
+  const { stdout, code, killed } = await pi.exec("git", ["branch", "--format=%(refname:short)"], {
+    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+  });
+  if (killed || code !== 0) return [];
   return stdout
     .trim()
     .split("\n")
@@ -595,8 +610,10 @@ async function getRecentCommits(
   pi: ExtensionAPI,
   limit: number = 10,
 ): Promise<Array<{ sha: string; title: string }>> {
-  const { stdout, code } = await pi.exec("git", ["log", `--oneline`, `-n`, `${limit}`]);
-  if (code !== 0) return [];
+  const { stdout, code, killed } = await pi.exec("git", ["log", `--oneline`, `-n`, `${limit}`], {
+    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+  });
+  if (killed || code !== 0) return [];
 
   return stdout
     .trim()
@@ -609,14 +626,18 @@ async function getRecentCommits(
 }
 
 async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
-  const { stdout, code } = await pi.exec("git", ["status", "--porcelain"]);
-  return code === 0 && stdout.trim().length > 0;
+  const { stdout, code, killed } = await pi.exec("git", ["status", "--porcelain"], {
+    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+  });
+  return !killed && code === 0 && stdout.trim().length > 0;
 }
 
 // Tracked staged/unstaged changes block branch switches. Untracked files (??) do not.
 async function hasPendingChanges(pi: ExtensionAPI): Promise<boolean> {
-  const { stdout, code } = await pi.exec("git", ["status", "--porcelain"]);
-  if (code !== 0) return false;
+  const { stdout, code, killed } = await pi.exec("git", ["status", "--porcelain"], {
+    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+  });
+  if (killed || code !== 0) return false;
 
   const lines = stdout
     .trim()
@@ -654,15 +675,13 @@ async function getPrInfo(
   pi: ExtensionAPI,
   prNumber: number,
 ): Promise<{ baseBranch: string; title: string; headBranch: string } | null> {
-  const { stdout, code } = await pi.exec("gh", [
-    "pr",
-    "view",
-    String(prNumber),
-    "--json",
-    "baseRefName,title,headRefName",
-  ]);
+  const { stdout, code, killed } = await pi.exec(
+    "gh",
+    ["pr", "view", String(prNumber), "--json", "baseRefName,title,headRefName"],
+    { timeout: GIT_GH_COMMAND_TIMEOUT_MS },
+  );
 
-  if (code !== 0) return null;
+  if (killed || code !== 0) return null;
 
   try {
     const data = JSON.parse(stdout);
@@ -706,8 +725,12 @@ async function checkoutPullRequest(
   }
 
   ctx.ui.notify(`Checking out PR #${prNumber}...`, "info");
-  const { stdout, stderr, code } = await pi.exec("gh", ["pr", "checkout", String(prNumber)]);
-  if (code !== 0) {
+  const { stdout, stderr, code, killed } = await pi.exec(
+    "gh",
+    ["pr", "checkout", String(prNumber)],
+    { timeout: PR_CHECKOUT_TIMEOUT_MS },
+  );
+  if (killed || code !== 0) {
     ctx.ui.notify(`Failed to checkout PR: ${stderr || stdout || "Failed to checkout PR"}`, "error");
     return null;
   }
@@ -722,20 +745,22 @@ async function checkoutPullRequest(
 }
 
 async function getCurrentBranch(pi: ExtensionAPI): Promise<string | null> {
-  const { stdout, code } = await pi.exec("git", ["branch", "--show-current"]);
-  if (code === 0 && stdout.trim()) {
+  const { stdout, code, killed } = await pi.exec("git", ["branch", "--show-current"], {
+    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+  });
+  if (!killed && code === 0 && stdout.trim()) {
     return stdout.trim();
   }
   return null;
 }
 
 async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
-  const { stdout, code } = await pi.exec("git", [
-    "symbolic-ref",
-    "refs/remotes/origin/HEAD",
-    "--short",
-  ]);
-  if (code === 0 && stdout.trim()) {
+  const { stdout, code, killed } = await pi.exec(
+    "git",
+    ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+    { timeout: GIT_GH_COMMAND_TIMEOUT_MS },
+  );
+  if (!killed && code === 0 && stdout.trim()) {
     return stdout.trim().replace("origin/", "");
   }
 
@@ -1731,8 +1756,10 @@ export default function reviewExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const { code } = await pi.exec("git", ["rev-parse", "--git-dir"]);
-      if (code !== 0) {
+      const { code, killed } = await pi.exec("git", ["rev-parse", "--git-dir"], {
+        timeout: GIT_GH_COMMAND_TIMEOUT_MS,
+      });
+      if (killed || code !== 0) {
         ctx.ui.notify("Not a git repository", "error");
         return;
       }
