@@ -471,6 +471,51 @@ test("parseMcpJson: http missing var in url skips server with warning", () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseMcpJson — shared fields
+// ---------------------------------------------------------------------------
+
+for (const [type, transport] of [
+  ["stdio", { command: "sh" }],
+  ["http", { url: "https://example.com/mcp" }],
+]) {
+  for (const [label, fields, warning] of [
+    ["string timeout", { timeout: "30" }, "timeout must be a finite positive number; skipping"],
+    ["null timeout", { timeout: null }, "timeout must be a finite positive number; skipping"],
+    ["zero timeout", { timeout: 0 }, "timeout must be a finite positive number; skipping"],
+    ["negative timeout", { timeout: -1 }, "timeout must be a finite positive number; skipping"],
+    ["non-string description", { description: 42 }, "description must be a string; skipping"],
+  ]) {
+    test(`parseMcpJson: ${type} with ${label} is skipped with warning`, () => {
+      const { servers, warnings } = parseMcpJson(json({ s: { ...transport, ...fields } }));
+      assert.equal(servers.length, 0);
+      assert.ok(warnings.some((w) => w.includes(warning)));
+    });
+  }
+
+  test(`parseMcpJson: ${type} with non-finite timeout is skipped with warning`, () => {
+    const input = json({ s: { ...transport, timeout: 30 } }).replace(
+      '"timeout":30',
+      '"timeout":1e400',
+    );
+    const { servers, warnings } = parseMcpJson(input);
+    assert.equal(servers.length, 0);
+    assert.ok(
+      warnings.some((w) => w.includes("timeout must be a finite positive number; skipping")),
+    );
+  });
+
+  test(`parseMcpJson: ${type} keeps valid timeout and description`, () => {
+    const { servers, warnings } = parseMcpJson(
+      json({ s: { ...transport, timeout: 30, description: "Test server" } }),
+    );
+    assert.equal(warnings.length, 0);
+    assert.equal(servers.length, 1);
+    assert.equal(servers[0]?.config.timeout, 30);
+    assert.equal(servers[0]?.config.description, "Test server");
+  });
+}
+
+// ---------------------------------------------------------------------------
 // parseMcpJson — allowlist enforcement
 // ---------------------------------------------------------------------------
 
