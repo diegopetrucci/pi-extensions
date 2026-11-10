@@ -21,7 +21,12 @@ const OPENAI_CODEX_MODELS = [
   "gpt-6-luna",
 ];
 const OPENAI_API_MODELS = ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
-const ANTHROPIC_MODELS = ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"];
+const ANTHROPIC_MODELS = [
+  "claude-opus-4-8",
+  "claude-opus-5",
+  "claude-opus-5-5",
+  "claude-fable-5-2",
+];
 const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
 
 function setupTempDirs(t) {
