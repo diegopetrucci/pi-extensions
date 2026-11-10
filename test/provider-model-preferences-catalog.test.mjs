@@ -1014,9 +1014,16 @@ test("specific frontier spellings precede ambiguous generations in every affecte
   }
 });
 
-test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", () => {
+test("unified direct API and Codex Fast mode allow the confirmed GPT models", () => {
   const prohibitedModels = ["claude-opus-5-5", "claude-opus-5.5", "grok-4.7"];
-  const confirmedDirectOpenAIModels = ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
+  const confirmedDirectOpenAIModels = [
+    "gpt-5.6-sol",
+    "gpt-6-astra",
+    "gpt-6-luna",
+    "gpt-6-sol",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+  ];
   const directOpenAIAllowlist = extractConst(
     "extensions/fast/index.ts",
     "OPENAI_API_SUPPORTED_MODELS",
