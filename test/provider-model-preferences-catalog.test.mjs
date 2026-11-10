@@ -1037,9 +1037,10 @@ test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", 
   }
 
   // ANTHROPIC_SUPPORTED_MODELS intentionally includes claude-opus-5-5 (added by #92);
-  // verify GPT-6 models, grok-4.7, and claude-opus-5.5 (dot notation) still stay out.
+  // verify GPT-6 models, grok-4.7, claude-opus-5.5 (dot notation), and deprecated
+  // claude-opus-4-8 (removed from Anthropic Fast) still stay out.
   const anthropicAllowlist = extractConst("extensions/fast/index.ts", "ANTHROPIC_SUPPORTED_MODELS");
-  const anthropicProhibited = ["claude-opus-5.5", "grok-4.7"];
+  const anthropicProhibited = ["claude-opus-4-8", "claude-opus-5.5", "grok-4.7"];
   for (const model of [...anthropicProhibited, ...confirmedDirectOpenAIModels]) {
     assert.equal(
       anthropicAllowlist.has(model),
