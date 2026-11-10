@@ -8,7 +8,7 @@ const DAY_MS = 86_400_000;
 const isRetryable = (status) => status === 429 || (status >= 500 && status < 600);
 
 export function encodePackageName(name) {
-  return name.startsWith("@") ? name.replace("/", "%2F") : name;
+  return name.startsWith("@") ? name.replaceAll("/", "%2F") : name;
 }
 
 const toDate = (ms) => new Date(ms).toISOString().slice(0, 10);
