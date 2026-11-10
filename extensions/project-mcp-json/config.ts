@@ -410,13 +410,16 @@ function parseStdioEntry(
     expandedCwd = res.value;
   }
 
+  const sharedFields = parseSharedFields(raw, warn);
+  if (sharedFields === null) return null;
+
   const config: McpStdioServerConfig = {
     type: "stdio",
     command: commandExpanded.value,
     ...(expandedArgs.length > 0 ? { args: expandedArgs } : {}),
     ...(Object.keys(encodedEnv).length > 0 ? { env: encodedEnv } : {}),
     ...(expandedCwd !== undefined ? { cwd: expandedCwd } : {}),
-    ...parseSharedFields(raw),
+    ...sharedFields,
   };
 
   return config;
@@ -535,12 +538,15 @@ function parseHttpEntry(
     parsedOauth = oauth;
   }
 
+  const sharedFields = parseSharedFields(raw, warn);
+  if (sharedFields === null) return null;
+
   const config: McpHttpServerConfig = {
     type: "http",
     url: urlExpanded.value,
     ...(Object.keys(encodedHeaders).length > 0 ? { headers: encodedHeaders } : {}),
     ...(parsedOauth !== undefined ? { oauth: parsedOauth } : {}),
-    ...parseSharedFields(raw),
+    ...sharedFields,
   };
 
   return config;
@@ -548,16 +554,27 @@ function parseHttpEntry(
 
 type SharedFields = Pick<McpServerConfigBase, "timeout" | "description">;
 
-function parseSharedFields(raw: Record<string, unknown>): SharedFields {
+function parseSharedFields(
+  raw: Record<string, unknown>,
+  warn: (msg: string) => void,
+): SharedFields | null {
   const result: SharedFields = {};
 
   const rawTimeout = raw["timeout"];
-  if (typeof rawTimeout === "number") {
+  if (rawTimeout !== undefined) {
+    if (typeof rawTimeout !== "number" || !Number.isFinite(rawTimeout) || rawTimeout <= 0) {
+      warn("timeout must be a finite positive number; skipping");
+      return null;
+    }
     result.timeout = rawTimeout;
   }
 
   const rawDescription = raw["description"];
-  if (typeof rawDescription === "string") {
+  if (rawDescription !== undefined) {
+    if (typeof rawDescription !== "string") {
+      warn("description must be a string; skipping");
+      return null;
+    }
     result.description = rawDescription;
   }
 

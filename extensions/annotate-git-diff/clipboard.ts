@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 
+const CLIPBOARD_COMMAND_TIMEOUT_MS = 5_000;
 const MAX_CLIPBOARD_BYTES = 16 * 1024 * 1024;
 
 type ClipboardPlatform = NodeJS.Platform;
@@ -20,7 +21,12 @@ export interface ClipboardCommandResult {
 export type ClipboardCommandRunner = (
   command: string,
   args: string[],
-  options: { encoding: "utf8"; maxBuffer: number; input?: string },
+  options: {
+    encoding: "utf8";
+    maxBuffer: number;
+    input?: string;
+    stdio?: ["pipe", "ignore", "ignore"];
+  },
 ) => ClipboardCommandResult;
 
 interface ClipboardOptions {
@@ -29,7 +35,7 @@ interface ClipboardOptions {
 }
 
 const defaultRunner: ClipboardCommandRunner = (command, args, options) =>
-  spawnSync(command, args, options);
+  spawnSync(command, args, { ...options, timeout: CLIPBOARD_COMMAND_TIMEOUT_MS });
 
 function clipboardReadCommands(platform: ClipboardPlatform): ClipboardCommand[] {
   switch (platform) {
@@ -102,7 +108,9 @@ function runClipboardCommand(
   const result = runner(command.command, command.args, {
     encoding: "utf8",
     maxBuffer: MAX_CLIPBOARD_BYTES,
-    ...(input == null ? {} : { input }),
+    // Write commands (wl-copy/xclip) fork a background owner that inherits output pipes;
+    // ignoring them keeps spawnSync from waiting until the timeout.
+    ...(input == null ? {} : { input, stdio: ["pipe", "ignore", "ignore"] as const }),
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
