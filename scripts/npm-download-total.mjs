@@ -66,7 +66,16 @@ export async function collectPackageNames(root) {
 async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } = {}) {
   const wait = sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   for (let attempt = 0; ; attempt++) {
-    const response = await fetchImpl(url);
+    let response;
+    try {
+      response = await fetchImpl(url);
+    } catch (error) {
+      if (attempt < retries) {
+        await wait(delayMs * 2 ** attempt);
+        continue;
+      }
+      throw error;
+    }
     if (response.status === 404) return null;
     if (response.ok) return response.json();
     if (isRetryable(response.status) && attempt < retries) {

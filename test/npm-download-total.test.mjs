@@ -82,6 +82,36 @@ test("404 registry counts 0; other errors throw; 5xx retried", async () => {
   );
 });
 
+test("network-level fetch rejection is retried then succeeds", async () => {
+  let failed = false;
+  const delays = [];
+  const fetch = async (url) => {
+    if (!failed) {
+      failed = true;
+      throw new TypeError("fetch failed");
+    }
+    if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
+    return res(200, { downloads: 7 });
+  };
+  const sleep = async (ms) => {
+    delays.push(ms);
+  };
+  assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", sleep }), 7);
+  assert.deepEqual(delays, [500]);
+});
+
+test("persistent network-level rejection propagates after retries", async () => {
+  let calls = 0;
+  const fetch = async () => {
+    calls++;
+    throw new TypeError("fetch failed");
+  };
+  await assert.rejects(getPackageDownloads("x", { fetch, retries: 2, ...noSleep }), {
+    message: "fetch failed",
+  });
+  assert.equal(calls, 3);
+});
+
 test("any 5xx (e.g. 520) is retried then succeeds", async () => {
   let calls = 0;
   const fetch = async (url) => {
