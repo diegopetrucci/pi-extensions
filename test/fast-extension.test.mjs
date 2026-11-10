@@ -17,11 +17,24 @@ const OPENAI_CODEX_MODELS = [
   "gpt-5.6-luna",
   "gpt-6-astra",
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-sol",
   "gpt-6-luna",
 ];
-const OPENAI_API_MODELS = ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
-const ANTHROPIC_MODELS = ["claude-opus-5", "claude-opus-5-5", "claude-fable-5-2"];
+const OPENAI_API_MODELS = [
+  "gpt-6.1-sol",
+  "gpt-6.1-terra",
+  "gpt-5.6-sol",
+  "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
+];
+const ANTHROPIC_MODELS = [
+  "claude-opus-5",
+  "claude-opus-5-5",
+  "claude-fable-5-2",
+  "claude-mythos-5-2",
+];
 const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
 
 function setupTempDirs(t) {
@@ -290,7 +303,7 @@ test("fast selects direct OpenAI service tier by auth type", async (t) => {
   });
 
   for (const model of [
-    { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol" },
+    { provider: "openai", api: "openai-responses", id: "gpt-5.6-luna" },
     { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol-fast" },
     { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol-pro" },
     { provider: "openai", api: "openai-codex-responses", id: "gpt-6-astra" },
@@ -456,6 +469,7 @@ test("ultrafast activation fails closed for every initial gate and preserves ord
     },
     { name: "API", model: ultrafastModel({ api: "openai-completions" }) },
     { name: "model", model: ultrafastModel({ id: "gpt-6-astra-preview" }) },
+    { name: "Sol pro model", model: ultrafastModel({ id: "gpt-6.1-sol-pro" }) },
     { name: "OAuth auth", model: ultrafastModel(), oauth: true },
     { name: "missing endpoint", model: ultrafastModel({ baseUrl: undefined }) },
     { name: "malformed endpoint", model: ultrafastModel({ baseUrl: "not-a-url" }) },
@@ -777,7 +791,7 @@ test("ultrafast wire capture uses Pi openai-responses streamSimple without real 
   assert.equal(fetchCalls, 2);
 });
 
-for (const id of ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"]) {
+for (const id of ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"]) {
   test(`fast gates Codex ${id} priority injection on OAuth and an explicit toggle`, async (t) => {
     const { agentDir, projectDir } = setupTempDirs(t);
     setAgentDir(t, agentDir);
@@ -1272,4 +1286,47 @@ test("fast does not inject Anthropic Fast mode for deprecated Claude Opus 4.8", 
     ),
     undefined,
   );
+});
+
+test("ultrafast supports gpt-6.1-sol and stays on when switching between eligible models", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const modelSelect = getHandler(harness, "model_select");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const ultrafastCommand = getCommand(harness, "ultrafast");
+  const context = createContext({
+    cwd: projectDir,
+    model: ultrafastModel({ id: "gpt-6.1-sol" }),
+    oauth: false,
+  });
+
+  await sessionStart({}, context.ctx);
+  await ultrafastCommand.handler("", context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), {
+    model: "gpt-6.1-sol",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel();
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6-astra" } }, context.ctx), {
+    model: "gpt-6-astra",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel({ id: "gpt-6.1-sol" });
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), {
+    model: "gpt-6.1-sol",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel({ id: "gpt-6.1-sol-pro" });
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
 });
