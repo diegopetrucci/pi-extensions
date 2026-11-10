@@ -112,6 +112,21 @@ test("annotate-git-diff terminates Git revision parsing before diff-tree and tex
   await assertSentinelUnchanged(tempRoot, sentinelPath);
 });
 
+test("getCommitFiles returns no files without diff-tree when first-parent lookup times out", async () => {
+  const calls = [];
+  const pi = {
+    async exec(command, args) {
+      calls.push([command, ...args]);
+      return { code: 0, stdout: "", stderr: "", killed: true };
+    },
+  };
+
+  assert.deepEqual(await getCommitFiles(pi, repoRoot, "abc123"), []);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], "rev-parse");
+  assert.ok(!calls.some((call) => call.includes("diff-tree")));
+});
+
 async function createIsolatedGitFixture(scratchDir) {
   const configPath = path.join(scratchDir, "empty-gitconfig");
   const templatePath = path.join(scratchDir, "empty-template");

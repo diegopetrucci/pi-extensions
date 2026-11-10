@@ -789,6 +789,7 @@ export async function getCommitFiles(
     ["rev-parse", "--verify", "--end-of-options", `${sha}^1`],
     { cwd: repoRoot, timeout: GIT_COMMAND_TIMEOUT_MS },
   );
+  if (firstParentResult.killed) return [];
   const hasFirstParent = !firstParentResult.killed && firstParentResult.code === 0;
   const gitArgs = hasFirstParent
     ? [

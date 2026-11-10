@@ -21,7 +21,12 @@ export interface ClipboardCommandResult {
 export type ClipboardCommandRunner = (
   command: string,
   args: string[],
-  options: { encoding: "utf8"; maxBuffer: number; input?: string },
+  options: {
+    encoding: "utf8";
+    maxBuffer: number;
+    input?: string;
+    stdio?: ["pipe", "ignore", "ignore"];
+  },
 ) => ClipboardCommandResult;
 
 interface ClipboardOptions {
@@ -103,7 +108,9 @@ function runClipboardCommand(
   const result = runner(command.command, command.args, {
     encoding: "utf8",
     maxBuffer: MAX_CLIPBOARD_BYTES,
-    ...(input == null ? {} : { input }),
+    // Write commands (wl-copy/xclip) fork a background owner that inherits output pipes;
+    // ignoring them keeps spawnSync from waiting until the timeout.
+    ...(input == null ? {} : { input, stdio: ["pipe", "ignore", "ignore"] as const }),
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
