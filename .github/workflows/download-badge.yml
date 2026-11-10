@@ -1,0 +1,61 @@
+name: Download Badge
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: download-badge
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm downloads badge
+    if: github.repository == 'diegopetrucci/pi-extensions'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Generate badge JSON
+        run: node scripts/npm-download-total.mjs --output "$RUNNER_TEMP/npm-downloads.json"
+
+      - name: Publish to badges branch
+        run: |
+          set -euo pipefail
+          wt="$RUNNER_TEMP/badges"
+          if git ls-remote --exit-code --heads origin badges >/dev/null; then
+            git fetch --no-tags origin badges
+            git worktree add -B badges "$wt" origin/badges
+          else
+            git worktree add --detach "$wt"
+            git -C "$wt" checkout --orphan badges
+            git -C "$wt" rm -rfq --ignore-unmatch .
+            git -C "$wt" clean -fdxq
+          fi
+          cp "$RUNNER_TEMP/npm-downloads.json" "$wt/npm-downloads.json"
+          cd "$wt"
+          git add npm-downloads.json
+          if git diff --cached --quiet; then
+            echo "Badge unchanged; nothing to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update npm downloads badge"
+          git push origin badges

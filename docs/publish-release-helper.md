@@ -35,7 +35,7 @@ Before dispatching, obtain explicit user release authorization for this exact re
 4. Approve the protected `npm-release` environment deployment only when the authenticated GitHub identity is an eligible reviewer. Required reviewers, deployment-branch restrictions, and no-self-review protections must remain enforced. If GitHub rejects the identity's dispatch or approval, stop and escalate to an eligible human; never bypass or disable protection.
 5. Let the publish job reverify and publish the exact tarballs through npm OIDC.
 
-Only one publish run can execute at a time. A rerun safely skips an exact version only when its registry `shasum` and `integrity` match the verified tag tarball. The root umbrella package remains last.
+Only one publish run can execute at a time. A rerun safely skips an exact version only when its registry `shasum` and `integrity` match the verified tag tarball. The root umbrella package remains last. If a run fails with `Published package did not become visible`, wait until the version resolves on the registry, then rerun `publish.yml` with the same inputs; already-published versions are skipped.
 
 For local, non-publishing verification:
 
