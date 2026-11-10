@@ -33,7 +33,7 @@ for (const leftover of leftovers) {
     const model = {
       provider: "anthropic",
       api: "anthropic-messages",
-      id: "claude-opus-4-8",
+      id: "claude-opus-5",
       headers: {
         "Anthropic-Beta": `existing-beta, ${FAST_BETA}, oauth-2025-04-20`,
         "anthropic-beta": FAST_BETA,
