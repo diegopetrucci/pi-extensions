@@ -97,6 +97,7 @@ test("annotate-git-diff clipboard helpers choose commands, fall back, and surfac
     );
     assert.equal(calls[0].options.encoding, "utf8");
     assert.equal(calls[0].options.input, undefined);
+    for (const call of calls) assert.equal("stdio" in call.options, false);
   });
 
   await t.test(
@@ -118,11 +119,30 @@ test("annotate-git-diff clipboard helpers choose commands, fall back, and surfac
             encoding: "utf8",
             input: "annotated text",
             maxBuffer: 16 * 1024 * 1024,
+            stdio: ["pipe", "ignore", "ignore"],
           },
         },
       ]);
     },
   );
+
+  await t.test("writeSystemClipboard ignores output pipes for every linux write command", () => {
+    const calls = [];
+    const runner = (command, args, options) => {
+      calls.push({ command, options });
+      return { status: 1, stderr: "nope" };
+    };
+
+    assert.throws(() => writeSystemClipboard("text", { platform: "linux", runner }));
+
+    assert.deepEqual(
+      calls.map((call) => call.command),
+      ["wl-copy", "xclip", "xsel"],
+    );
+    for (const call of calls) {
+      assert.deepEqual(call.options.stdio, ["pipe", "ignore", "ignore"]);
+    }
+  });
 
   await t.test("unsupported platforms fail before invoking any clipboard command", () => {
     assert.equal(clipboardReadCommands("freebsd").length, 0);
@@ -412,7 +432,7 @@ test("annotate-git-diff commit file helper sorts files and preserves rename meta
     async exec(command, args, options) {
       execCalls.push({ command, args, options });
       assert.equal(command, "git");
-      assert.deepEqual(options, { cwd: "/repo" });
+      assert.deepEqual(options, { cwd: "/repo", timeout: 30000 });
       if (args[0] === "rev-parse") {
         assert.deepEqual(args, ["rev-parse", "--verify", "--end-of-options", "abc123^1"]);
         return { code: 1, stdout: "", stderr: "" };
