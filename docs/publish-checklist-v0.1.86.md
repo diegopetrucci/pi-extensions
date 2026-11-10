@@ -96,6 +96,6 @@ Candidate artifact evidence (Node `26.13.0`, npm `11.20.0`):
   - All nine `name@version` entries resolve on the public registry with `dist.shasum` and `dist.integrity` equal to the CI-reproduced tarballs, and `latest` points to the target version.
   - A clean `npm install @diegopetrucci/pi-extensions@0.1.86` installs 0.1.86, including the new Fast models.
   - The public release body still matches `docs/github-release-v0.1.86.md` apart from one trailing newline, including the @chenxin-yan credit, and `v0.1.86` is the latest release.
-- **Follow-up:** the helper's visibility window (`PUBLISHED_VISIBILITY_RETRY_ATTEMPTS` × 5 s) has now been exceeded twice. Consider extending it within the publish job's 45-minute timeout.
+- **Follow-up completed:** [#225](https://github.com/diegopetrucci/pi-extensions/pull/225) (`cffc318`) extended the helper's visibility window to 25 minutes (301 attempts, with 300 sleeps × 5 s), within the publish job's unchanged 45-minute timeout.
 
 <!-- prepare-release:packages [["@diegopetrucci/pi-annotate-git-diff","0.1.17"],["@diegopetrucci/pi-contrarian","0.1.22"],["@diegopetrucci/pi-fast","0.1.12"],["@diegopetrucci/pi-git-footer","0.1.14"],["@diegopetrucci/pi-inline-bash","0.1.16"],["@diegopetrucci/pi-minimal-footer","0.1.27"],["@diegopetrucci/pi-oracle","0.1.37"],["pi-dynamic-context-pruning","0.1.17"],["@diegopetrucci/pi-extensions","0.1.86"]] -->
