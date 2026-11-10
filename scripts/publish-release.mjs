@@ -16,10 +16,12 @@ const TRUSTED_REPOSITORY = "diegopetrucci/pi-extensions";
 const TRUSTED_WORKFLOW = "publish.yml";
 const TRUSTED_ENVIRONMENT = "npm-release";
 const PUBLISHED_VISIBILITY_RETRY_INTERVAL_MS = 5_000;
-// npm accepted pi-context-cap@0.1.11 during v0.1.66 but kept returning 404 for
-// longer than the old one-minute retry window. Keep this bounded while allowing
-// enough time for delayed registry propagation before an idempotent rerun.
-const PUBLISHED_VISIBILITY_RETRY_ATTEMPTS = 121;
+// npm accepted pi-context-cap@0.1.11 during v0.1.66 and pi-inline-bash@0.1.16
+// during v0.1.86 but kept returning 404 for longer than the earlier windows
+// (the latter became visible about 14 minutes after npm accepted the publish).
+// 301 attempts means 300 sleeps of 5s, a 25-minute bound that stays within the
+// 45-minute publish job timeout before an idempotent rerun.
+const PUBLISHED_VISIBILITY_RETRY_ATTEMPTS = 301;
 const EXACT_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const RELEASE_VERSION_RE = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 

@@ -435,7 +435,7 @@ test("GitHub OIDC live mode skips exact published versions, publishes verified t
   assert.ok(publishCalls.every(({ env }) => !env.NPM_TOKEN && !env.NODE_AUTH_TOKEN));
 });
 
-test("GitHub OIDC live mode gives post-publish propagation a bounded ten-minute window", async (t) => {
+test("GitHub OIDC live mode gives post-publish propagation a bounded 25-minute window", async (t) => {
   const { root, snapshot } = await fixture(t);
   const sleeps = [];
   const result = await publishRelease({
@@ -447,14 +447,14 @@ test("GitHub OIDC live mode gives post-publish propagation a bounded ten-minute 
       root,
       snapshot,
       publishedSpecs: new Set(["plain-addon@1.2.3"]),
-      postPublishVisibilityMisses: { "@example/feature@1.2.3": 120 },
+      postPublishVisibilityMisses: { "@example/feature@1.2.3": 300 },
     }),
     sleep: async (milliseconds) => sleeps.push(milliseconds),
     createTagSnapshot: async () => cloneSnapshot(snapshot),
   });
 
   assert.deepEqual(result.published, ["@example/feature@1.2.3", "@example/umbrella@1.2.3"]);
-  assert.equal(sleeps.length, 120);
+  assert.equal(sleeps.length, 300);
   assert.ok(sleeps.every((milliseconds) => milliseconds === 5_000));
 
   const { root: timeoutRoot, snapshot: timeoutSnapshot } = await fixture(t);
@@ -469,14 +469,14 @@ test("GitHub OIDC live mode gives post-publish propagation a bounded ten-minute 
         root: timeoutRoot,
         snapshot: timeoutSnapshot,
         publishedSpecs: new Set(["plain-addon@1.2.3"]),
-        postPublishVisibilityMisses: { "@example/feature@1.2.3": 121 },
+        postPublishVisibilityMisses: { "@example/feature@1.2.3": 301 },
       }),
       sleep: async (milliseconds) => timeoutSleeps.push(milliseconds),
       createTagSnapshot: async () => cloneSnapshot(timeoutSnapshot),
     }),
     /Published package did not become visible: @example\/feature@1\.2\.3/,
   );
-  assert.equal(timeoutSleeps.length, 120);
+  assert.equal(timeoutSleeps.length, 300);
   assert.ok(timeoutSleeps.every((milliseconds) => milliseconds === 5_000));
 });
 
