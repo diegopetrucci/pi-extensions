@@ -1,6 +1,6 @@
 # pi-extensions
 
-[![Total npm downloads](https://img.shields.io/npm/dt/%40diegopetrucci%2Fpi-extensions?label=total%20npm%20downloads)](https://www.npmjs.com/package/@diegopetrucci/pi-extensions)
+[![Total npm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdiegopetrucci%2Fpi-extensions%2Fbadges%2Fnpm-downloads.json)](https://www.npmjs.com/~diegopetrucci)
 
 A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also building my own harness on top of pi](https://github.com/diegopetrucci/the-last-harness). Have a look if that sounds interesting!)
 
@@ -18,7 +18,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 
 ### Providers
 
-- [`fast`](./extensions/fast): Adds `/fast` plus the session-only `/ultrafast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models; Ultrafast is limited to API-key `gpt-6-astra` on OpenAI's canonical Responses endpoint.
+- [`fast`](./extensions/fast): Adds `/fast` plus the session-only `/ultrafast` toggle for supported direct OpenAI API, OpenAI Codex, and Anthropic Claude models; Ultrafast is limited to API-key `gpt-6-astra` or `gpt-6.1-sol` on OpenAI's canonical Responses endpoint.
 
 ### UI
 

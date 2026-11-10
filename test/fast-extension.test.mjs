@@ -17,11 +17,24 @@ const OPENAI_CODEX_MODELS = [
   "gpt-5.6-luna",
   "gpt-6-astra",
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-sol",
   "gpt-6-luna",
 ];
-const OPENAI_API_MODELS = ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"];
-const ANTHROPIC_MODELS = ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"];
+const OPENAI_API_MODELS = [
+  "gpt-6.1-sol",
+  "gpt-6.1-terra",
+  "gpt-5.6-sol",
+  "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
+];
+const ANTHROPIC_MODELS = [
+  "claude-opus-5",
+  "claude-opus-5-5",
+  "claude-fable-5-2",
+  "claude-mythos-5-2",
+];
 const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
 
 function setupTempDirs(t) {
@@ -142,7 +155,7 @@ test("fast routes one enabled session across supported OpenAI and Anthropic mode
   context.ctx.model = {
     provider: "anthropic",
     api: "anthropic-messages",
-    id: "claude-opus-4-8",
+    id: "claude-opus-5",
     compat: { forceAdaptiveThinking: true },
   };
   await modelSelect({ model: context.ctx.model }, context.ctx);
@@ -152,7 +165,7 @@ test("fast routes one enabled session across supported OpenAI and Anthropic mode
     await beforeRequest(
       {
         payload: {
-          model: "claude-opus-4-8",
+          model: "claude-opus-5",
           messages: [],
           betas: ["existing-beta", "oauth-2025-04-20"],
         },
@@ -160,15 +173,15 @@ test("fast routes one enabled session across supported OpenAI and Anthropic mode
       context.ctx,
     ),
     {
-      model: "claude-opus-4-8",
+      model: "claude-opus-5",
       messages: [],
       betas: ["existing-beta", "oauth-2025-04-20", ANTHROPIC_FAST_BETA],
       speed: "fast",
     },
   );
   assert.deepEqual(
-    await beforeRequest({ payload: { model: "claude-opus-4-8", messages: [] } }, context.ctx),
-    { model: "claude-opus-4-8", messages: [], betas: [ANTHROPIC_FAST_BETA], speed: "fast" },
+    await beforeRequest({ payload: { model: "claude-opus-5", messages: [] } }, context.ctx),
+    { model: "claude-opus-5", messages: [], betas: [ANTHROPIC_FAST_BETA], speed: "fast" },
   );
 
   context.ctx.model = { provider: "google", api: "google-generative-ai", id: "gemini-test" };
@@ -290,7 +303,7 @@ test("fast selects direct OpenAI service tier by auth type", async (t) => {
   });
 
   for (const model of [
-    { provider: "openai", api: "openai-responses", id: "gpt-5.6-sol" },
+    { provider: "openai", api: "openai-responses", id: "gpt-5.6-luna" },
     { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol-fast" },
     { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol-pro" },
     { provider: "openai", api: "openai-codex-responses", id: "gpt-6-astra" },
@@ -456,6 +469,7 @@ test("ultrafast activation fails closed for every initial gate and preserves ord
     },
     { name: "API", model: ultrafastModel({ api: "openai-completions" }) },
     { name: "model", model: ultrafastModel({ id: "gpt-6-astra-preview" }) },
+    { name: "Sol pro model", model: ultrafastModel({ id: "gpt-6.1-sol-pro" }) },
     { name: "OAuth auth", model: ultrafastModel(), oauth: true },
     { name: "missing endpoint", model: ultrafastModel({ baseUrl: undefined }) },
     { name: "malformed endpoint", model: ultrafastModel({ baseUrl: "not-a-url" }) },
@@ -571,13 +585,13 @@ test("ultrafast payloads preserve explicit tiers, malformed inputs, and Anthropi
   context.ctx.model = {
     provider: "anthropic",
     api: "anthropic-messages",
-    id: "claude-opus-4-8",
+    id: "claude-opus-5",
     compat: { forceAdaptiveThinking: true },
   };
   await modelSelect({ model: context.ctx.model }, context.ctx);
   assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
   assert.equal(
-    await beforeRequest({ payload: { model: "claude-opus-4-8", messages: [] } }, context.ctx),
+    await beforeRequest({ payload: { model: "claude-opus-5", messages: [] } }, context.ctx),
     undefined,
   );
 
@@ -777,7 +791,7 @@ test("ultrafast wire capture uses Pi openai-responses streamSimple without real 
   assert.equal(fetchCalls, 2);
 });
 
-for (const id of ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"]) {
+for (const id of ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"]) {
   test(`fast gates Codex ${id} priority injection on OAuth and an explicit toggle`, async (t) => {
     const { agentDir, projectDir } = setupTempDirs(t);
     setAgentDir(t, agentDir);
@@ -854,7 +868,7 @@ test("fast never overwrites provider fields or mutates malformed and mismatched 
   const beforeRequest = getHandler(harness, "before_provider_request");
   const context = createContext({
     cwd: projectDir,
-    model: { provider: "anthropic", api: "anthropic-messages", id: "claude-opus-4-8" },
+    model: { provider: "anthropic", api: "anthropic-messages", id: "claude-opus-5-5" },
   });
   await sessionStart({}, context.ctx);
 
@@ -863,13 +877,13 @@ test("fast never overwrites provider fields or mutates malformed and mismatched 
     await beforeRequest({ payload: { model: "claude-opus-5" } }, context.ctx),
     undefined,
   );
-  const speedPayload = { model: "claude-opus-4-8", speed: "standard" };
+  const speedPayload = { model: "claude-opus-5-5", speed: "standard" };
   assert.equal(await beforeRequest({ payload: speedPayload }, context.ctx), undefined);
-  assert.deepEqual(speedPayload, { model: "claude-opus-4-8", speed: "standard" });
+  assert.deepEqual(speedPayload, { model: "claude-opus-5-5", speed: "standard" });
   for (const betas of ["context-1m-2025-08-07", null]) {
-    const betasPayload = { model: "claude-opus-4-8", betas };
+    const betasPayload = { model: "claude-opus-5-5", betas };
     assert.equal(await beforeRequest({ payload: betasPayload }, context.ctx), undefined);
-    assert.deepEqual(betasPayload, { model: "claude-opus-4-8", betas });
+    assert.deepEqual(betasPayload, { model: "claude-opus-5-5", betas });
   }
 
   context.ctx.model = { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" };
@@ -936,14 +950,14 @@ test("fast only adds the Anthropic beta to the payload while active and keeps ex
     model: {
       provider: "anthropic",
       api: "anthropic-messages",
-      id: "claude-opus-4-8",
+      id: "claude-opus-5",
       compat: { forceAdaptiveThinking: true },
     },
     oauth: false,
   });
   await sessionStart({}, context.ctx);
 
-  const payload = { model: "claude-opus-4-8", messages: [], betas: ["existing-beta"] };
+  const payload = { model: "claude-opus-5", messages: [], betas: ["existing-beta"] };
   assert.equal(await beforeRequest({ payload }, context.ctx), undefined);
 
   await command.handler("", context.ctx);
@@ -954,7 +968,7 @@ test("fast only adds the Anthropic beta to the payload while active and keeps ex
   });
   assert.deepEqual(payload.betas, ["existing-beta"]);
 
-  const alreadyHasBeta = { model: "claude-opus-4-8", messages: [], betas: [ANTHROPIC_FAST_BETA] };
+  const alreadyHasBeta = { model: "claude-opus-5", messages: [], betas: [ANTHROPIC_FAST_BETA] };
   assert.deepEqual((await beforeRequest({ payload: alreadyHasBeta }, context.ctx)).betas, [
     ANTHROPIC_FAST_BETA,
   ]);
@@ -1183,7 +1197,7 @@ test("fast preserves installed Anthropic provider betas across supported models 
     return { betas: betaValues(request.headers), body: request.body };
   }
 
-  for (const id of ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"]) {
+  for (const id of ["claude-opus-5", "claude-opus-5-5"]) {
     const catalogModel = Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === id);
     assert.ok(catalogModel, `model ${id} must exist in the installed catalog`);
     const model = { ...catalogModel, baseUrl: "https://capture.invalid" };
@@ -1211,7 +1225,7 @@ test("fast preserves installed Anthropic provider betas across supported models 
   }
 
   const oauthModel = {
-    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-4-8"),
+    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-5"),
     baseUrl: "https://capture.invalid",
   };
   const oauthContext = createContext({ cwd: projectDir, model: oauthModel, oauth: true });
@@ -1225,7 +1239,7 @@ test("fast preserves installed Anthropic provider betas across supported models 
   assert.equal(oauth.betas.filter((beta) => beta === ANTHROPIC_FAST_BETA).length, 1);
 
   const explicitHeaderModel = {
-    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-4-8"),
+    ...Object.values(CATALOG_ANTHROPIC_MODELS).find((model) => model.id === "claude-opus-5"),
     baseUrl: "https://capture.invalid",
   };
   const explicitHeaderContext = createContext({ cwd: projectDir, model: explicitHeaderModel });
@@ -1235,4 +1249,84 @@ test("fast preserves installed Anthropic provider betas across supported models 
     headers: { "Anthropic-Beta": "user-beta-A,User-Beta-B" },
   });
   assert.deepEqual(explicitHeader.betas, ["user-beta-A", "User-Beta-B", ANTHROPIC_FAST_BETA]);
+});
+
+test("fast does not inject Anthropic Fast mode for deprecated Claude Opus 4.8", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+
+  const sessionStart = getHandler(harness, "session_start");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const command = getCommand(harness);
+  const context = createContext({
+    cwd: projectDir,
+    model: {
+      provider: "anthropic",
+      api: "anthropic-messages",
+      id: "claude-opus-4-8",
+    },
+  });
+
+  await sessionStart({}, context.ctx);
+  await command.handler("", context.ctx);
+  assert.equal(
+    await beforeRequest(
+      {
+        payload: {
+          model: "claude-opus-4-8",
+          messages: [],
+          betas: ["existing-beta"],
+        },
+      },
+      context.ctx,
+    ),
+    undefined,
+  );
+});
+
+test("ultrafast supports gpt-6.1-sol and stays on when switching between eligible models", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  const extension = await loadExtension("extensions/fast/index.ts");
+  const harness = createExtensionHarness();
+  extension(harness.pi);
+  const sessionStart = getHandler(harness, "session_start");
+  const modelSelect = getHandler(harness, "model_select");
+  const beforeRequest = getHandler(harness, "before_provider_request");
+  const ultrafastCommand = getCommand(harness, "ultrafast");
+  const context = createContext({
+    cwd: projectDir,
+    model: ultrafastModel({ id: "gpt-6.1-sol" }),
+    oauth: false,
+  });
+
+  await sessionStart({}, context.ctx);
+  await ultrafastCommand.handler("", context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), {
+    model: "gpt-6.1-sol",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel();
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6-astra" } }, context.ctx), {
+    model: "gpt-6-astra",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel({ id: "gpt-6.1-sol" });
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-6.1-sol" } }, context.ctx), {
+    model: "gpt-6.1-sol",
+    service_tier: "ultrafast",
+  });
+
+  context.ctx.model = ultrafastModel({ id: "gpt-6.1-sol-pro" });
+  await modelSelect({ model: context.ctx.model }, context.ctx);
+  assert.match(context.notifications.at(-1).message, /Ultrafast mode disabled/);
 });

@@ -12,7 +12,12 @@ const ANTHROPIC_PROVIDER_ID = "anthropic";
 const ANTHROPIC_API_ID = "anthropic-messages";
 const ANTHROPIC_FAST_SPEED = "fast";
 const ANTHROPIC_FAST_BETA = "fast-mode-2026-02-01";
-const ANTHROPIC_SUPPORTED_MODELS = new Set(["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"]);
+const ANTHROPIC_SUPPORTED_MODELS = new Set([
+  "claude-opus-5",
+  "claude-opus-5-5",
+  "claude-fable-5-2",
+  "claude-mythos-5-2",
+]);
 
 const OPENAI_PROVIDER_ID = "openai-codex";
 const OPENAI_API_ID = "openai-codex-responses";
@@ -24,6 +29,7 @@ const OPENAI_SUPPORTED_MODELS = new Set([
   "gpt-5.6-luna",
   "gpt-6-astra",
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-sol",
   "gpt-6-luna",
 ]);
@@ -32,11 +38,13 @@ const OPENAI_API_IDS = new Set(["openai-responses", "openai-completions"]);
 const OPENAI_API_FAST_SERVICE_TIER = "fast";
 const OPENAI_API_SUPPORTED_MODELS = new Set([
   "gpt-6.1-sol",
+  "gpt-6.1-terra",
+  "gpt-5.6-sol",
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
 ]);
-const OPENAI_ULTRAFAST_MODEL = "gpt-6-astra";
+const OPENAI_ULTRAFAST_MODELS = new Set(["gpt-6-astra", "gpt-6.1-sol"]);
 const OPENAI_ULTRAFAST_API_ID = "openai-responses";
 const OPENAI_ULTRAFAST_SERVICE_TIER = "ultrafast";
 const OPENAI_CANONICAL_BASE_URL = "https://api.openai.com/v1";
@@ -167,7 +175,8 @@ function getEligibility(ctx: ExtensionContext, includeServiceTier = true): Eligi
       return {
         eligible: false,
         modelKey: key,
-        reason: "Fast mode is only enabled for Claude Opus 4.8, Claude Opus 5, and Claude Opus 5.5",
+        reason:
+          "Fast mode is only enabled for Claude Opus 5, Claude Opus 5.5, Claude Fable 5.2, and Claude Mythos 5.2",
       };
     }
 
@@ -221,7 +230,7 @@ function getEligibility(ctx: ExtensionContext, includeServiceTier = true): Eligi
         eligible: false,
         modelKey: key,
         reason:
-          "Fast mode is only enabled for GPT-6.1 Sol, GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
+          "Fast mode is only enabled for GPT-6.1 Sol, GPT-6.1 Terra, GPT-5.6 Sol, GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
       };
     }
 
@@ -271,11 +280,11 @@ function getUltrafastEligibility(ctx: ExtensionContext): Eligibility {
     };
   }
 
-  if (model.id !== OPENAI_ULTRAFAST_MODEL) {
+  if (!OPENAI_ULTRAFAST_MODELS.has(model.id)) {
     return {
       eligible: false,
       modelKey: key,
-      reason: `Ultrafast mode is only enabled for ${OPENAI_ULTRAFAST_MODEL}`,
+      reason: "Ultrafast mode is only enabled for GPT-6 Astra and GPT-6.1 Sol",
     };
   }
 
@@ -518,7 +527,8 @@ export default function fastExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("ultrafast", {
-    description: "Toggle session-only Ultrafast mode for direct OpenAI API-key GPT-6 Astra",
+    description:
+      "Toggle session-only Ultrafast mode for direct OpenAI API-key GPT-6 Astra or GPT-6.1 Sol",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       if (args.trim()) {

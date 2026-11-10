@@ -38,6 +38,18 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
+      - name: Provision search binaries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ripgrep fd-find
+          if ! command -v fd >/dev/null 2>&1; then
+            fdfind_path="$(command -v fdfind)"
+            sudo ln -s "$fdfind_path" /usr/local/bin/fd
+          fi
+          rg --version
+          fd --version
+
       - name: Install dependencies
         run: npm ci
 

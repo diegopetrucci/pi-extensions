@@ -42,7 +42,7 @@ Direct OpenAI API Fast mode requires all of the following:
 
 - Provider `openai`.
 - API `openai-responses` or `openai-completions`.
-- Model `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
+- Model `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-5.6-sol`, `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
 - API-key auth sets `service_tier: "fast"`; Pi's `openai` ChatGPT OAuth sets `priority`.
 - No existing `service_tier` field in the request payload.
 
@@ -60,7 +60,7 @@ the following on every activation and provider request:
 
 - Provider `openai`.
 - API `openai-responses`.
-- Model `gpt-6-astra`.
+- Model `gpt-6-astra` or `gpt-6.1-sol`.
 - Direct API-key auth, not Codex OAuth or direct OpenAI OAuth.
 - Base URL exactly `https://api.openai.com/v1` (a single trailing slash is also accepted).
 
@@ -81,7 +81,7 @@ OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
-- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, or `gpt-6-luna`.
+- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, or `gpt-6-luna`.
 - ChatGPT OAuth/subscription auth, not API-key auth.
 - No existing `service_tier` field in the request payload.
 
@@ -108,10 +108,10 @@ Anthropic Fast mode requires all of the following:
 
 - Provider `anthropic`.
 - API `anthropic-messages`.
-- Model `claude-opus-4-8`, `claude-opus-5`, or `claude-opus-5-5`.
+- Model `claude-opus-5`, `claude-opus-5-5`, `claude-fable-5-2`, or `claude-mythos-5-2`.
 - No existing `speed` field in the request payload.
 
-Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.
+Anthropic Fast mode supports both API-key and Claude Code OAuth access. Fast mode on Claude Opus 5.5 and Claude Fable 5.2 is generally available, subject to the account usage tier. Fast mode on Claude Opus 5 is a research preview and requires research-preview access. On Claude subscriptions (OAuth), Fast usage draws from usage credits.
 
 ## Commands
 
@@ -132,7 +132,8 @@ Ultrafast override. Ultrafast defaults off, is never enabled by global or projec
 configuration, and can be undone with either command. Running ordinary `/fast`
 while Ultrafast is selected turns Ultrafast off rather than silently switching to
 another paid tier. Switching to an unsupported model or endpoint disables
-Ultrafast and does not re-enable it when `gpt-6-astra` is selected again. The
+Ultrafast and does not re-enable it when `gpt-6-astra` or `gpt-6.1-sol` is selected again. Switching directly
+between those two eligible models keeps Ultrafast on. The
 footer uses `ultrafast` while an eligible request is selected; status text says
 that the tier is requested, not remotely applied.
 
@@ -199,8 +200,10 @@ The collection package loads this unified extension only (`extensions/fast/index
 ## Notes
 
 - Anthropic Fast mode has separate rate limits, costs more than standard speed, and does not share prompt-cache prefixes with standard-speed requests.
-- Direct OpenAI Fast mode is limited to the confirmed GPT-6 API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
-- Authoritative support evidence: [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) explicitly uses `gpt-6.1-sol` with `service_tier: "fast"` and documents `priority` as an equivalent alias for supported API models; the [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents the model itself.
+- Claude Fable 5.2 Fast mode bills at $16 / $80 per MTok input/output (2x its standard rate). Because the Fast toggle follows model changes, a config default of `enabled: true` applies Fast to Fable 5.2 as soon as it is selected.
+- Direct OpenAI Fast mode is limited to the documented API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
+- Authoritative support evidence: [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) explicitly uses `gpt-6.1-sol` with `service_tier: "fast"` and documents `priority` as an equivalent alias for supported API models; the [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents the model itself. The [GPT-6.1 Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra) states Fast prices are 2x Standard, and the Fast mode guide lists GPT-5.6 Sol at 2x.
+- Codex `gpt-6.1-terra` is enabled because openai/codex `codex-rs/models-manager/models.json` @ b32ada5 advertises `priority` for it. Anthropic `claude-mythos-5-2` follows [Anthropic Fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), which lists Claude Mythos 5.2; the native ID is inferred from naming.
 - Codex Fast availability depends on plan, client, workspace settings, and rollout. Local eligibility is not live-provider certification.
 - Pi's provider catalog remains the source of reported model pricing, including any tiered pricing; this extension does not apply guessed discounts or rewrite cost metadata.
 - OpenAI Codex Fast mode intentionally does not affect API-key models.

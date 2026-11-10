@@ -29,3 +29,4 @@ Future release authors must audit merged pull requests and commit/coauthor metad
 
 At the start of any task, run `gn help plan` and follow its instructions.
 After finishing a task, run `gn help review`.
+Always commit gnosis changes (`.gnosis/entries.jsonl`) in the same branch and pull request as the work they describe; never leave them uncommitted.

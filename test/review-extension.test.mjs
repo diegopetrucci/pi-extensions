@@ -53,7 +53,8 @@ function createReviewStateContext({
 
 function createGitPi(execImpl) {
   return {
-    async exec(command, args) {
+    async exec(command, args, options) {
+      assert.ok(options?.timeout > 0);
       return execImpl(command, args);
     },
   };
