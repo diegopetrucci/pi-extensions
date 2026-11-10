@@ -111,7 +111,7 @@ Anthropic Fast mode requires all of the following:
 - Model `claude-opus-4-8`, `claude-opus-5`, `claude-opus-5-5`, or `claude-fable-5-2`.
 - No existing `speed` field in the request payload.
 
-Anthropic Fast mode supports both API-key and Claude Code OAuth access when the account has access to the research preview.
+Anthropic Fast mode supports both API-key and Claude Code OAuth access. Fast mode on Claude Opus 5.5 and Claude Fable 5.2 is generally available, subject to the account usage tier. Fast mode on Claude Opus 5 and Claude Opus 4.8 is a research preview and requires research-preview access. On Claude subscriptions (OAuth), Fast usage draws from usage credits.
 
 ## Commands
 
@@ -199,6 +199,7 @@ The collection package loads this unified extension only (`extensions/fast/index
 ## Notes
 
 - Anthropic Fast mode has separate rate limits, costs more than standard speed, and does not share prompt-cache prefixes with standard-speed requests.
+- Claude Fable 5.2 Fast mode bills at $16 / $80 per MTok input/output (2x its standard rate). Because the Fast toggle follows model changes, a config default of `enabled: true` applies Fast to Fable 5.2 as soon as it is selected.
 - Direct OpenAI Fast mode is limited to the confirmed GPT-6 API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
 - Authoritative support evidence: [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) explicitly uses `gpt-6.1-sol` with `service_tier: "fast"` and documents `priority` as an equivalent alias for supported API models; the [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents the model itself.
 - Codex Fast availability depends on plan, client, workspace settings, and rollout. Local eligibility is not live-provider certification.
