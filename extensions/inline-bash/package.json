@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-inline-bash",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "A pi extension that expands inline bash commands in user prompts.",
   "keywords": [
     "pi-package",
