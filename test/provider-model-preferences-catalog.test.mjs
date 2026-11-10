@@ -1014,9 +1014,16 @@ test("specific frontier spellings precede ambiguous generations in every affecte
   }
 });
 
-test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", () => {
+test("unified direct API and Codex Fast mode allow the confirmed GPT models", () => {
   const prohibitedModels = ["claude-opus-5-5", "claude-opus-5.5", "grok-4.7"];
-  const confirmedDirectOpenAIModels = ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
+  const confirmedDirectOpenAIModels = [
+    "gpt-5.6-sol",
+    "gpt-6-astra",
+    "gpt-6-luna",
+    "gpt-6-sol",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+  ];
   const directOpenAIAllowlist = extractConst(
     "extensions/fast/index.ts",
     "OPENAI_API_SUPPORTED_MODELS",
@@ -1037,9 +1044,10 @@ test("unified direct API and Codex Fast mode allow the confirmed GPT-6 models", 
   }
 
   // ANTHROPIC_SUPPORTED_MODELS intentionally includes claude-opus-5-5 (added by #92);
-  // verify GPT-6 models, grok-4.7, and claude-opus-5.5 (dot notation) still stay out.
+  // verify GPT-6 models, grok-4.7, claude-opus-5.5 (dot notation), and deprecated
+  // claude-opus-4-8 (removed from Anthropic Fast) still stay out.
   const anthropicAllowlist = extractConst("extensions/fast/index.ts", "ANTHROPIC_SUPPORTED_MODELS");
-  const anthropicProhibited = ["claude-opus-5.5", "grok-4.7"];
+  const anthropicProhibited = ["claude-opus-4-8", "claude-opus-5.5", "grok-4.7"];
   for (const model of [...anthropicProhibited, ...confirmedDirectOpenAIModels]) {
     assert.equal(
       anthropicAllowlist.has(model),
