@@ -6,7 +6,7 @@
 
 ## Highlights
 
-- `fast` covers every Fast and Ultrafast model currently documented by OpenAI and Anthropic. The added models are:
+- `fast` adds the newly documented OpenAI and Anthropic Fast and Ultrafast models. Claude Opus 4.8, which Anthropic still lists as a research preview, is deliberately excluded (see below). The added models are:
   - Codex Fast (`priority`): `gpt-6.1-terra`.
   - Direct OpenAI API Fast: `gpt-6.1-terra` and `gpt-5.6-sol`.
   - Anthropic Fast: Claude Fable 5.2 and `claude-mythos-5-2`. The Mythos native ID is inferred from naming.

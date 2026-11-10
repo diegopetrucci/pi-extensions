@@ -4,7 +4,7 @@
 
 Draft for publication only after successful release verification:
 
-pi-extensions v0.1.86 adds every Fast and Ultrafast model OpenAI and Anthropic currently document to `/fast`:
+pi-extensions v0.1.86 adds the newly documented Fast and Ultrafast models to `/fast`, and drops Claude Opus 4.8 ahead of its Fast deprecation:
 - GPT-6.1 Terra on Codex and the API
 - GPT-5.6 Sol on the API
 - Claude Fable 5.2 and Mythos 5.2

@@ -53,9 +53,12 @@ Candidate artifact evidence (Node `26.13.0`, npm `11.20.0`):
 | `pi-dynamic-context-pruning@0.1.17` | 36,436 / 131,837 | 4 | `534ba1bcffa04d2e03143064d8ca54894cb3b83a0b1af2633846d4f267a4a98b` |
 | `pi-extensions@0.1.86` | 1,341,200 / 2,596,397 | 188 | `097c43689220a08c421cb8a4877e2f3ee89393256af2f6a56fbe2bdd4f2320cc` |
 
-## Publishing notes
+## Publishing blockers
 
-- [ ] Read-only GitHub inspection on 2026-11-10 shows the `npm-release` environment unchanged since v0.1.85: required reviewer `diegopetrucci`, custom branch policy, and `prevent_self_review: false`. The active CLI identity is `diegopetrucci`. Do not exploit or change this setting; confirm the dispatch and review arrangement with the user before publishing.
+- [ ] Before dispatch, obtain an authorized correction of the `npm-release` environment's no-self-review protection and an eligible independent dispatch/review arrangement.
+  - Read-only GitHub inspection on 2026-11-10 shows the environment unchanged since v0.1.85: required reviewer `diegopetrucci`, custom branch policy, and `prevent_self_review: false`.
+  - The active CLI identity is `diegopetrucci`.
+  - Do not exploit this weaker setting or bypass required reviewers. No environment setting has been changed.
 
 ## Agent-safe follow-up actions — pre-commit snapshot
 
