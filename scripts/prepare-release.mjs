@@ -5,6 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import {
+  CHANGELOG_FILE_NAME,
+  CHANGELOG_PLACEHOLDER_BULLET,
+  formatChangelogHeading,
+  parseChangelogEntries,
+} from "./changelog.mjs";
 import { gzipPayloadEqual } from "./gzip-payload.mjs";
 import { discoverPackages, findRoot, isExactNotFound, releaseOrder } from "./release-workspace.mjs";
 
@@ -89,7 +95,10 @@ async function packArtifact(pkg, run, destination, spec) {
   const pack = parsePack(result.stdout, spec ?? pkg.name);
   if (!pack.filename) return { ...pack, artifactPath: null };
   const artifactPath = path.join(destination, pack.filename);
-  return { ...pack, artifactPath: (await exists(artifactPath)) ? artifactPath : null };
+  return {
+    ...pack,
+    artifactPath: (await exists(artifactPath)) ? artifactPath : null,
+  };
 }
 
 async function canonicalPackEqual(pkg, run) {
@@ -187,7 +196,7 @@ function scaffolds(version, ordered, versions) {
     ],
     [
       `publish-checklist-v${version}.md`,
-      `# Publish checklist — v${version}\n\n## Target package versions\n\n${ordered.map((pkg) => `- [ ] \`${pkg.name}@${versions[pkg.name]}\``).join("\n")}\n\n## Validation evidence\n\n- [ ] record completed checks here\n- [ ] confirm no staged files\n\n## Agent-safe follow-up actions\n\n- [ ] obtain explicit user approval before any commit-creating command, then commit release prep changes outside this tool\n- [ ] tag the release outside this tool\n- [ ] push the branch and tag outside this tool\n- [ ] create the GitHub release outside this tool\n\n## Authorized trusted OIDC release actions\n\n- [ ] with an explicit user release request, run \`scripts/publish-release.mjs v${version} --dry-run\` and review the exact tag, body, package, and tarball evidence\n- [ ] dispatch the trusted \`publish.yml\` workflow only when the authenticated GitHub identity is permitted, from verified \`main\`, with the exact release tag in both \`release_tag\` and \`confirmation\` fields\n- [ ] inspect the verified package plan and confirm the audited contributor evidence and exact public-body/package evidence before approval\n- [ ] approve the protected \`npm-release\` environment deployment only with an eligible authenticated GitHub identity; required reviewers, \`main\` branch restrictions, and no-self-review protections remain enforced\n- [ ] if GitHub rejects the identity's dispatch or approval, escalate to an eligible human; never bypass or disable protection\n- [ ] let the workflow publish through npm OIDC only; never run local \`npm publish\` or use legacy npm token/OTP credentials\n- [ ] after verified workflow publication success, wait five minutes before post-publish registry/package-page or npm-install verification\n\n${marker}\n`,
+      `# Publish checklist — v${version}\n\n## Target package versions\n\n${ordered.map((pkg) => `- [ ] \`${pkg.name}@${versions[pkg.name]}\``).join("\n")}\n\n## Validation evidence\n\n- [ ] record completed checks here\n- [ ] replace changelog placeholders in each package CHANGELOG.md\n- [ ] confirm no staged files\n\n## Agent-safe follow-up actions\n\n- [ ] obtain explicit user approval before any commit-creating command, then commit release prep changes outside this tool\n- [ ] tag the release outside this tool\n- [ ] push the branch and tag outside this tool\n- [ ] create the GitHub release outside this tool\n\n## Authorized trusted OIDC release actions\n\n- [ ] with an explicit user release request, run \`scripts/publish-release.mjs v${version} --dry-run\` and review the exact tag, body, package, and tarball evidence\n- [ ] dispatch the trusted \`publish.yml\` workflow only when the authenticated GitHub identity is permitted, from verified \`main\`, with the exact release tag in both \`release_tag\` and \`confirmation\` fields\n- [ ] inspect the verified package plan and confirm the audited contributor evidence and exact public-body/package evidence before approval\n- [ ] approve the protected \`npm-release\` environment deployment only with an eligible authenticated GitHub identity; required reviewers, \`main\` branch restrictions, and no-self-review protections remain enforced\n- [ ] if GitHub rejects the identity's dispatch or approval, escalate to an eligible human; never bypass or disable protection\n- [ ] let the workflow publish through npm OIDC only; never run local \`npm publish\` or use legacy npm token/OTP credentials\n- [ ] after verified workflow publication success, wait five minutes before post-publish registry/package-page or npm-install verification\n\n${marker}\n`,
     ],
   ]);
 }
@@ -219,6 +228,29 @@ async function restoreSnapshots(snapshots) {
   }
 }
 
+function changelogEnabled(pkg) {
+  return Array.isArray(pkg.manifest.files) && pkg.manifest.files.includes(CHANGELOG_FILE_NAME);
+}
+
+/** Returns the new changelog content, or null when the target heading already exists. */
+function scaffoldChangelog(content, filePath, version, date) {
+  const core = version;
+  const entries = parseChangelogEntries(content);
+  if (entries.some((entry) => entry.version === core)) return null;
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/(?<=\n)/);
+  const titleIndex = lines.findIndex((line) => /^# Changelog\s*$/.test(line));
+  if (titleIndex === -1) throw new Error(`Changelog lacks a "# Changelog" title: ${filePath}`);
+  // Insert above the first existing entry (directly below the title when there is no prose).
+  const insertAt = entries.length > 0 ? entries[0].line - 1 : lines.length;
+  const before = lines.slice(0, insertAt);
+  if (before.length > 0 && !before.at(-1).endsWith("\n")) before[before.length - 1] += eol;
+  const entry = `${formatChangelogHeading(core, date)}${eol}${eol}${CHANGELOG_PLACEHOLDER_BULLET}${eol}`;
+  const after = lines.slice(insertAt).join("");
+  if (before.at(-1)?.trim() !== "") before.push(eol);
+  return `${before.join("")}${entry}${after ? `${eol}${after}` : ""}`;
+}
+
 async function writeJson(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
@@ -243,6 +275,7 @@ export async function prepareRelease({
   inputPath,
   write = false,
   run = defaultRun,
+  now = new Date(),
 } = {}) {
   if (!inputPath) throw new Error("An explicit JSON input path is required");
   const root = await findRoot(cwd);
@@ -290,7 +323,42 @@ export async function prepareRelease({
       action: (await exists(filePath)) ? "preserved" : write ? "created" : "would-create",
     });
   }
+  const date = new Date(now).toISOString().slice(0, 10);
+  const changelogPlans = new Map();
+  for (const pkg of selected) {
+    if (!changelogEnabled(pkg)) {
+      changelogPlans.set(pkg.name, {
+        action: "skip",
+        filePath: null,
+        content: null,
+      });
+      continue;
+    }
+    // Changelog headings carry only x.y.z (as Pi parses them) and CI requires the newest entry
+    // to equal the package version, so prerelease targets cannot be scaffolded.
+    if (!/^\d+\.\d+\.\d+$/.test(input.versions[pkg.name])) {
+      throw new Error(
+        `Changelog-enabled package ${pkg.name} requires a plain x.y.z target version; got ${input.versions[pkg.name]}`,
+      );
+    }
+    const filePath = path.join(pkg.root, CHANGELOG_FILE_NAME);
+    if (!(await exists(filePath))) throw new Error(`Missing ${CHANGELOG_FILE_NAME}: ${filePath}`);
+    const content = scaffoldChangelog(
+      await readFile(filePath, "utf8"),
+      filePath,
+      input.versions[pkg.name],
+      date,
+    );
+    changelogPlans.set(pkg.name, {
+      action: content === null ? "keep" : "create-entry",
+      filePath,
+      content,
+    });
+  }
   if (write) {
+    const changelogPaths = [...changelogPlans.values()].flatMap((plan) =>
+      plan.filePath ? [plan.filePath] : [],
+    );
     const manifestPaths = selected.map((pkg) => path.join(pkg.root, "package.json"));
     const markerPaths = selected
       .filter((pkg) => input.fleetMarkers?.[pkg.name] !== undefined)
@@ -301,6 +369,7 @@ export async function prepareRelease({
       path.join(root, "package-lock.json"),
       ...markerPaths,
       ...documentPaths,
+      ...changelogPaths,
     ]);
     try {
       for (const [name, content] of scaffoldEntries) {
@@ -310,6 +379,8 @@ export async function prepareRelease({
           await writeFile(filePath, content, "utf8");
         }
       }
+      for (const plan of changelogPlans.values())
+        if (plan.content !== null) await writeFile(plan.filePath, plan.content, "utf8");
       for (const pkg of selected) {
         pkg.manifest.version = input.versions[pkg.name];
         await writeJson(path.join(pkg.root, "package.json"), pkg.manifest);
@@ -350,6 +421,12 @@ export async function prepareRelease({
       size: pkg.pack.size,
       unpackedSize: pkg.pack.unpackedSize,
       fileCount: pkg.pack.fileCount,
+      changelog: {
+        action: changelogPlans.get(pkg.name).action,
+        path: changelogPlans.get(pkg.name).filePath
+          ? path.relative(root, changelogPlans.get(pkg.name).filePath)
+          : null,
+      },
     })),
     documents: documentStatus,
   };

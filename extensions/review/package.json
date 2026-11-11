@@ -19,6 +19,7 @@
   "files": [
     "index.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     ".pi-fleet-tested-version"
   ],

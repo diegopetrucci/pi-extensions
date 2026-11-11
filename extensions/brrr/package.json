@@ -18,6 +18,7 @@
   "files": [
     "index.ts",
     "README.md",
+    "CHANGELOG.md",
     "brrr.example.json",
     ".pi-fleet-tested-version"
   ],
