@@ -18,6 +18,7 @@
   "files": [
     "index.ts",
     "README.md",
+    "CHANGELOG.md",
     ".pi-fleet-tested-version"
   ],
   "publishConfig": {

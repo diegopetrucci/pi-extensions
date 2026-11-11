@@ -20,6 +20,7 @@
     "openai-usage.ts",
     "minimal-footer.example.json",
     "README.md",
+    "CHANGELOG.md",
     ".pi-fleet-tested-version"
   ],
   "publishConfig": {

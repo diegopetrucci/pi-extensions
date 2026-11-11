@@ -27,7 +27,10 @@ async function fixture(t) {
     peerDependencies: { "plain-addon": "1.0.0" },
     devDependencies: { "plain-addon": "1.0.0" },
   });
-  await json(path.join(root, "packages/b/package.json"), { name: "plain-addon", version: "1.0.0" });
+  await json(path.join(root, "packages/b/package.json"), {
+    name: "plain-addon",
+    version: "1.0.0",
+  });
   await json(path.join(root, "package-lock.json"), {
     name: "@example/umbrella",
     version: "1.0.0",
@@ -40,7 +43,11 @@ async function fixture(t) {
   });
   const input = {
     releaseVersion: "1.1.0",
-    versions: { "@example/umbrella": "1.1.0", "@example/a": "1.1.0", "plain-addon": "1.1.0" },
+    versions: {
+      "@example/umbrella": "1.1.0",
+      "@example/a": "1.1.0",
+      "plain-addon": "1.1.0",
+    },
     fleetMarkers: { "plain-addon": "0.80.6" },
   };
   await json(path.join(root, "release.json"), input);
@@ -102,7 +109,11 @@ function mockRunner(
       const spec = args[1];
       if (registryError) return { code: 1, stdout: "", stderr: registryError };
       if (target[spec] === "published")
-        return { code: 0, stdout: JSON.stringify(spec.split("@").at(-1)), stderr: "" };
+        return {
+          code: 0,
+          stdout: JSON.stringify(spec.split("@").at(-1)),
+          stderr: "",
+        };
       return notFoundResult(notFoundOnStdout);
     }
     assert.equal(args[0], "pack");
@@ -180,7 +191,11 @@ test("dry-run selects packages by pack artifacts, includes root overlap, orders 
     inputPath: "../../release.json",
     run,
   });
-  const second = await prepareRelease({ cwd: root, inputPath: "release.json", run });
+  const second = await prepareRelease({
+    cwd: root,
+    inputPath: "release.json",
+    run,
+  });
   assert.deepEqual(first, second);
   assert.equal(first.mode, "dry-run");
   assert.deepEqual(
@@ -211,8 +226,14 @@ test("canonical tar payloads ignore recompression and select only genuinely chan
     run: mockRunner(root, {
       local: { "@example/a": "local-a", "plain-addon": "local-addon" },
       baseline: { "@example/a": "registry-a", "plain-addon": "registry-addon" },
-      localPayloads: { "@example/a": "same tar payload", "plain-addon": "local tar payload" },
-      baselinePayloads: { "@example/a": "same tar payload", "plain-addon": "registry tar payload" },
+      localPayloads: {
+        "@example/a": "same tar payload",
+        "plain-addon": "local tar payload",
+      },
+      baselinePayloads: {
+        "@example/a": "same tar payload",
+        "plain-addon": "registry tar payload",
+      },
       artifactDirectories,
     }),
   });
@@ -272,7 +293,10 @@ test("malformed, bounded-overflow, or missing tar payloads remain changed", asyn
         const baselineArtifact = gzipSync(payload, { level: 0 });
         assert.ok(localArtifact.length < compressedLimit);
         assert.ok(baselineArtifact.length > compressedLimit);
-        return { "local:@example/a": localArtifact, "baseline:@example/a": baselineArtifact };
+        return {
+          "local:@example/a": localArtifact,
+          "baseline:@example/a": baselineArtifact,
+        };
       },
     ],
     [
@@ -280,7 +304,10 @@ test("malformed, bounded-overflow, or missing tar payloads remain changed", asyn
       () => {
         const artifact = gzipSync(Buffer.alloc(payloadLimit + 1), { level: 1 });
         assert.ok(artifact.length < compressedLimit);
-        return { "local:@example/a": artifact, "baseline:@example/a": artifact };
+        return {
+          "local:@example/a": artifact,
+          "baseline:@example/a": artifact,
+        };
       },
     ],
     ["missing", () => ({ "baseline:@example/a": null })],
@@ -341,9 +368,19 @@ test("write mode synchronizes selected versions and lock entries, writes optiona
   );
   const calls = [];
   const run = mockRunner(root, { local: changedHashes, calls });
-  const first = await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  const first = await prepareRelease({
+    cwd: root,
+    inputPath: "release.json",
+    write: true,
+    run,
+  });
   const prose = await readFile(humanDoc, "utf8");
-  const second = await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  const second = await prepareRelease({
+    cwd: root,
+    inputPath: "release.json",
+    write: true,
+    run,
+  });
   assert.equal(await readFile(humanDoc, "utf8"), prose);
   assert.equal(prose.startsWith("Human summary."), true);
   assert.match(prose, /## Highlights[\s\S]*## Packages[\s\S]*## Install/);
@@ -390,7 +427,10 @@ test("stdout-only exact not-found is an absent baseline", async (t) => {
     prepareRelease({
       cwd: root,
       inputPath: "release.json",
-      run: mockRunner(root, { baseline: { "plain-addon": "absent" }, notFoundOnStdout: true }),
+      run: mockRunner(root, {
+        baseline: { "plain-addon": "absent" },
+        notFoundOnStdout: true,
+      }),
     }),
     /Changed package plain-addon needs an exact target version/,
   );
@@ -471,7 +511,11 @@ test("ambiguous or mixed 404 output hard-fails and an empty selection is rejecte
     /registry target check.*E404.*E500/s,
   );
   await assert.rejects(
-    prepareRelease({ cwd: root, inputPath: "release.json", run: mockRunner(root) }),
+    prepareRelease({
+      cwd: root,
+      inputPath: "release.json",
+      run: mockRunner(root),
+    }),
     /No changed packages were detected/,
   );
 });
@@ -479,7 +523,12 @@ test("ambiguous or mixed 404 output hard-fails and an empty selection is rejecte
 test("changed inputs cannot reuse stale managed document evidence or mutate manifests", async (t) => {
   const { root, input } = await fixture(t);
   const run = mockRunner(root, { local: changedHashes });
-  await prepareRelease({ cwd: root, inputPath: "release.json", write: true, run });
+  await prepareRelease({
+    cwd: root,
+    inputPath: "release.json",
+    write: true,
+    run,
+  });
   const generatedBody = await readFile(path.join(root, "docs/github-release-v1.1.0.md"), "utf8");
   assert.match(
     generatedBody,
@@ -545,7 +594,10 @@ test("install failure rolls back manifests, lockfile, markers, and newly-created
       cwd: root,
       inputPath: "release.json",
       write: true,
-      run: mockRunner(root, { local: changedHashes, installError: "install exploded" }),
+      run: mockRunner(root, {
+        local: changedHashes,
+        installError: "install exploded",
+      }),
     }),
     /lockfile synchronization failed.*install exploded/,
   );
@@ -577,4 +629,136 @@ test("stale top-level lock version fails post-install verification and rolls bac
   await assert.rejects(readFile(path.join(root, "docs/release-notes-v1.1.0.md")), {
     code: "ENOENT",
   });
+});
+
+const OLD_CHANGELOG = "# Changelog\n\n## [1.0.0] - 2026-01-01\n\n- Initial release.\n";
+
+async function enableChangelog(root, content = OLD_CHANGELOG) {
+  const manifestPath = path.join(root, "packages/a/package.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  await json(manifestPath, {
+    ...manifest,
+    files: ["index.js", "CHANGELOG.md"],
+  });
+  await writeFile(path.join(root, "packages/a/CHANGELOG.md"), content);
+}
+
+const changelogNow = new Date("2026-03-04T23:59:59Z");
+const changelogOptions = { inputPath: "release.json", now: changelogNow };
+
+test("changelog dry-run reports actions without writing and skips non-enabled packages", async (t) => {
+  const { root } = await fixture(t);
+  await enableChangelog(root);
+  const run = mockRunner(root, { local: changedHashes });
+  const report = await prepareRelease({ cwd: root, ...changelogOptions, run });
+  assert.deepEqual(
+    report.packages.map(({ name, changelog }) => [name, changelog]),
+    [
+      ["plain-addon", { action: "skip", path: null }],
+      ["@example/a", { action: "create-entry", path: "packages/a/CHANGELOG.md" }],
+      ["@example/umbrella", { action: "skip", path: null }],
+    ],
+  );
+  assert.equal(await readFile(path.join(root, "packages/a/CHANGELOG.md"), "utf8"), OLD_CHANGELOG);
+  await assert.rejects(readFile(path.join(root, "packages/b/CHANGELOG.md")), {
+    code: "ENOENT",
+  });
+});
+
+test("changelog write inserts a dated placeholder entry below the title and reruns idempotently", async (t) => {
+  const { root } = await fixture(t);
+  await enableChangelog(root);
+  const run = mockRunner(root, { local: changedHashes });
+  const file = path.join(root, "packages/a/CHANGELOG.md");
+  await prepareRelease({ cwd: root, ...changelogOptions, write: true, run });
+  const first = await readFile(file, "utf8");
+  assert.equal(
+    first,
+    "# Changelog\n\n## [1.1.0] - 2026-03-04\n\n- TODO(changelog): describe user-facing changes.\n\n## [1.0.0] - 2026-01-01\n\n- Initial release.\n",
+  );
+  const report = await prepareRelease({
+    cwd: root,
+    ...changelogOptions,
+    write: true,
+    run,
+  });
+  assert.equal(await readFile(file, "utf8"), first);
+  assert.equal(report.packages.find(({ name }) => name === "@example/a").changelog.action, "keep");
+  await assert.rejects(readFile(path.join(root, "packages/b/CHANGELOG.md")), {
+    code: "ENOENT",
+  });
+});
+
+test("changelog existing target heading is left byte-for-byte untouched", async (t) => {
+  const { root } = await fixture(t);
+  const existing = "# Changelog\n\nIntro.\n\n## [1.1.0] - 2026-02-02\n\n- Real notes.\n";
+  await enableChangelog(root, existing);
+  const run = mockRunner(root, { local: changedHashes });
+  const report = await prepareRelease({
+    cwd: root,
+    ...changelogOptions,
+    write: true,
+    run,
+  });
+  assert.equal(await readFile(path.join(root, "packages/a/CHANGELOG.md"), "utf8"), existing);
+  assert.equal(report.packages.find(({ name }) => name === "@example/a").changelog.action, "keep");
+});
+
+test("changelog write preserves intro prose above the new entry's position", async (t) => {
+  const { root } = await fixture(t);
+  await enableChangelog(root, "# Changelog\n\nIntro prose.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n");
+  await prepareRelease({
+    cwd: root,
+    ...changelogOptions,
+    write: true,
+    run: mockRunner(root, { local: changedHashes }),
+  });
+  assert.equal(
+    await readFile(path.join(root, "packages/a/CHANGELOG.md"), "utf8"),
+    "# Changelog\n\nIntro prose.\n\n## [1.1.0] - 2026-03-04\n\n- TODO(changelog): describe user-facing changes.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n",
+  );
+});
+
+for (const write of [false, true]) {
+  test(`changelog-enabled package rejects prerelease target before mutation (write=${write})`, async (t) => {
+    const { root, input } = await fixture(t);
+    await enableChangelog(root);
+    await json(path.join(root, "release.json"), {
+      ...input,
+      versions: { ...input.versions, "@example/a": "1.1.0-beta.1" },
+    });
+    const files = ["packages/a/CHANGELOG.md", "packages/a/package.json", "package-lock.json"];
+    const before = await Promise.all(files.map((f) => readFile(path.join(root, f))));
+    await assert.rejects(
+      prepareRelease({
+        cwd: root,
+        ...changelogOptions,
+        write,
+        run: mockRunner(root, { local: changedHashes }),
+      }),
+      /Changelog-enabled package @example\/a requires a plain x\.y\.z target version; got 1\.1\.0-beta\.1/,
+    );
+    const after = await Promise.all(files.map((f) => readFile(path.join(root, f))));
+    assert.deepEqual(after, before);
+  });
+}
+
+test("changelog failure rolls back CHANGELOG.md byte-for-byte", async (t) => {
+  const { root } = await fixture(t);
+  await enableChangelog(root);
+  const file = path.join(root, "packages/a/CHANGELOG.md");
+  const before = await readFile(file);
+  await assert.rejects(
+    prepareRelease({
+      cwd: root,
+      ...changelogOptions,
+      write: true,
+      run: mockRunner(root, {
+        local: changedHashes,
+        installError: "install exploded",
+      }),
+    }),
+    /install exploded/,
+  );
+  assert.deepEqual(await readFile(file), before);
 });

@@ -28,6 +28,7 @@
     "extensions",
     "assets",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     ".pi-fleet-tested-version"
   ],

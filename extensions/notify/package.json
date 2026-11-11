@@ -17,6 +17,7 @@
   "files": [
     "index.ts",
     "README.md",
+    "CHANGELOG.md",
     "notify.example.json",
     ".pi-fleet-tested-version"
   ],
