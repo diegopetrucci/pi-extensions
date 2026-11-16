@@ -172,6 +172,23 @@ test("Oracle maps published Pi 1.0 GPT-6.1 Sol to high without requesting unsupp
   }
 });
 
+test("Oracle applies the GPT Sol high-thinking exception to base batch aliases", async () => {
+  const { resolveThinkingLevel } = await loadOracleTestUtils();
+  for (const [provider, id] of [
+    ["openrouter", "openai/gpt-5.6-sol:batch"],
+    ["openrouter", "openai/gpt-6-sol:batch"],
+    ["openrouter", "openai/gpt-6.1-sol:batch"],
+    ["vercel-ai-gateway", "openai/gpt-5.6-sol-batch"],
+    ["vercel-ai-gateway", "openai/gpt-6-sol-batch"],
+    ["vercel-ai-gateway", "openai/gpt-6.1-sol-batch"],
+  ]) {
+    const model = getBuiltinModels(provider).find((model) => model.id === id);
+    assert.ok(model, `expected ${id} in the pinned ${provider} catalog`);
+    assert.equal(resolveThinkingLevel(model, undefined).requested, "high", `${provider}/${id}`);
+    assert.equal(resolveThinkingLevel(model, "xhigh").requested, "xhigh", `${provider}/${id}`);
+  }
+});
+
 test("Oracle does not apply the GPT Sol high-thinking exception to Pro/Fast variants", async () => {
   const { resolveThinkingLevel } = await loadOracleTestUtils();
   for (const [provider, id] of [
