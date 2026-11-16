@@ -127,6 +127,92 @@ test("getCommitFiles returns no files without diff-tree when first-parent lookup
   assert.ok(!calls.some((call) => call.includes("diff-tree")));
 });
 
+test("getCommitFiles rejects timed-out diffs but allows genuine nonzero exits", async () => {
+  for (const code of [0, 1]) {
+    const pi = {
+      async exec(command, args) {
+        assert.equal(command, "git");
+        if (args[0] === "rev-parse") return { code: 0, stdout: "parent\n", stderr: "" };
+        assert.equal(args[0], "diff-tree");
+        return { code, stdout: "", stderr: "", killed: true };
+      },
+    };
+
+    await assert.rejects(
+      getCommitFiles(pi, repoRoot, "abc123"),
+      /git diff-tree .* timed out after 30s/,
+    );
+  }
+
+  const pi = {
+    async exec(command, args) {
+      return { code: args[0] === "rev-parse" ? 0 : 1, stdout: "", stderr: "" };
+    },
+  };
+  assert.deepEqual(await getCommitFiles(pi, repoRoot, "abc123"), []);
+});
+
+test("repository lookup distinguishes timeouts from non-repository failures", async () => {
+  for (const code of [0, 1]) {
+    const pi = {
+      async exec(command, args) {
+        assert.equal(command, "git");
+        assert.deepEqual(args, ["rev-parse", "--show-toplevel"]);
+        return { code, stdout: "", stderr: "", killed: true };
+      },
+    };
+
+    await assert.rejects(
+      getReviewWindowData(pi, repoRoot),
+      /git rev-parse --show-toplevel timed out after 30s/,
+    );
+  }
+
+  const pi = {
+    async exec() {
+      return { code: 1, stdout: "", stderr: "" };
+    },
+  };
+  await assert.rejects(getReviewWindowData(pi, repoRoot), /Not inside a git repository\./);
+});
+
+test("working-tree snapshot rejects timeouts and cleans its index on signals", async (t) => {
+  const scratchDir = await mkdtemp(path.join(os.tmpdir(), "pi-annotate-snapshot-signals-"));
+  t.after(() => rm(scratchDir, { recursive: true, force: true }));
+  let script;
+  const pi = {
+    async exec(command, args) {
+      if (command === "git") {
+        assert.deepEqual(args, ["rev-parse", "--verify", "HEAD"]);
+        return { code: 0, stdout: "head\n", stderr: "" };
+      }
+      assert.equal(command, "bash");
+      assert.equal(args[0], "-lc");
+      script = args[1];
+      return { code: 0, stdout: "", stderr: "", killed: true };
+    },
+  };
+
+  await assert.rejects(
+    getCommitFiles(pi, repoRoot, "__tlh_working_tree__"),
+    /bash .* timed out after 30s/,
+  );
+  for (const signal of ["TERM", "INT", "HUP"]) {
+    const setup = [
+      'mktemp() { touch "$PWD/index"; echo "$PWD/index"; }',
+      `git() { kill -s ${signal} "$$"; }`,
+    ].join("\n");
+    await assert.rejects(
+      execFileAsync("bash", ["--noprofile", "--norc", "-c", `${setup}\n${script}`], {
+        cwd: scratchDir,
+        encoding: "utf8",
+      }),
+      (error) => error.code === 1,
+    );
+    assert.deepEqual(await readdir(scratchDir), []);
+  }
+});
+
 async function createIsolatedGitFixture(scratchDir) {
   const configPath = path.join(scratchDir, "empty-gitconfig");
   const templatePath = path.join(scratchDir, "empty-template");
