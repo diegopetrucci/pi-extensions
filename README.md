@@ -61,7 +61,7 @@ A collection of [pi](https://pi.dev) agent extensions I made. (Btw, [I am also b
 - [`claude-fast`](./extensions/claude-fast): Deprecated standalone leftover. It no longer changes provider requests; use [`fast`](./extensions/fast).
 - [`openai-fast`](./extensions/openai-fast): Deprecated standalone leftover. It no longer changes provider requests; use [`fast`](./extensions/fast).
 
-Packages ship a `CHANGELOG.md` that Pi 1.5.0+ shows after an update.
+Packages except `illustrations-to-explain-things`, `claude-fast`, and `openai-fast` ship a `CHANGELOG.md` that Pi 1.5.0+ shows after an update.
 
 ## Install
 

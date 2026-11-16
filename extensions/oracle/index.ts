@@ -1106,7 +1106,7 @@ function clampThinkingLevel(model: PiModel, requested: ThinkingLevel): ThinkingL
 
 function isGptSolModel(model: PiModel | undefined): boolean {
   if (!model) return false;
-  return /\bgpt-(?:5\.6|6|6\.1)-sol(?:\s|$)/i.test(`${model.id} ${model.name ?? ""}`);
+  return /\bgpt-(?:5\.6|6|6\.1)-sol(?:[:-]batch)?(?:\s|$)/i.test(`${model.id} ${model.name ?? ""}`);
 }
 
 function resolveThinkingLevel(
