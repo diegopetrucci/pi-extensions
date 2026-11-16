@@ -633,11 +633,19 @@ async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
 }
 
 // Tracked staged/unstaged changes block branch switches. Untracked files (??) do not.
-async function hasPendingChanges(pi: ExtensionAPI): Promise<boolean> {
+async function hasPendingChanges(pi: ExtensionAPI, ctx: ExtensionContext): Promise<boolean | null> {
   const { stdout, code, killed } = await pi.exec("git", ["status", "--porcelain"], {
     timeout: GIT_GH_COMMAND_TIMEOUT_MS,
   });
-  if (killed || code !== 0) return false;
+  if (killed || code !== 0) {
+    ctx.ui.notify(
+      killed
+        ? "Cannot checkout PR: uncommitted-changes check failed (git status timed out)."
+        : "Cannot checkout PR: uncommitted-changes check failed (git status failed).",
+      "error",
+    );
+    return null;
+  }
 
   const lines = stdout
     .trim()
@@ -674,14 +682,15 @@ function parsePrReference(ref: string): number | null {
 async function getPrInfo(
   pi: ExtensionAPI,
   prNumber: number,
-): Promise<{ baseBranch: string; title: string; headBranch: string } | null> {
+): Promise<{ baseBranch: string; title: string; headBranch: string } | null | "timedOut"> {
   const { stdout, code, killed } = await pi.exec(
     "gh",
     ["pr", "view", String(prNumber), "--json", "baseRefName,title,headRefName"],
     { timeout: GIT_GH_COMMAND_TIMEOUT_MS },
   );
 
-  if (killed || code !== 0) return null;
+  if (killed) return "timedOut";
+  if (code !== 0) return null;
 
   try {
     const data = JSON.parse(stdout);
@@ -708,6 +717,10 @@ async function checkoutPullRequest(
 
   ctx.ui.notify(`Fetching PR #${prNumber} info...`, "info");
   const prInfo = await getPrInfo(pi, prNumber);
+  if (prInfo === "timedOut") {
+    ctx.ui.notify(`gh pr view timed out while fetching PR #${prNumber}.`, "error");
+    return null;
+  }
   if (!prInfo) {
     ctx.ui.notify(
       `Could not find PR #${prNumber}. Make sure gh is authenticated and the PR exists.`,
@@ -716,7 +729,9 @@ async function checkoutPullRequest(
     return null;
   }
 
-  if (await hasPendingChanges(pi)) {
+  const pendingChanges = await hasPendingChanges(pi, ctx);
+  if (pendingChanges === null) return null;
+  if (pendingChanges) {
     ctx.ui.notify(
       "Cannot checkout PR: you have uncommitted changes. Please commit or stash them first.",
       "error",
@@ -730,7 +745,11 @@ async function checkoutPullRequest(
     ["pr", "checkout", String(prNumber)],
     { timeout: PR_CHECKOUT_TIMEOUT_MS },
   );
-  if (killed || code !== 0) {
+  if (killed) {
+    ctx.ui.notify("gh pr checkout timed out; check the working tree before retrying.", "error");
+    return null;
+  }
+  if (code !== 0) {
     ctx.ui.notify(`Failed to checkout PR: ${stderr || stdout || "Failed to checkout PR"}`, "error");
     return null;
   }
@@ -1760,7 +1779,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
         timeout: GIT_GH_COMMAND_TIMEOUT_MS,
       });
       if (killed || code !== 0) {
-        ctx.ui.notify("Not a git repository", "error");
+        ctx.ui.notify(killed ? "git rev-parse timed out" : "Not a git repository", "error");
         return;
       }
 
