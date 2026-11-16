@@ -115,6 +115,31 @@ test("each fetch attempt has a timeout signal and aborts are retried", async () 
   assert.equal(new Set(signals).size, 3);
 });
 
+test("response body AbortError is retried then succeeds", async () => {
+  const urls = [];
+  const delays = [];
+  const fetch = async (url) => {
+    urls.push(url);
+    if (urls.length === 1) {
+      return {
+        ...res(200),
+        json: async () => {
+          throw new DOMException("Body read aborted", "AbortError");
+        },
+      };
+    }
+    if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
+    return downloadsRes(url, 7);
+  };
+  const sleep = async (ms) => {
+    delays.push(ms);
+  };
+  assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", sleep }), 7);
+  assert.equal(urls.length, 3);
+  assert.equal(urls[0], urls[1]);
+  assert.deepEqual(delays, [500]);
+});
+
 test("mismatched download window start or end rejects", async () => {
   for (const field of ["start", "end"]) {
     const fetch = async (url) => {

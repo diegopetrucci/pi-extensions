@@ -69,6 +69,8 @@ async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } =
     let response;
     try {
       response = await fetchImpl(url, { signal: AbortSignal.timeout(30_000) });
+      if (response.status === 404) return null;
+      if (response.ok) return await response.json();
     } catch (error) {
       if (attempt < retries) {
         await wait(delayMs * 2 ** attempt);
@@ -76,8 +78,6 @@ async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } =
       }
       throw error;
     }
-    if (response.status === 404) return null;
-    if (response.ok) return response.json();
     if (isRetryable(response.status) && attempt < retries) {
       await wait(delayMs * 2 ** attempt);
       continue;
