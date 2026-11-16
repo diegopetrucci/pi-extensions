@@ -84,6 +84,7 @@ function mockRunner(
     assert.ok(args.some((arg) => arg === `--registry=${PUBLIC_REGISTRY}`));
     assert.ok(!args.includes("publish"), "release preparation must never execute npm publish");
     if (args[0] === "install") {
+      assert.equal(options.timeout, undefined);
       assert.deepEqual(args, [
         "install",
         "--package-lock-only",
@@ -106,6 +107,7 @@ function mockRunner(
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "view") {
+      assert.equal(options.timeout, 60_000);
       const spec = args[1];
       if (registryError) return { code: 1, stdout: "", stderr: registryError };
       if (target[spec] === "published")
@@ -125,6 +127,7 @@ function mockRunner(
       .slice(1, destinationIndex === -1 ? args.length : destinationIndex)
       .filter((arg) => !arg.startsWith("-"))
       .at(-1);
+    assert.equal(options.timeout, spec ? 60_000 : undefined);
     let name;
     let shasum;
     if (spec) {
@@ -417,6 +420,41 @@ test("new absent baseline is changed and exact versions are mandatory", async (t
     }),
     /Changed package plain-addon needs an exact target version/,
   );
+});
+
+test("killed registry reads fail even with partial not-found output", async (t) => {
+  for (const stage of ["baseline dry-run", "baseline artifact", "target view"]) {
+    await t.test(stage, async (t) => {
+      const { root } = await fixture(t);
+      const run = mockRunner(root, { local: changedHashes });
+      await assert.rejects(
+        prepareRelease({
+          cwd: root,
+          inputPath: "release.json",
+          run: async (file, args, options) => {
+            const registryPack = args[0] === "pack" && args.includes("plain-addon@1.0.0");
+            if (
+              (stage === "target view" && args[0] === "view") ||
+              (stage !== "target view" &&
+                registryPack &&
+                args.includes("--dry-run") === (stage === "baseline dry-run"))
+            ) {
+              assert.equal(options.timeout, 60_000);
+              return {
+                code: 1,
+                killed: true,
+                signal: "SIGTERM",
+                stdout: "npm error code E404",
+                stderr: "Command timed out after 60000 ms (SIGTERM)",
+              };
+            }
+            return run(file, args, options);
+          },
+        }),
+        /(?:registry baseline|registry pack|registry target check).*timed out/,
+      );
+    });
+  }
 });
 
 test("stdout-only exact not-found is an absent baseline", async (t) => {

@@ -16,11 +16,13 @@ import { discoverPackages, findRoot, isExactNotFound, releaseOrder } from "./rel
 
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org";
+const REGISTRY_READ_TIMEOUT_MS = 60_000;
 
 async function defaultRun(file, args, options = {}) {
   try {
     const result = await execFileAsync(file, args, {
       cwd: options.cwd,
+      timeout: options.timeout,
       encoding: "utf8",
       env: { ...process.env, npm_config_ignore_scripts: "true" },
       maxBuffer: 20 * 1024 * 1024,
@@ -30,7 +32,12 @@ async function defaultRun(file, args, options = {}) {
     return {
       code: error.code ?? 1,
       stdout: error.stdout ?? "",
-      stderr: error.stderr ?? String(error),
+      killed: error.killed,
+      signal: error.signal,
+      stderr:
+        error.killed && options.timeout
+          ? `Command timed out after ${options.timeout} ms (${error.signal}): ${error.stderr ?? ""}`
+          : (error.stderr ?? String(error)),
     };
   }
 }
@@ -89,7 +96,7 @@ async function packArtifact(pkg, run, destination, spec) {
     run,
     "npm",
     args,
-    { cwd: pkg.root },
+    { cwd: pkg.root, ...(spec ? { timeout: REGISTRY_READ_TIMEOUT_MS } : {}) },
     `${spec ? "registry" : "local"} pack for ${pkg.name}`,
   );
   const pack = parsePack(result.stdout, spec ?? pkg.name);
@@ -130,8 +137,9 @@ async function inspectPackage(pkg, run) {
   const local = parsePack(localResult.stdout, pkg.name);
   const baselineResult = await run("npm", [...args, `${pkg.name}@${pkg.manifest.version}`], {
     cwd: pkg.root,
+    timeout: REGISTRY_READ_TIMEOUT_MS,
   });
-  if (isExactNotFound(baselineResult))
+  if (!baselineResult.killed && !baselineResult.signal && isExactNotFound(baselineResult))
     return {
       ...pkg,
       originalVersion: pkg.manifest.version,
@@ -160,9 +168,9 @@ async function assertTargetUnpublished(pkg, version, run) {
   const result = await run(
     "npm",
     ["view", spec, "version", "--json", `--registry=${PUBLIC_REGISTRY}`],
-    { cwd: pkg.root },
+    { cwd: pkg.root, timeout: REGISTRY_READ_TIMEOUT_MS },
   );
-  if (isExactNotFound(result)) return;
+  if (!result.killed && !result.signal && isExactNotFound(result)) return;
   if (result.code !== 0)
     throw new Error(
       `registry target check for ${spec} failed (${result.code}): ${result.stderr.trim()}`,
