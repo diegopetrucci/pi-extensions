@@ -17,6 +17,10 @@ const res = (status, body) => ({
   ok: status >= 200 && status < 300,
   json: async () => body,
 });
+const downloadsRes = (url, downloads) => {
+  const [start, end] = new URL(url).pathname.split("/")[3].split(":");
+  return res(200, { downloads, start, end });
+};
 const noSleep = { sleep: async () => {} };
 
 test("buildWindows chunks without overlap or gaps", () => {
@@ -54,7 +58,7 @@ test("sums across windows and encodes scoped names", async () => {
     urls.push(url);
     if (url.startsWith("https://registry"))
       return res(200, { time: { created: "2020-01-01T10:00:00Z" } });
-    return res(200, { downloads: 10 });
+    return downloadsRes(url, 10);
   };
   const n = await getPackageDownloads("@s/p", { fetch, today: "2023-01-01" });
   assert.equal(n, 30);
@@ -62,19 +66,15 @@ test("sums across windows and encodes scoped names", async () => {
   assert.equal(urls[1], "https://api.npmjs.org/downloads/point/2020-01-01:2021-06-23/@s%2Fp");
 });
 
-test("404 registry counts 0; other errors throw; 5xx retried", async () => {
-  const warn = console.warn;
-  console.warn = () => {};
-  try {
-    assert.equal(await getPackageDownloads("x", { fetch: async () => res(404) }), 0);
-  } finally {
-    console.warn = warn;
-  }
+test("404 registry and other errors throw; 5xx retried", async () => {
+  await assert.rejects(getPackageDownloads("x", { fetch: async () => res(404) }), {
+    message: "x not found on npm registry",
+  });
   await assert.rejects(getPackageDownloads("x", { fetch: async () => res(403), ...noSleep }));
   let calls = 0;
   const fetch = async (url) => {
     if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
-    return ++calls < 3 ? res(503) : res(200, { downloads: 5 });
+    return ++calls < 3 ? res(503) : downloadsRes(url, 5);
   };
   assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", ...noSleep }), 5);
   await assert.rejects(
@@ -91,13 +91,41 @@ test("network-level fetch rejection is retried then succeeds", async () => {
       throw new TypeError("fetch failed");
     }
     if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
-    return res(200, { downloads: 7 });
+    return downloadsRes(url, 7);
   };
   const sleep = async (ms) => {
     delays.push(ms);
   };
   assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", sleep }), 7);
   assert.deepEqual(delays, [500]);
+});
+
+test("each fetch attempt has a timeout signal and aborts are retried", async () => {
+  const signals = [];
+  const fetch = async (url, { signal }) => {
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(signal.aborted, false);
+    signals.push(signal);
+    if (signals.length === 1) throw new DOMException("Request aborted", "AbortError");
+    if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
+    return downloadsRes(url, 7);
+  };
+  assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", ...noSleep }), 7);
+  assert.equal(signals.length, 3);
+  assert.equal(new Set(signals).size, 3);
+});
+
+test("mismatched download window start or end rejects", async () => {
+  for (const field of ["start", "end"]) {
+    const fetch = async (url) => {
+      if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
+      const data = await downloadsRes(url, 7).json();
+      return res(200, { ...data, [field]: "2025-01-15" });
+    };
+    await assert.rejects(getPackageDownloads("x", { fetch, today: "2025-02-01" }), {
+      message: "Downloads API returned an unexpected date range for x",
+    });
+  }
 });
 
 test("persistent network-level rejection propagates after retries", async () => {
@@ -116,7 +144,7 @@ test("any 5xx (e.g. 520) is retried then succeeds", async () => {
   let calls = 0;
   const fetch = async (url) => {
     if (url.startsWith("https://registry")) return res(200, { time: { created: "2025-01-01" } });
-    return ++calls < 2 ? res(520) : res(200, { downloads: 7 });
+    return ++calls < 2 ? res(520) : downloadsRes(url, 7);
   };
   assert.equal(await getPackageDownloads("x", { fetch, today: "2025-02-01", ...noSleep }), 7);
   assert.equal(calls, 2);
@@ -139,7 +167,7 @@ test("computeTotal sums packages", async () => {
   const fetch = async (url) =>
     url.startsWith("https://registry")
       ? res(200, { time: { created: "2025-01-01" } })
-      : res(200, { downloads: 7 });
+      : downloadsRes(url, 7);
   const r = await computeTotal(["a", "b"], { fetch, today: "2025-01-02" });
   assert.equal(r.total, 14);
 });
