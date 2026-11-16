@@ -693,6 +693,127 @@ test(
   },
 );
 
+test("review reports a timed-out repository check", { concurrency: false }, async () => {
+  reviewTestApi.resetReviewRuntimeState();
+  const harness = createReviewHarness({
+    execImpl: async (command, args) => {
+      assert.equal(command, "git");
+      assert.deepEqual(args, ["rev-parse", "--git-dir"]);
+      return { stdout: "", stderr: "", code: 0, killed: true };
+    },
+  });
+  const context = createReviewCommandContext();
+
+  await harness.reviewHandler("pr 123", context.ctx);
+
+  assert.deepEqual(context.notifications, [{ message: "git rev-parse timed out", level: "error" }]);
+  assert.equal(harness.execCalls.length, 1);
+  assert.equal(context.customCalls.length, 0);
+  assert.deepEqual(harness.sentUserMessages, []);
+});
+
+for (const { name, command, args, result, message } of [
+  {
+    name: "timed-out status check",
+    command: "git",
+    args: ["status", "--porcelain"],
+    result: { stdout: "", code: 0, killed: true },
+    message: "Cannot checkout PR: uncommitted-changes check failed (git status timed out).",
+  },
+  {
+    name: "failed status check",
+    command: "git",
+    args: ["status", "--porcelain"],
+    result: { stdout: "", code: 128 },
+    message: "Cannot checkout PR: uncommitted-changes check failed (git status failed).",
+  },
+  {
+    name: "dirty tracked tree",
+    command: "git",
+    args: ["status", "--porcelain"],
+    result: { stdout: " M tracked.ts\n", code: 0 },
+    message: "Cannot checkout PR: you have uncommitted changes. Please commit or stash them first.",
+  },
+  {
+    name: "timed-out PR lookup",
+    command: "gh",
+    args: ["pr", "view", "123", "--json", "baseRefName,title,headRefName"],
+    result: { stdout: "", code: 0, killed: true },
+    message: "gh pr view timed out while fetching PR #123.",
+  },
+  {
+    name: "failed PR lookup",
+    command: "gh",
+    args: ["pr", "view", "123", "--json", "baseRefName,title,headRefName"],
+    result: { stdout: "", code: 1 },
+    message: "Could not find PR #123. Make sure gh is authenticated and the PR exists.",
+  },
+  {
+    name: "timed-out PR checkout",
+    command: "gh",
+    args: ["pr", "checkout", "123"],
+    result: { stdout: "", code: 0, killed: true },
+    message: "gh pr checkout timed out; check the working tree before retrying.",
+  },
+  {
+    name: "failed PR checkout",
+    command: "gh",
+    args: ["pr", "checkout", "123"],
+    result: { stdout: "", stderr: "checkout failed", code: 1 },
+    message: "Failed to checkout PR: checkout failed",
+  },
+]) {
+  test(`review blocks PR review after ${name}`, { concurrency: false }, async () => {
+    reviewTestApi.resetReviewRuntimeState();
+    const cleanGitExec = createCleanGitExec();
+    const harness = createReviewHarness({
+      execImpl: async (actualCommand, actualArgs) => {
+        if (actualCommand === command && actualArgs[0] === args[0] && actualArgs[1] === args[1]) {
+          assert.deepEqual(actualArgs, args);
+          return { stderr: "", ...result };
+        }
+        if (actualCommand === "gh") {
+          assert.deepEqual(actualArgs, [
+            "pr",
+            "view",
+            "123",
+            "--json",
+            "baseRefName,title,headRefName",
+          ]);
+          return {
+            stdout: JSON.stringify({
+              baseRefName: "main",
+              title: "Example PR",
+              headRefName: "feature",
+            }),
+            stderr: "",
+            code: 0,
+          };
+        }
+        return cleanGitExec(actualCommand, actualArgs);
+      },
+    });
+    const context = createReviewCommandContext({ customResponses: [null] });
+
+    await harness.reviewHandler("pr 123", context.ctx);
+
+    assert.deepEqual(
+      context.notifications.filter((notice) => notice.level === "error"),
+      [{ message, level: "error" }],
+    );
+    assert.ok(
+      harness.execCalls.some(
+        ([callCommand, callArgs]) =>
+          callCommand === command && JSON.stringify(callArgs) === JSON.stringify(args),
+      ),
+    );
+    if (!args.includes("checkout")) {
+      assert.ok(harness.execCalls.every(([, callArgs]) => !callArgs.includes("checkout")));
+    }
+    assert.deepEqual(harness.sentUserMessages, []);
+  });
+}
+
 test(
   "review command rejects invalid PR args without gh or checkout and cancels cleanly",
   { concurrency: false },
