@@ -57,7 +57,10 @@ async function runGitAllowFailure(
   args: string[],
 ): Promise<string> {
   const result = await pi.exec("git", args, { cwd: repoRoot, timeout: GIT_COMMAND_TIMEOUT_MS });
-  if (result.killed || result.code !== 0) {
+  if (result.killed) {
+    throw new Error(`git ${args.join(" ")} timed out after ${GIT_COMMAND_TIMEOUT_MS / 1000}s`);
+  }
+  if (result.code !== 0) {
     return "";
   }
   return result.stdout;
@@ -72,7 +75,12 @@ async function runBashAllowFailure(
     cwd: repoRoot,
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
-  if (result.killed || result.code !== 0) {
+  if (result.killed) {
+    throw new Error(
+      `bash (git working-tree snapshot) timed out after ${GIT_COMMAND_TIMEOUT_MS / 1000}s`,
+    );
+  }
+  if (result.code !== 0) {
     return "";
   }
   return result.stdout;
@@ -83,7 +91,12 @@ async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
     cwd,
     timeout: GIT_COMMAND_TIMEOUT_MS,
   });
-  if (result.killed || result.code !== 0) {
+  if (result.killed) {
+    throw new Error(
+      `git rev-parse --show-toplevel timed out after ${GIT_COMMAND_TIMEOUT_MS / 1000}s`,
+    );
+  }
+  if (result.code !== 0) {
     throw new Error("Not inside a git repository.");
   }
   return result.stdout.trim();
@@ -554,6 +567,7 @@ async function getWorkingTreeSnapshotChanges(
     "set -euo pipefail",
     'tmp_index=$(mktemp "/tmp/tlh-annotate-git-diff-index.XXXXXX")',
     "trap 'rm -f \"$tmp_index\"' EXIT",
+    "trap 'rm -f \"$tmp_index\"; exit 1' TERM INT HUP",
     'export GIT_INDEX_FILE="$tmp_index"',
   ];
   if (baseRevision != null) {

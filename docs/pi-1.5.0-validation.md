@@ -24,7 +24,7 @@ The preference catalogs and `docs/oracle-provider-matrix.md` were refreshed:
 
 - stale Radius and Mistral entries were removed;
 - GPT-6.1 Terra and Kimi K3.1 Pro rankings were added;
-- GPT-6.1 Terra was not added to fast mode (Codex fast still covers GPT-5.6 Terra);
+- GPT-6.1 Terra was not added to fast mode during the 1.5.0 validation; it was added later;
 - the librarian kimi-coding selection changed from `k3-256k` to `kimi-for-coding` because K3-256K pricing became 3/15. This change was reviewed and accepted.
 
 Catalog assertions cover selection behavior; they do not claim that a selected model was contacted through a live provider.
