@@ -47,6 +47,7 @@ There is no runtime setting or toggle for submit behavior. To restore the prior 
 
 - `annotate-git-diff requires interactive mode.` → run it from the pi TUI.
 - `Review failed: Not inside a git repository.` → change into a git repo and rerun `/annotate-git-diff`.
+- `Review failed: ... timed out after 30s` → a Git command exceeded the time limit; check repository performance and rerun.
 - `No reviewable files found.` → make or fetch reviewable changes, then rerun.
 - `Review failed: Glimpse host not found ...` → the native window runtime is unavailable; reinstall/update the package and rerun from a machine/session that can open native windows.
 - `Review failed: Unable to locate packaged ... runtime` → reinstall/update the package so its declared Monaco and Tailwind dependencies are present, then rerun.
