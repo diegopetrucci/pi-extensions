@@ -1637,7 +1637,7 @@ export function computeFileReadRange(args: Record<string, unknown> | undefined):
 }
 
 /**
- * Implements README rules 1-2: does `later` fully cover `earlier`?
+ * Implements README rule 1: does `later` fully cover `earlier`?
  * An undefined end means EOF; a bounded range cannot prove coverage to EOF.
  */
 export function readRangeCovers(later: FileReadRange, earlier: FileReadRange): boolean {
