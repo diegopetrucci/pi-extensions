@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-developer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A standalone pi extension that adds a developer subagent tool that implements one task in an isolated child agent.",
   "keywords": [
     "pi-package",

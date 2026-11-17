@@ -228,5 +228,7 @@ test("package metadata registers web-scout in the collection", async () => {
   assert.ok(root.pi.extensions.includes("./extensions/web-scout/index.ts"));
   const pkg = JSON.parse(await readFile("extensions/web-scout/package.json", "utf8"));
   assert.equal(pkg.name, "@diegopetrucci/pi-web-scout");
-  assert.equal(pkg.version, "0.1.0");
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+  const changelog = await readFile("extensions/web-scout/CHANGELOG.md", "utf8");
+  assert.equal(changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1], pkg.version);
 });

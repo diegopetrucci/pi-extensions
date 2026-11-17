@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-test-runner",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A standalone pi extension that adds a test_runner subagent tool that runs exact validation steps in an isolated child agent.",
   "keywords": [
     "pi-package",

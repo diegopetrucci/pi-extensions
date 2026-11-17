@@ -1,6 +1,6 @@
 {
   "name": "@diegopetrucci/pi-diff-summarizer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A standalone pi extension that adds a read-only diff_summarizer subagent tool that summarizes a diff and highlights review risk in an isolated child agent.",
   "keywords": [
     "pi-package",
