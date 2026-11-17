@@ -693,6 +693,38 @@ test(
   },
 );
 
+for (const [name, busy] of [
+  ["streaming", { isIdle: () => false, hasPendingMessages: () => false }],
+  ["pending messages", { isIdle: () => true, hasPendingMessages: () => true }],
+]) {
+  test(
+    `review refuses to start while the agent is busy (${name})`,
+    { concurrency: false },
+    async () => {
+      reviewTestApi.resetReviewRuntimeState();
+      const harness = createReviewHarness({
+        execImpl: async () => {
+          throw new Error("exec should not be called while busy");
+        },
+      });
+      const context = createReviewCommandContext();
+      Object.assign(context.ctx, busy);
+
+      await harness.reviewHandler("uncommitted", context.ctx);
+
+      assert.deepEqual(context.notifications, [
+        {
+          message: "Wait for the current response to finish before starting a review.",
+          level: "warning",
+        },
+      ]);
+      assert.equal(harness.execCalls.length, 0);
+      assert.equal(context.navigateCalls.length, 0);
+      assert.deepEqual(harness.sentUserMessages, []);
+    },
+  );
+}
+
 test("review reports a timed-out repository check", { concurrency: false }, async () => {
   reviewTestApi.resetReviewRuntimeState();
   const harness = createReviewHarness({
@@ -1342,3 +1374,176 @@ test("summary navigation loader is not marked blocked", { concurrency: false }, 
   assert.equal(context.customCalls.length, 1);
   assert.equal(context.customCalls[0].options?.blocked, undefined);
 });
+
+const BLOCKING_REVIEW_TEXT = "## Findings\n- [P1] a.ts:1 Bug\n\nVerdict: needs attention";
+const CLEAN_REVIEW_TEXT = "## Findings\n- (none)\n\nVerdict: correct";
+
+// Simulates Pi's async prompt preflight: after sendUserMessage the session reports idle
+// (and no pending messages) while navigateTree throws, until the scripted reply lands.
+function createLoopSession({ initialBranch, replies, mode = "tui", lateSuccess = false }) {
+  const entries = new Map();
+  let leafId;
+  let counter = 0;
+  let preflight = false;
+  let streaming = false;
+  const sent = [];
+  const navigations = [];
+  const addEntry = (entry) => {
+    const id = entry.id ?? `e${++counter}`;
+    entries.set(id, { ...entry, id, parentId: leafId });
+    leafId = id;
+    return id;
+  };
+  for (const entry of initialBranch) addEntry(entry);
+
+  const context = createReviewCommandContext({ mode });
+  const getBranch = () => {
+    const branch = [];
+    for (let id = leafId; id; id = entries.get(id).parentId) branch.unshift(entries.get(id));
+    return branch;
+  };
+  context.ctx.sessionManager = {
+    getEntries: () => [...entries.values()],
+    getBranch,
+    getLeafId: () => leafId,
+  };
+  context.ctx.isIdle = () => !streaming;
+  context.ctx.hasPendingMessages = () => false;
+  context.ctx.waitForIdle = async () => {
+    while (streaming) await new Promise((resolve) => setTimeout(resolve, 10));
+  };
+  let reviewOrigin;
+  context.ctx.ui.custom = async () => {
+    if (lateSuccess) return { status: "late-success" };
+    try {
+      await context.ctx.navigateTree(reviewOrigin);
+      return { status: "success" };
+    } catch (error) {
+      return { status: "error", error: error.message };
+    }
+  };
+  context.ctx.navigateTree = async (id) => {
+    navigations.push(id);
+    if (streaming || preflight) {
+      throw new Error(
+        "Wait for the current response to finish before navigating the session tree.",
+      );
+    }
+    leafId = id;
+    return { cancelled: false };
+  };
+
+  const attach = (harness) => {
+    harness.pi.appendEntry = (customType, data) => {
+      if (data?.originId) reviewOrigin = data.originId;
+      addEntry({ type: "custom", customType, data });
+    };
+    harness.pi.sendUserMessage = (message) => {
+      sent.push(message);
+      const reply = replies.shift();
+      if (!reply) return;
+      preflight = true;
+      setTimeout(() => {
+        preflight = false;
+        streaming = true;
+        setTimeout(() => {
+          addEntry({
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: reply.text }],
+              ...reply,
+            },
+          });
+          streaming = false;
+        }, 80);
+      }, 150);
+    };
+  };
+
+  return { ...context, attach, sent, navigations };
+}
+
+async function runLoopScenario(options) {
+  reviewTestApi.resetReviewRuntimeState();
+  const settings = createReviewStateContext({
+    entries: [
+      {
+        type: "custom",
+        customType: "review-settings",
+        data: { loopFixingEnabled: true },
+      },
+    ],
+  });
+  reviewTestApi.applyReviewSettings(settings.ctx);
+  const harness = createReviewHarness({
+    execImpl: createCleanGitExec({ status: " M a.ts\n" }),
+  });
+  const session = createLoopSession(options);
+  session.attach(harness);
+  await harness.reviewHandler("uncommitted", session.ctx);
+  return session;
+}
+
+const ORIGIN_BRANCH = [
+  { id: "u1", type: "message", message: { role: "user", content: "hi" } },
+  {
+    id: "a-origin",
+    type: "message",
+    message: { role: "assistant", content: [], text: "old" },
+  },
+];
+
+for (const [name, initialBranch] of [
+  ["a pending prompt preflight", ORIGIN_BRANCH],
+  ["an origin branch with no assistant message", []],
+]) {
+  test(`loop fixing waits for the real fix turn with ${name}`, { concurrency: false }, async () => {
+    const session = await runLoopScenario({
+      initialBranch,
+      replies: [{ text: BLOCKING_REVIEW_TEXT }, { text: "fixed" }, { text: CLEAN_REVIEW_TEXT }],
+    });
+
+    assert.equal(session.sent.length, 3); // review, fix, review
+    assert.match(session.sent[1], /fix/i);
+    assert.ok(session.notifications.some((n) => n.message.startsWith("Loop fixing complete")));
+    assert.ok(session.notifications.every((n) => n.level !== "error"));
+  });
+}
+
+test(
+  "loop fixing stops with a warning when end-review cancellation arrives too late",
+  { concurrency: false },
+  async () => {
+    const session = await runLoopScenario({
+      initialBranch: ORIGIN_BRANCH,
+      lateSuccess: true,
+      replies: [{ text: BLOCKING_REVIEW_TEXT }],
+    });
+
+    assert.equal(session.sent.length, 1);
+    assert.deepEqual(session.notifications.at(-1), {
+      message: "Loop fixing stopped: no fix prompt was submitted.",
+      level: "warning",
+    });
+  },
+);
+
+for (const [stopReason, level, message] of [
+  ["aborted", "warning", "Loop fixing stopped: fix pass was aborted."],
+  ["error", "error", "Loop fixing stopped: fix pass failed with an error."],
+]) {
+  test(
+    `loop fixing stops when the fix pass ends with ${stopReason}`,
+    { concurrency: false },
+    async () => {
+      const session = await runLoopScenario({
+        initialBranch: ORIGIN_BRANCH,
+        replies: [{ text: BLOCKING_REVIEW_TEXT }, { text: "partial", stopReason }],
+      });
+
+      assert.equal(session.sent.length, 2);
+      assert.deepEqual(session.notifications.at(-1), { message, level });
+    },
+  );
+}

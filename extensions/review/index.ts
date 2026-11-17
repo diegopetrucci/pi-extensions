@@ -1546,7 +1546,11 @@ export default function reviewExtension(pi: ExtensionAPI) {
     ctx: ExtensionCommandContext,
     target: ReviewTarget,
     useFreshSession: boolean,
-    options?: { includeLocalChanges?: boolean; extraInstruction?: string },
+    options?: {
+      includeLocalChanges?: boolean;
+      extraInstruction?: string;
+      onBeforeSend?: () => void;
+    },
   ): Promise<boolean> {
     if (reviewOriginId) {
       ctx.ui.notify("Already in a review. Use /end-review to finish first.", "warning");
@@ -1625,6 +1629,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
     const modeHint = useFreshSession ? " (fresh session)" : "";
     ctx.ui.notify(`Starting review: ${hint}${modeHint}`, "info");
 
+    options?.onBeforeSend?.();
     pi.sendUserMessage(fullPrompt);
     return true;
   }
@@ -1648,10 +1653,13 @@ export default function reviewExtension(pi: ExtensionAPI) {
       );
 
       for (let pass = 1; pass <= REVIEW_LOOP_MAX_ITERATIONS; pass++) {
-        const reviewBaselineAssistantId = getLastAssistantSnapshot(ctx)?.id;
+        let reviewBaselineAssistantId: string | undefined;
         const started = await executeReview(ctx, target, true, {
           includeLocalChanges: true,
           extraInstruction,
+          onBeforeSend: () => {
+            reviewBaselineAssistantId = getLastAssistantSnapshot(ctx)?.id;
+          },
         });
         if (!started) {
           ctx.ui.notify("Loop fixing stopped before starting the review pass.", "warning");
@@ -1695,6 +1703,10 @@ export default function reviewExtension(pi: ExtensionAPI) {
             showSummaryLoader: true,
             notifySuccess: false,
           });
+          if (finalized === "late-success") {
+            ctx.ui.notify("Loop fixing stopped: review result was not finalized.", "warning");
+            return;
+          }
           if (finalized !== "ok") {
             return;
           }
@@ -1708,11 +1720,18 @@ export default function reviewExtension(pi: ExtensionAPI) {
           "info",
         );
 
-        const fixBaselineAssistantId = getLastAssistantSnapshot(ctx)?.id;
+        let fixBaselineAssistantId: string | undefined;
         const sentFixPrompt = await executeEndReviewAction(ctx, "returnAndFix", {
           showSummaryLoader: true,
           notifySuccess: false,
+          onBeforeSend: () => {
+            fixBaselineAssistantId = getLastAssistantSnapshot(ctx)?.id;
+          },
         });
+        if (sentFixPrompt === "late-success") {
+          ctx.ui.notify("Loop fixing stopped: no fix prompt was submitted.", "warning");
+          return;
+        }
         if (sentFixPrompt !== "ok") {
           return;
         }
@@ -1772,6 +1791,14 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
       if (reviewOriginId) {
         ctx.ui.notify("Already in a review. Use /end-review to finish first.", "warning");
+        return;
+      }
+
+      if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+        ctx.ui.notify(
+          "Wait for the current response to finish before starting a review.",
+          "warning",
+        );
         return;
       }
 
@@ -1876,10 +1903,11 @@ Instructions:
 9. End with: fixed items, deferred/skipped items (with reasons), and verification results.`;
 
   type EndReviewAction = "returnOnly" | "returnAndFix" | "returnAndSummarize";
-  type EndReviewActionResult = "ok" | "cancelled" | "error";
+  type EndReviewActionResult = "ok" | "cancelled" | "late-success" | "error";
   type EndReviewActionOptions = {
     showSummaryLoader?: boolean;
     notifySuccess?: boolean;
+    onBeforeSend?: () => void;
   };
 
   function getActiveReviewOrigin(ctx: ExtensionContext): string | undefined {
@@ -2037,7 +2065,7 @@ Instructions:
         "Cancellation arrived too late; review already completed, and no follow-up was queued.",
         "warning",
       );
-      return "ok";
+      return "late-success";
     }
 
     if (action === "returnAndSummarize") {
@@ -2050,6 +2078,7 @@ Instructions:
       return "ok";
     }
 
+    options.onBeforeSend?.();
     pi.sendUserMessage(REVIEW_FIX_FINDINGS_PROMPT, { deliverAs: "followUp" });
     if (notifySuccess) {
       ctx.ui.notify("Review complete! Returned and queued a follow-up to fix findings.", "info");
