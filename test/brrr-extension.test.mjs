@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -56,6 +56,15 @@ function setEnvVar(t, name, value) {
     }
     process.env[name] = original;
   });
+}
+
+function stubIdleDetection(t) {
+  const binDir = mkdtempSync(path.join(os.tmpdir(), "brrr-ioreg-"));
+  t.after(() => rmSync(binDir, { recursive: true, force: true }));
+  const ioregPath = path.join(binDir, "ioreg");
+  writeFileSync(ioregPath, "#!/bin/sh\necho '\"HIDIdleTime\" = 3600000000000'\n");
+  chmodSync(ioregPath, 0o755);
+  setEnvVar(t, "PATH", `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
 }
 
 function writeBrrrConfig(filePath, config) {
@@ -534,6 +543,7 @@ for (const [field, value] of Object.entries({
   imageUrl: 42,
 })) {
   test(`brrr warns and uses the default for a wrong-typed ${field}`, async (t) => {
+    stubIdleDetection(t);
     const { agentDir, projectDir } = setupTempDirs(t);
     setAgentDirEnv(t, agentDir);
     setEnvVar(t, "BRRR_WEBHOOK_URL", "https://api.brrr.now/v1/br_defaults");
