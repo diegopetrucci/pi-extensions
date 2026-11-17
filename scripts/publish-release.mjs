@@ -12,6 +12,7 @@ export { gzipPayloadEqual } from "./gzip-payload.mjs";
 
 const execFileAsync = promisify(execFile);
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org";
+const REGISTRY_READ_TIMEOUT_MS = 60_000;
 const TRUSTED_REPOSITORY = "diegopetrucci/pi-extensions";
 const TRUSTED_WORKFLOW = "publish.yml";
 const TRUSTED_ENVIRONMENT = "npm-release";
@@ -29,6 +30,7 @@ async function defaultRun(file, args, options = {}) {
   try {
     const result = await execFileAsync(file, args, {
       cwd: options.cwd,
+      timeout: options.timeout,
       input: options.input,
       encoding: "utf8",
       env: options.replaceEnv ? options.env : { ...process.env, ...options.env },
@@ -39,7 +41,12 @@ async function defaultRun(file, args, options = {}) {
     return {
       code: error.code ?? 1,
       stdout: error.stdout ?? "",
-      stderr: error.stderr ?? String(error),
+      killed: error.killed,
+      signal: error.signal,
+      stderr:
+        error.killed && options.timeout
+          ? `Command timed out after ${options.timeout} ms (${error.signal}): ${error.stderr ?? ""}`
+          : (error.stderr ?? String(error)),
     };
   }
 }
@@ -294,9 +301,9 @@ async function checkPublishedVersion(pkg, version, expectedPack, run, root) {
   const result = await run(
     "npm",
     ["view", spec, "dist", "--json", `--registry=${PUBLIC_REGISTRY}`],
-    { cwd: root },
+    { cwd: root, timeout: REGISTRY_READ_TIMEOUT_MS },
   );
-  if (isExactNotFound(result)) return false;
+  if (!result.killed && !result.signal && isExactNotFound(result)) return false;
   if (result.code !== 0)
     throw new Error(
       `registry dist check for ${spec} failed (${result.code}): ${result.stderr.trim() || result.stdout.trim()}`,
@@ -426,7 +433,7 @@ async function checkLatestTag(pkg, version, run, root) {
     run,
     "npm",
     ["view", pkg.name, "dist-tags.latest", "--json", `--registry=${PUBLIC_REGISTRY}`],
-    { cwd: root },
+    { cwd: root, timeout: REGISTRY_READ_TIMEOUT_MS },
     `latest dist-tag check for ${pkg.name}`,
   );
   let latest;
