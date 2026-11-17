@@ -7,7 +7,7 @@ Draft for publication only after successful release verification:
 pi-extensions v0.1.87 adds Pi 1.5.2 development compatibility and ships a changelog with every extension package except illustrations-to-explain-things, claude-fast and openai-fast, so Pi shows per-package update notes:
 - `oracle`, `contrarian`, and `code-reviewer` get refreshed model catalogs, and `oracle` gets thinking fixes
 - `review` and `annotate-git-diff` time out git/gh commands and fail closed instead of hanging
-- `project-mcp-json` warns about and skips servers with an invalid timeout or description
+- `project-mcp-json` skips servers with an invalid timeout or description, with a warning in interactive sessions
 
 `pi install npm:@diegopetrucci/pi-extensions`
 

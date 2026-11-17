@@ -6,6 +6,6 @@ Notable user-facing changes to this package are listed here, newest first.
 
 - Every extension package (except illustrations-to-explain-things, claude-fast and openai-fast) now ships a CHANGELOG.md, so Pi 1.5.0+ shows notes after an update.
 - annotate-git-diff and review: git/gh commands time out (clipboard commands too, in annotate-git-diff); timeouts fail the review instead of hanging. review also no longer stops loop fixing after the first pass on Pi 1.5.x.
-- project-mcp-json: servers with an invalid timeout or description are warned about and skipped.
+- project-mcp-json: servers with an invalid timeout or description are now skipped, with a warning in interactive sessions.
 - oracle, contrarian, code-reviewer: model preference catalogs refreshed for Pi 1.5.2; oracle also keeps Sol pro/fast on xhigh and batch Sol aliases on high thinking.
 - dynamic-context-pruning: code comment correction only.
