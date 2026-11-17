@@ -136,6 +136,7 @@ function mockRunner({
   const artifacts = new Map();
   const remainingPostPublishMisses = new Map();
   return async (file, args, options = {}) => {
+    assert.equal(options.timeout, file === "npm" && args[0] === "view" ? 60_000 : undefined);
     calls.push({
       file,
       args: [...args],
@@ -478,6 +479,50 @@ test("GitHub OIDC live mode gives post-publish propagation a bounded 25-minute w
   );
   assert.equal(timeoutSleeps.length, 300);
   assert.ok(timeoutSleeps.every((milliseconds) => milliseconds === 5_000));
+});
+
+test("killed registry views fail immediately even with partial not-found output", async (t) => {
+  for (const stage of ["before publish", "after publish", "latest tag"]) {
+    await t.test(stage, async (t) => {
+      const { root, snapshot } = await fixture(t);
+      const sleeps = [];
+      let published = false;
+      const run = mockRunner({ root, snapshot });
+      await assert.rejects(
+        publishRelease({
+          cwd: root,
+          version: "v1.2.3",
+          githubActions: true,
+          env: githubEnv(),
+          run: async (file, args, options) => {
+            if (
+              file === "npm" &&
+              args[0] === "view" &&
+              (stage === "before publish" ||
+                (stage === "after publish" && published) ||
+                (stage === "latest tag" && args[2] === "dist-tags.latest"))
+            ) {
+              assert.equal(options.timeout, 60_000);
+              return {
+                code: 1,
+                killed: true,
+                signal: "SIGTERM",
+                stdout: "npm error code E404",
+                stderr: "Command timed out after 60000 ms (SIGTERM)",
+              };
+            }
+            const result = await run(file, args, options);
+            if (file === "npm" && args[0] === "publish") published = true;
+            return result;
+          },
+          sleep: async (milliseconds) => sleeps.push(milliseconds),
+          createTagSnapshot: async () => cloneSnapshot(snapshot),
+        }),
+        /(?:registry dist check|latest dist-tag check).*timed out/,
+      );
+      assert.deepEqual(sleeps, []);
+    });
+  }
 });
 
 test("stdout-only exact not-found still plans a publish", async (t) => {
