@@ -68,7 +68,9 @@ async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } =
   for (let attempt = 0; ; attempt++) {
     let response;
     try {
-      response = await fetchImpl(url);
+      response = await fetchImpl(url, { signal: AbortSignal.timeout(30_000) });
+      if (response.status === 404) return null;
+      if (response.ok) return await response.json();
     } catch (error) {
       if (attempt < retries) {
         await wait(delayMs * 2 ** attempt);
@@ -76,8 +78,6 @@ async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } =
       }
       throw error;
     }
-    if (response.status === 404) return null;
-    if (response.ok) return response.json();
     if (isRetryable(response.status) && attempt < retries) {
       await wait(delayMs * 2 ** attempt);
       continue;
@@ -89,10 +89,7 @@ async function fetchJson(url, fetchImpl, { retries = 3, delayMs = 500, sleep } =
 export async function getPackageDownloads(name, { fetch: fetchImpl = fetch, today, ...opts } = {}) {
   const encoded = encodePackageName(name);
   const meta = await fetchJson(`https://registry.npmjs.org/${encoded}`, fetchImpl, opts);
-  if (!meta) {
-    console.warn(`warning: ${name} not found on npm registry; counting 0`);
-    return 0;
-  }
+  if (!meta) throw new Error(`${name} not found on npm registry`);
   const created = meta.time?.created;
   if (!created || Number.isNaN(Date.parse(created))) {
     throw new Error(`Missing time.created for ${name}`);
@@ -108,6 +105,9 @@ export async function getPackageDownloads(name, { fetch: fetchImpl = fetch, toda
     );
     if (!data) throw new Error(`Downloads API returned 404 for ${name}`);
     if (!Number.isFinite(data.downloads)) throw new Error(`Invalid downloads for ${name}`);
+    if (data.start !== window.start || data.end !== window.end) {
+      throw new Error(`Downloads API returned an unexpected date range for ${name}`);
+    }
     sum += data.downloads;
   }
   return sum;
