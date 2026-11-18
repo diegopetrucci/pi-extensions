@@ -297,14 +297,17 @@ function mockRunner({
 test("dry-run verifies evidence against the tag without npm auth and never executes npm publish", async (t) => {
   const { root, snapshot } = await fixture(t);
   const calls = [];
+  const logs = [];
   const result = await publishRelease({
     cwd: root,
     version: "v1.2.3",
     dryRun: true,
+    log: (line) => logs.push(line),
     run: mockRunner({ root, snapshot, publishedSpecs: new Set(["plain-addon@1.2.3"]), calls }),
     createTagSnapshot: async () => cloneSnapshot(snapshot),
   });
 
+  assert.deepEqual(logs, []);
   assert.equal(result.mode, "dry-run");
   assert.equal(result.authMode, "none");
   assert.equal(result.tagCommit, "deadbeef");
@@ -416,11 +419,25 @@ test("GitHub OIDC live mode skips exact published versions, publishes verified t
     version: "v1.2.3",
     githubActions: true,
     env: githubEnv(),
+    log: (line) => calls.push({ log: line }),
     run: mockRunner({ root, snapshot, publishedSpecs: new Set(["plain-addon@1.2.3"]), calls }),
     sleep: async () => {},
     createTagSnapshot: async () => cloneSnapshot(snapshot),
   });
 
+  const timeline = calls
+    .filter((c) => c.log || (c.file === "npm" && c.args[0] === "publish"))
+    .map((c) => c.log ?? "npm publish");
+  assert.deepEqual(timeline, [
+    "publish-release: publishing @example/feature@1.2.3 (1/2)",
+    "npm publish",
+    "publish-release: npm accepted @example/feature@1.2.3; waiting for registry visibility",
+    "publish-release: published @example/feature@1.2.3",
+    "publish-release: publishing @example/umbrella@1.2.3 (2/2)",
+    "npm publish",
+    "publish-release: npm accepted @example/umbrella@1.2.3; waiting for registry visibility",
+    "publish-release: published @example/umbrella@1.2.3",
+  ]);
   assert.equal(result.authMode, "github-oidc");
   assert.deepEqual(result.published, ["@example/feature@1.2.3", "@example/umbrella@1.2.3"]);
   const publishCalls = calls.filter(({ file, args }) => file === "npm" && args[0] === "publish");
