@@ -595,25 +595,38 @@ async function getMergeBase(pi: ExtensionAPI, branch: string): Promise<string | 
   }
 }
 
-async function getLocalBranches(pi: ExtensionAPI): Promise<string[]> {
+type GitListFailure = "timedOut" | "failed";
+
+async function listLocalBranches(pi: ExtensionAPI): Promise<string[] | GitListFailure> {
   const { stdout, code, killed } = await pi.exec("git", ["branch", "--format=%(refname:short)"], {
     timeout: GIT_GH_COMMAND_TIMEOUT_MS,
   });
-  if (killed || code !== 0) return [];
+  if (killed) return "timedOut";
+  if (code !== 0) return "failed";
   return stdout
     .trim()
     .split("\n")
     .filter((b) => b.trim());
 }
 
+async function getLocalBranches(pi: ExtensionAPI): Promise<string[]> {
+  const branches = await listLocalBranches(pi);
+  return typeof branches === "string" ? [] : branches;
+}
+
 async function getRecentCommits(
   pi: ExtensionAPI,
   limit: number = 10,
-): Promise<Array<{ sha: string; title: string }>> {
-  const { stdout, code, killed } = await pi.exec("git", ["log", `--oneline`, `-n`, `${limit}`], {
-    timeout: GIT_GH_COMMAND_TIMEOUT_MS,
-  });
-  if (killed || code !== 0) return [];
+): Promise<Array<{ sha: string; title: string }> | GitListFailure> {
+  const { stdout, stderr, code, killed } = await pi.exec(
+    "git",
+    ["log", `--oneline`, `-n`, `${limit}`],
+    { timeout: GIT_GH_COMMAND_TIMEOUT_MS },
+  );
+  if (killed) return "timedOut";
+  // A repository with no commits yet exits non-zero; that is an empty list, not a failure.
+  if (code !== 0 && /does not have any commits yet/i.test(stderr ?? "")) return [];
+  if (code !== 0) return "failed";
 
   return stdout
     .trim()
@@ -625,11 +638,15 @@ async function getRecentCommits(
     });
 }
 
-async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
+async function hasUncommittedChanges(
+  pi: ExtensionAPI,
+): Promise<"dirty" | "clean" | "timedOut" | "failed"> {
   const { stdout, code, killed } = await pi.exec("git", ["status", "--porcelain"], {
     timeout: GIT_GH_COMMAND_TIMEOUT_MS,
   });
-  return !killed && code === 0 && stdout.trim().length > 0;
+  if (killed) return "timedOut";
+  if (code !== 0) return "failed";
+  return stdout.trim().length > 0 ? "dirty" : "clean";
 }
 
 // Tracked staged/unstaged changes block branch switches. Untracked files (??) do not.
@@ -1192,8 +1209,18 @@ export default function reviewExtension(pi: ExtensionAPI) {
     applyAllReviewState(ctx);
   });
 
-  async function getSmartDefault(): Promise<"uncommitted" | "baseBranch" | "commit"> {
-    if (await hasUncommittedChanges(pi)) {
+  async function getSmartDefault(
+    ctx: ExtensionContext,
+  ): Promise<"uncommitted" | "baseBranch" | "commit"> {
+    const status = await hasUncommittedChanges(pi);
+    if (status === "timedOut" || status === "failed") {
+      ctx.ui.notify(
+        `Could not check for uncommitted changes (git status ${status === "timedOut" ? "timed out" : "failed"}); defaulting to uncommitted review.`,
+        "warning",
+      );
+      return "uncommitted";
+    }
+    if (status === "dirty") {
       return "uncommitted";
     }
 
@@ -1208,7 +1235,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
   async function showReviewSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
     // Determine smart default (but keep the list order stable)
-    const smartDefault = await getSmartDefault();
+    const smartDefault = await getSmartDefault(ctx);
     const presetItems: SelectItem[] = REVIEW_PRESETS.map((preset) => ({
       value: preset.value,
       label: preset.label,
@@ -1453,7 +1480,11 @@ export default function reviewExtension(pi: ExtensionAPI) {
   }
 
   async function showBranchSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
-    const branches = await getLocalBranches(pi);
+    const branches = await listLocalBranches(pi);
+    if (typeof branches === "string") {
+      ctx.ui.notify(`git branch ${branches === "timedOut" ? "timed out" : "failed"}`, "error");
+      return null;
+    }
     const currentBranch = await getCurrentBranch(pi);
     const defaultBranch = await getDefaultBranch(pi);
 
@@ -1497,6 +1528,10 @@ export default function reviewExtension(pi: ExtensionAPI) {
 
   async function showCommitSelector(ctx: ExtensionContext): Promise<ReviewTarget | null> {
     const commits = await getRecentCommits(pi, 20);
+    if (typeof commits === "string") {
+      ctx.ui.notify(`git log ${commits === "timedOut" ? "timed out" : "failed"}`, "error");
+      return null;
+    }
 
     if (commits.length === 0) {
       ctx.ui.notify("No commits found", "error");

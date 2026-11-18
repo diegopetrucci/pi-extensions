@@ -1547,3 +1547,152 @@ for (const [stopReason, level, message] of [
     },
   );
 }
+
+function withGitOverride(base, matches, result) {
+  return async (command, args) => {
+    if (matches(args)) return result;
+    return base(command, args);
+  };
+}
+
+const isStatus = (args) => args[0] === "status" && args[1] === "--porcelain";
+const isBranchList = (args) => args[0] === "branch" && args[1] === "--format=%(refname:short)";
+const isLog = (args) => args[0] === "log";
+
+for (const [label, result, phrase] of [
+  ["timed out", { stdout: "", stderr: "", code: 0, killed: true }, "timed out"],
+  ["failed", { stdout: "", stderr: "boom", code: 128 }, "failed"],
+]) {
+  test(
+    `review selector warns and preselects uncommitted when git status ${label}`,
+    {
+      concurrency: false,
+    },
+    async () => {
+      reviewTestApi.resetReviewRuntimeState();
+      const components = [];
+      const capture = (renderer) => {
+        components.push(renderer({ requestRender() {} }, plainTheme, pageKeybindings, () => {}));
+        return null;
+      };
+      const harness = createReviewHarness({
+        execImpl: withGitOverride(createCleanGitExec(), isStatus, result),
+      });
+      const context = createReviewCommandContext({
+        customResponses: [capture],
+      });
+      await harness.reviewHandler("", context.ctx);
+
+      assert.deepEqual(context.notifications.slice(0, 1), [
+        {
+          message: `Could not check for uncommitted changes (git status ${phrase}); defaulting to uncommitted review.`,
+          level: "warning",
+        },
+      ]);
+      const lines = components[0].render(100);
+      assert.match(
+        lines.find((line) => line.includes("→")),
+        /ncommitted/,
+      );
+      assert.ok(
+        harness.execCalls.every(
+          ([, args]) =>
+            args[0] !== "symbolic-ref" && !(args[0] === "branch" && args[1] !== undefined),
+        ),
+      );
+    },
+  );
+
+  test(
+    `branch picker reports git branch ${label} instead of an empty list`,
+    {
+      concurrency: false,
+    },
+    async () => {
+      reviewTestApi.resetReviewRuntimeState();
+      const harness = createReviewHarness({
+        execImpl: withGitOverride(createCleanGitExec(), isBranchList, result),
+      });
+      const context = createReviewCommandContext({
+        customResponses: ["baseBranch", null],
+      });
+      await harness.reviewHandler("", context.ctx);
+
+      assert.ok(
+        context.notifications.some(
+          (n) => n.message === `git branch ${phrase}` && n.level === "error",
+        ),
+      );
+      assert.ok(!context.notifications.some((n) => /No (other )?branches found/.test(n.message)));
+      assert.equal(context.customCalls.length, 2);
+    },
+  );
+
+  test(
+    `commit picker reports git log ${label} instead of an empty list`,
+    {
+      concurrency: false,
+    },
+    async () => {
+      reviewTestApi.resetReviewRuntimeState();
+      const harness = createReviewHarness({
+        execImpl: withGitOverride(createCleanGitExec(), isLog, result),
+      });
+      const context = createReviewCommandContext({
+        customResponses: ["commit", null],
+      });
+      await harness.reviewHandler("", context.ctx);
+
+      assert.ok(
+        context.notifications.some((n) => n.message === `git log ${phrase}` && n.level === "error"),
+      );
+      assert.ok(!context.notifications.some((n) => n.message === "No commits found"));
+      assert.equal(context.customCalls.length, 2);
+    },
+  );
+}
+
+test(
+  "commit picker keeps the empty-list message for a repository with no commits yet",
+  {
+    concurrency: false,
+  },
+  async () => {
+    reviewTestApi.resetReviewRuntimeState();
+    const harness = createReviewHarness({
+      execImpl: withGitOverride(createCleanGitExec(), isLog, {
+        stdout: "",
+        stderr: "fatal: your current branch 'main' does not have any commits yet",
+        code: 128,
+      }),
+    });
+    const context = createReviewCommandContext({
+      customResponses: ["commit", null],
+    });
+    await harness.reviewHandler("", context.ctx);
+    assert.ok(context.notifications.some((n) => n.message === "No commits found"));
+    assert.ok(!context.notifications.some((n) => n.message === "git log failed"));
+  },
+);
+
+test(
+  "commit picker keeps the empty-list message for a successful empty git log",
+  {
+    concurrency: false,
+  },
+  async () => {
+    reviewTestApi.resetReviewRuntimeState();
+    const harness = createReviewHarness({
+      execImpl: withGitOverride(createCleanGitExec(), isLog, {
+        stdout: "",
+        stderr: "",
+        code: 0,
+      }),
+    });
+    const context = createReviewCommandContext({
+      customResponses: ["commit", null],
+    });
+    await harness.reviewHandler("", context.ctx);
+    assert.ok(context.notifications.some((n) => n.message === "No commits found"));
+  },
+);
