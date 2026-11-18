@@ -506,6 +506,7 @@ export async function publishRelease({
   createTagSnapshot = defaultCreateTagSnapshot,
   sleep = defaultSleep,
   env = process.env,
+  log = (line) => console.error(line),
 } = {}) {
   if (!RELEASE_VERSION_RE.test(version ?? ""))
     throw new Error("Expected a v-prefixed release version such as v0.1.60");
@@ -641,9 +642,11 @@ export async function publishRelease({
     const skipped = plan.filter((entry) => entry.action === "skip");
     const toPublish = plan.filter((entry) => entry.action === "publish");
     if (!dryRun && toPublish.length > 0) {
-      for (const entry of toPublish) {
+      for (const [index, entry] of toPublish.entries()) {
+        const label = `${entry.name}@${entry.version}`;
         const pkg = currentByName.get(entry.name);
         const artifact = currentPacks.get(entry.name);
+        log(`publish-release: publishing ${label} (${index + 1}/${toPublish.length})`);
         await checked(
           npmRun,
           "npm",
@@ -660,6 +663,7 @@ export async function publishRelease({
           { cwd: root },
           `publish ${entry.name}@${entry.version}`,
         );
+        log(`publish-release: npm accepted ${label}; waiting for registry visibility`);
         await verifyPublishedWithRetry(
           pkg,
           entry.version,
@@ -668,6 +672,7 @@ export async function publishRelease({
           root,
           sleep,
         );
+        log(`publish-release: published ${label}`);
       }
     }
 
