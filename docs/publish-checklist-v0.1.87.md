@@ -67,7 +67,7 @@ The Pi development baseline is 1.5.2 (`docs/pi-1.5.2-validation.md`); no fleet m
 - [x] approve the protected `npm-release` environment deployment only with an eligible authenticated GitHub identity; required reviewers and `main` branch restrictions remain enforced (the maintainer accepted self-approval of `npm-release` for v0.1.87)
 - [x] if GitHub rejects the identity's dispatch or approval, escalate to an eligible human; never bypass or disable protection
 - [x] let the workflow publish through npm OIDC only; never run local `npm publish` or use legacy npm token/OTP credentials
-- [x] after verified workflow publication success, wait five minutes before post-publish registry/package-page or npm-install verification
+- [x] after verified workflow publication success, wait five minutes before post-publish registry/package-page or npm-install verification (run 2 was cancelled by the job timeout after every package had published, so publication success was verified directly on the registry — all 31 versions, hashes, latest, provenance — before the five-minute wait)
 
 ## Publication record
 
@@ -82,10 +82,10 @@ The Pi development baseline is 1.5.2 (`docs/pi-1.5.2-validation.md`); no fleet m
   - The job was cancelled at 21:28:23 UTC by its 45-minute timeout during the final visibility check, after every package had published.
 - **Post-publication verification** (after a 5-minute wait):
   - All 31 `name@version` entries resolve with `dist.shasum` and `dist.integrity` equal to the reproduced tarballs, `latest` points to the target version, and provenance attestations are present.
-  - A clean `npm install` of `@diegopetrucci/pi-extensions@0.1.87`, `pi-web-scout@0.1.1`, and `pi-oracle@0.1.38` succeeded, and the packages include `CHANGELOG.md`.
+  - A clean `npm install` of `@diegopetrucci/pi-extensions@0.1.87`, `@diegopetrucci/pi-web-scout@0.1.1`, and `@diegopetrucci/pi-oracle@0.1.38` succeeded, and the packages include `CHANGELOG.md`.
   - The public release body matches apart from one trailing newline, and `v0.1.87` is the latest release.
 - **Follow-ups:**
-  - The publish job timeout is raised to 120 minutes in this same PR.
+  - The publish job timeout is raised to 180 minutes in this same PR.
   - [#239](https://github.com/diegopetrucci/pi-extensions/issues/239) tracks the review preset selector issue.
   - Pending maintainer action: set the five subagent packages' npm publishing access to "Require two-factor authentication and disallow tokens".
 

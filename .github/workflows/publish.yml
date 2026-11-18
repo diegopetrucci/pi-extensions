@@ -79,9 +79,10 @@ jobs:
     name: Publish ${{ inputs.release_tag }} through npm OIDC
     needs: verify
     runs-on: ubuntu-24.04
-    # Publishing is sequential with a per-package registry visibility wait (~1.5-4 min
-    # observed, up to 25 min per package), so the limit must cover all workspaces.
-    timeout-minutes: 120
+    # Publishing is sequential with a per-package registry visibility wait; v0.1.87
+    # observed ~2 min average and up to ~4.5 min per package (31 packages could need
+    # ~140 min), and the helper waits up to 25 min for a single package.
+    timeout-minutes: 180
     environment:
       name: npm-release
       url: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}
