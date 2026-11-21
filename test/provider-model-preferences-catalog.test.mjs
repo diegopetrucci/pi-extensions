@@ -39,9 +39,10 @@ test("Pi 0.87.1 Astra leads direct OpenAI and Codex preferences with Sol/Luna fa
   for (const role of ["oracle", "contrarian", "code-reviewer"]) {
     const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
     for (const provider of ["openai", "openai-codex"]) {
-      assert.equal(firstCatalogMatchId(provider, preferences[provider]), "gpt-6-astra");
-      assert.equal(preferences[provider][0], "gpt-6-astra ");
-      assert.equal(preferences[provider][1], "gpt-6-astra");
+      assert.equal(firstCatalogMatchId(provider, preferences[provider]), "gpt-6.2-astra");
+      assert.equal(preferences[provider][0], "gpt-6.2-astra ");
+      assert.equal(preferences[provider][1], "gpt-6-astra ");
+      assert.equal(preferences[provider][2], "gpt-6-astra");
       assert.ok(preferences[provider].includes("gpt-5.6-sol"));
     }
   }
@@ -51,7 +52,7 @@ test("Pi 0.87.1 Meta and Radius ladders prefer their current frontier models", (
   for (const role of ["oracle", "contrarian"]) {
     const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
     assert.equal(firstCatalogMatchId("meta", preferences.meta), "muse-spark-1.3");
-    assert.equal(firstCatalogMatchId("radius", preferences.radius), "gpt-6-astra");
+    assert.equal(firstCatalogMatchId("radius", preferences.radius), "gpt-6.2-astra");
     assert.ok(preferences.radius.includes("kimi-k3"));
     assert.equal(preferences.radius.includes("gpt-5.4-mini"), false);
   }
@@ -214,7 +215,7 @@ test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
       "workers-ai/@cf/zai-org/glm-5.3 ",
     ],
     "cloudflare-workers-ai": ["@cf/deepseek-ai/deepseek-v4-pro-0813", "@cf/zai-org/glm-5.3 "],
-    nvidia: ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k2.6"],
+    nvidia: ["nvidia/nemotron-3-ultra-550b-a55b"],
     openrouter: ["z-ai/glm-5.3 "],
     together: ["zai-org/GLM-5.3-Flash"],
     "vercel-ai-gateway": ["zai/glm-5.3 "],
@@ -305,7 +306,6 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "gpt-5.6-luna",
       "deepseek-v4-pro",
       "glm-5.3 ",
-      "glm-5.2",
       "qwen3.8-max ",
       "qwen3.7-plus",
       "mimo-v2.6-pro",
@@ -319,6 +319,7 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "grok-4.7",
     ],
     radius: [
+      "gpt-6.2-astra ",
       "gpt-6-astra ",
       "gpt-6-astra",
       "claude-opus-5-5 ",
@@ -1030,6 +1031,8 @@ test("unified direct API and Codex Fast mode allow the confirmed GPT models", ()
     "gpt-6-sol",
     "gpt-6.1-sol",
     "gpt-6.1-terra",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
   ];
   const directOpenAIAllowlist = extractConst(
     "extensions/fast/index.ts",
