@@ -30,6 +30,8 @@ const OPENAI_SUPPORTED_MODELS = new Set([
   "gpt-6-astra",
   "gpt-6.1-sol",
   "gpt-6.1-terra",
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
   "gpt-6-sol",
   "gpt-6-luna",
 ]);
@@ -39,12 +41,19 @@ const OPENAI_API_FAST_SERVICE_TIER = "fast";
 const OPENAI_API_SUPPORTED_MODELS = new Set([
   "gpt-6.1-sol",
   "gpt-6.1-terra",
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
   "gpt-5.6-sol",
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
 ]);
-const OPENAI_ULTRAFAST_MODELS = new Set(["gpt-6-astra", "gpt-6.1-sol"]);
+const OPENAI_ULTRAFAST_MODELS = new Set([
+  "gpt-6-astra",
+  "gpt-6.1-sol",
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
+]);
 const OPENAI_ULTRAFAST_API_ID = "openai-responses";
 const OPENAI_ULTRAFAST_SERVICE_TIER = "ultrafast";
 const OPENAI_CANONICAL_BASE_URL = "https://api.openai.com/v1";
@@ -230,7 +239,7 @@ function getEligibility(ctx: ExtensionContext, includeServiceTier = true): Eligi
         eligible: false,
         modelKey: key,
         reason:
-          "Fast mode is only enabled for GPT-6.1 Sol, GPT-6.1 Terra, GPT-5.6 Sol, GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
+          "Fast mode is only enabled for GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-5.6 Sol, GPT-6 Astra, GPT-6 Sol, and GPT-6 Luna on direct OpenAI APIs",
       };
     }
 
@@ -284,7 +293,8 @@ function getUltrafastEligibility(ctx: ExtensionContext): Eligibility {
     return {
       eligible: false,
       modelKey: key,
-      reason: "Ultrafast mode is only enabled for GPT-6 Astra and GPT-6.1 Sol",
+      reason:
+        "Ultrafast mode is only enabled for GPT-6.2 Astra, GPT-6.2 Sol, GPT-6 Astra, and GPT-6.1 Sol",
     };
   }
 
@@ -528,7 +538,7 @@ export default function fastExtension(pi: ExtensionAPI) {
 
   pi.registerCommand("ultrafast", {
     description:
-      "Toggle session-only Ultrafast mode for direct OpenAI API-key GPT-6 Astra or GPT-6.1 Sol",
+      "Toggle session-only Ultrafast mode for direct OpenAI API-key GPT-6.2/GPT-6 Astra or GPT-6.2/GPT-6.1 Sol",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       if (args.trim()) {

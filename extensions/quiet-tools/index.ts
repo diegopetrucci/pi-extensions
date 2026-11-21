@@ -41,7 +41,7 @@ class QuietLinesRenderComponent extends Container {
     return this.linesRenderer?.(width).filter((line) => line) ?? [];
   }
 
-  render(width: number): string[] {
+  render(width: number): readonly string[] {
     return this.renderLines(width);
   }
 }
@@ -81,7 +81,7 @@ class QuietCallRenderComponent extends QuietLinesRenderComponent {
     this.framePaddingX = undefined;
   }
 
-  render(width: number): string[] {
+  render(width: number): readonly string[] {
     if (!this.frame) return super.render(width);
 
     this.frame.clear();

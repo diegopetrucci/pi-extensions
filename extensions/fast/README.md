@@ -42,7 +42,7 @@ Direct OpenAI API Fast mode requires all of the following:
 
 - Provider `openai`.
 - API `openai-responses` or `openai-completions`.
-- Model `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-5.6-sol`, `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
+- Model `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-5.6-sol`, `gpt-6-astra`, `gpt-6-sol`, or `gpt-6-luna`.
 - API-key auth sets `service_tier: "fast"`; Pi's `openai` ChatGPT OAuth sets `priority`.
 - No existing `service_tier` field in the request payload.
 
@@ -60,7 +60,7 @@ the following on every activation and provider request:
 
 - Provider `openai`.
 - API `openai-responses`.
-- Model `gpt-6-astra` or `gpt-6.1-sol`.
+- Model `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.2-sol`, or `gpt-6.2-astra`.
 - Direct API-key auth, not Codex OAuth or direct OpenAI OAuth.
 - Base URL exactly `https://api.openai.com/v1` (a single trailing slash is also accepted).
 
@@ -81,7 +81,7 @@ OpenAI Codex Fast mode requires all of the following:
 
 - Provider `openai-codex`.
 - API `openai-codex-responses`.
-- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, or `gpt-6-luna`.
+- Model `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-sol`, or `gpt-6-luna`.
 - ChatGPT OAuth/subscription auth, not API-key auth.
 - No existing `service_tier` field in the request payload.
 
@@ -132,8 +132,8 @@ Ultrafast override. Ultrafast defaults off, is never enabled by global or projec
 configuration, and can be undone with either command. Running ordinary `/fast`
 while Ultrafast is selected turns Ultrafast off rather than silently switching to
 another paid tier. Switching to an unsupported model or endpoint disables
-Ultrafast and does not re-enable it when `gpt-6-astra` or `gpt-6.1-sol` is selected again. Switching directly
-between those two eligible models keeps Ultrafast on. The
+Ultrafast and does not re-enable it when a supported Ultrafast model is selected again. Switching directly
+between eligible Ultrafast models keeps Ultrafast on. The
 footer uses `ultrafast` while an eligible request is selected; status text says
 that the tier is requested, not remotely applied.
 
@@ -203,6 +203,7 @@ The collection package loads this unified extension only (`extensions/fast/index
 - Claude Fable 5.2 Fast mode bills at $16 / $80 per MTok input/output (2x its standard rate). Because the Fast toggle follows model changes, a config default of `enabled: true` applies Fast to Fable 5.2 as soon as it is selected.
 - Direct OpenAI Fast mode is limited to the documented API models above; Fast pricing, availability, and rate limits remain provider- and account-dependent.
 - Authoritative support evidence: [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) explicitly uses `gpt-6.1-sol` with `service_tier: "fast"` and documents `priority` as an equivalent alias for supported API models; the [GPT-6.1 Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents the model itself. The [GPT-6.1 Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra) states Fast prices are 2x Standard, and the Fast mode guide lists GPT-5.6 Sol at 2x.
+- Codex `gpt-6.2-sol` and `gpt-6.2-astra` are enabled because openai/codex `codex-rs/models-manager/models.json` @ 6c0cee5 advertises `priority` for both. Direct API Fast for them follows [OpenAI data residency](https://developers.openai.com/api/docs/guides/data-residency), which lists GPT-6.2 Astra and Sol with Fast processing; [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode) lists both as supported, and GPT-6.2 Ultrafast data residency is US-only.
 - Codex `gpt-6.1-terra` is enabled because openai/codex `codex-rs/models-manager/models.json` @ b32ada5 advertises `priority` for it. Anthropic `claude-mythos-5-2` follows [Anthropic Fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), which lists Claude Mythos 5.2; the native ID is inferred from naming.
 - Codex Fast availability depends on plan, client, workspace settings, and rollout. Local eligibility is not live-provider certification.
 - Pi's provider catalog remains the source of reported model pricing, including any tiered pricing; this extension does not apply guessed discounts or rewrite cost metadata.

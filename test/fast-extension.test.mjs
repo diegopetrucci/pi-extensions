@@ -18,12 +18,16 @@ const OPENAI_CODEX_MODELS = [
   "gpt-6-astra",
   "gpt-6.1-sol",
   "gpt-6.1-terra",
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
   "gpt-6-sol",
   "gpt-6-luna",
 ];
 const OPENAI_API_MODELS = [
   "gpt-6.1-sol",
   "gpt-6.1-terra",
+  "gpt-6.2-sol",
+  "gpt-6.2-astra",
   "gpt-5.6-sol",
   "gpt-6-astra",
   "gpt-6-sol",
@@ -449,6 +453,25 @@ test("ultrafast commands toggle through one session-only implementation without 
     model: "gpt-6-astra",
     service_tier: "fast",
   });
+});
+
+test("ultrafast accepts GPT-6.2 Sol and Astra on direct openai-responses", async (t) => {
+  const { agentDir, projectDir } = setupTempDirs(t);
+  setAgentDir(t, agentDir);
+
+  for (const id of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+    const extension = await loadExtension("extensions/fast/index.ts");
+    const harness = createExtensionHarness();
+    extension(harness.pi);
+    const context = createContext({ cwd: projectDir, model: ultrafastModel({ id }), oauth: false });
+    await getHandler(harness, "session_start")({}, context.ctx);
+    await getCommand(harness, "ultrafast").handler("", context.ctx);
+    assert.deepEqual(context.statuses.at(-1), { key: "fast", value: "ultrafast" }, id);
+    assert.deepEqual(
+      await getHandler(harness, "before_provider_request")({ payload: { model: id } }, context.ctx),
+      { model: id, service_tier: "ultrafast" },
+    );
+  }
 });
 
 test("ultrafast activation fails closed for every initial gate and preserves ordinary Fast state", async (t) => {
