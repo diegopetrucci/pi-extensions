@@ -588,7 +588,7 @@ test("changed inputs cannot reuse stale managed document evidence or mutate mani
   );
   assert.match(
     checklist,
-    /approve the protected `npm-release` environment deployment only with an eligible authenticated GitHub identity; required reviewers, `main` branch restrictions, and no-self-review protections remain enforced/,
+    /approve the protected `npm-release` environment deployment only with an eligible authenticated GitHub identity; required reviewers and the `main` deployment-branch restriction remain enforced and must never be bypassed or disabled; because the repository has a single maintainer, `npm-release` has `prevent_self_review` off, so record which identity dispatched and which approved, and note any self-approval explicitly in the release checklist/,
   );
   assert.match(
     checklist,
