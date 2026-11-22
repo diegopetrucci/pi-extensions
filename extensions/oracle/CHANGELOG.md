@@ -2,6 +2,10 @@
 
 Notable user-facing changes to this package are listed here, newest first.
 
+## [0.1.39] - 2026-11-22
+
+- Model preference ladder ranks GPT-6.2 Astra and Sol above GPT-6 Astra and GPT-6.1 Sol, drops stale catalog entries, and adds `glm-5.3` and `deepseek-v4.1-flash` (below `deepseek-v4-pro`) on Qwen Token Plan.
+
 ## [0.1.38] - 2026-11-17
 
 - OpenRouter and Vercel Sol Pro/Fast variants request xhigh thinking again, instead of falling back to the high default used by base Sol models.

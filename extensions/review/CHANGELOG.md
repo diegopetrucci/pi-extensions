@@ -2,6 +2,10 @@
 
 Notable user-facing changes to this package are listed here, newest first.
 
+## [0.1.19] - 2026-11-22
+
+- Reports git timeouts and failures instead of hiding them: the preset selector warns and defaults to uncommitted review when `git status` times out or fails, and the branch and commit pickers show an error when `git branch` or `git log` times out or fails.
+
 ## [0.1.18] - 2026-11-17
 
 - git and gh commands now time out instead of hanging (30s for reads, 120s for `gh pr checkout`).

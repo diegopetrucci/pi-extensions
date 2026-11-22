@@ -2,6 +2,11 @@
 
 Notable user-facing changes to this package are listed here, newest first.
 
+## [0.1.88] - 2026-11-22
+
+- Bundles the extension updates in this release: Pi 1.6.0 support, GPT-6.2 in `fast` and the model preference ladders (`oracle`, `contrarian`, `code-reviewer`), and `review` git timeout reporting.
+- Development baseline moves to Pi 1.6.0 (automated checks only; no fleet certification claim).
+
 ## [0.1.87] - 2026-11-17
 
 - Every extension package (except illustrations-to-explain-things, claude-fast and openai-fast) now ships a CHANGELOG.md, so Pi 1.5.0+ shows notes after an update.
