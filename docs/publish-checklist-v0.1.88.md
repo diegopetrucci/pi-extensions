@@ -40,7 +40,7 @@ The Pi development baseline is 1.6.0 (`docs/pi-1.6.0-validation.md`); no fleet m
 - [x] with an explicit user release request, run `scripts/publish-release.mjs v0.1.88 --dry-run` and review the exact tag, body, package, and tarball evidence
 - [x] dispatch the trusted `publish.yml` workflow only when the authenticated GitHub identity is permitted, from verified `main`, with the exact release tag in both `release_tag` and `confirmation` fields
 - [x] inspect the verified package plan and confirm the audited contributor evidence and exact public-body/package evidence before approval
-- [x] approve the protected `npm-release` environment deployment only with an eligible authenticated GitHub identity; required reviewers, `main` branch restrictions, and no-self-review protections remain enforced (the maintainer authorized this release; GitHub accepted approval from `diegopetrucci`, the configured `npm-release` reviewer)
+- [x] approve the protected `npm-release` environment deployment with an eligible authenticated GitHub identity. `diegopetrucci`, the sole maintainer and only configured reviewer, both dispatched and approved this run under the maintainer's explicit release authorization. The environment enforces required reviewers and the `main` deployment-branch restriction, but `prevent_self_review` is off and administrator bypass is enabled, so self-approval was possible; the maintainer accepts self-approval because the repository has no second eligible reviewer.
 - [x] if GitHub rejects the identity's dispatch or approval, escalate to an eligible human; never bypass or disable protection (not needed; dispatch and approval were accepted)
 - [x] let the workflow publish through npm OIDC only; never run local `npm publish` or use legacy npm token/OTP credentials
 - [x] after verified workflow publication success, wait five minutes before post-publish registry/package-page or npm-install verification
@@ -48,7 +48,7 @@ The Pi development baseline is 1.6.0 (`docs/pi-1.6.0-validation.md`); no fleet m
 ## Publication record
 
 - **Run [45010346848](https://github.com/diegopetrucci/pi-extensions/actions/runs/45010346848)** (2026-11-22, from `main` at `da78cfa`):
-  - The verify job passed (10:01:18–10:01:42 UTC) with 7 `publish` entries. The local dry-run on Node 26.13.1 and npm 11.20.0 gave different tarball hashes, but a repack of the tag with Node 24.11.1 and npm 11.17.0 reproduced all 7 names, versions, SHA1 and SHA512 values from the CI plan. The deployment was approved after that check.
+  - The verify job passed (10:01:18–10:01:42 UTC) with 7 `publish` entries. The local dry-run on Node 26.13.1 and npm 11.20.0 gave different tarball hashes, but a repack of the tag with Node 24.11.1 and npm 11.17.0 reproduced all 7 names, versions, SHA1 and SHA512 values from the CI plan. The maintainer's account approved the deployment (self-approval; see the checklist above) after that check.
   - The publish job ran 10:02:45–10:21:50 UTC and succeeded; the 7 packages published in order from 10:03:08 (`pi-code-reviewer`) to 10:18:17 UTC (umbrella `pi-extensions` last).
 - **Post-publication verification** (after a 5-minute wait):
   - All 7 `name@version` entries resolve with `dist.shasum` and `dist.integrity` equal to the CI plan, `latest` points to the target version, and SLSA provenance attestations are present.
