@@ -37,6 +37,10 @@ Sound remains available as an opt-in option via config.
 
 The extension automatically picks the appropriate backend for the current environment.
 
+### Permission-prompt notifications
+
+This extension can also notify when `@gotgenes/pi-permission-system` asks for approval or when `@yandy0725/pi-sandbox` shows its **Deny / Allow once** escalation prompt — not just when the whole agent turn settles. This is off by default, since it fires mid-turn rather than only when Pi goes idle.
+
 ## Install
 
 ### Standalone npm package
@@ -102,9 +106,42 @@ Example:
     "frequencyHz": 1000,
     "durationMs": 250,
     "command": ""
+  },
+  "permissionPrompt": {
+    "enabled": false,
+    "title": "Pi permission request",
+    "body": "{surface}: {value}",
+    "channels": {
+      "terminal": false,
+      "desktop": true,
+      "bell": false,
+      "sound": false
+    }
   }
 }
 ```
+
+### Notify on permission prompts
+
+Set `permissionPrompt.enabled` to `true` to notify for interactive prompts from [`@gotgenes/pi-permission-system`](https://www.npmjs.com/package/@gotgenes/pi-permission-system) or escalation prompts from [`@yandy0725/pi-sandbox`](https://www.npmjs.com/package/@yandy0725/pi-sandbox). These integrations work independently; neither package requires the other. Permission notifications have their own `channels`, `title`, and `body` and reuse the same `terminal`/`desktop`/`sound` backend settings as settled notifications.
+
+`title` and `body` support `{surface}`, `{value}`, and `{pattern}` placeholders, filled in from the prompt's normalized display projection (for example `surface: "bash"`, `value: "git push"`, `pattern: "git *"`). A placeholder resolves to an empty string when the underlying field isn't a string for that particular ask.
+
+Minimal example (desktop + sound only, matching the top-level `notify.json` this repo ships by default):
+
+```json
+{
+  "permissionPrompt": {
+    "enabled": true,
+    "channels": {
+      "desktop": true,
+      "sound": true
+    }
+  }
+}
+```
+
+For sandbox prompts, `{surface}` is `sandbox`, `{value}` describes the operation and requested access (for example `command under "workspace-write"`), and `{pattern}` is empty. The command, file path, and justification are not copied into the notification. Only the escalation prompt triggers the alert, not the optional denial-reason input.
 
 ### Running inside tmux
 
@@ -172,10 +209,15 @@ You can also customize the sound backend and options if needed.
 - `sound.frequencyHz`: Windows beep frequency
 - `sound.durationMs`: Windows beep duration
 - `sound.command`: custom shell command when `sound.backend` is `command`
+- `permissionPrompt.enabled`: master on/off switch for permission-prompt notifications (default `false`)
+- `permissionPrompt.title`: notification title template; supports `{surface}`, `{value}`, `{pattern}`
+- `permissionPrompt.body`: notification body template; supports `{surface}`, `{value}`, `{pattern}`
+- `permissionPrompt.channels.terminal` / `.desktop` / `.bell` / `.sound`: enable channels for the permission-prompt notification independently from the settled notification's `channels`
 
 ## Notes
 
 - Hooks the `agent_settled` event so automatic retries, compaction retries, and queued follow-ups do not trigger intermediate notifications.
+- Optionally listens for `@gotgenes/pi-permission-system`'s `permissions:ui_prompt` broadcast and detects `@yandy0725/pi-sandbox` escalation selects through Pi's `ui_prompt_start` event. See [Notify on permission prompts](#notify-on-permission-prompts). Disabled by default.
 - Terminal notifications are wrapped for tmux when `$TMUX` is set, which also requires `set -g allow-passthrough all` in `tmux.conf`.
 - Default message is `Pi` / `Ready for input`.
 - Terminal, desktop, bell, and sound channels can be enabled independently.

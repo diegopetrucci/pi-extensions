@@ -17,7 +17,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 type TerminalBackend = "auto" | "osc777" | "osc99" | "none";
@@ -30,16 +30,24 @@ type ProjectConfigContext = {
   isProjectTrusted?: () => boolean;
 };
 
+interface NotificationChannels {
+  terminal: boolean;
+  desktop: boolean;
+  bell: boolean;
+  sound: boolean;
+}
+
 interface NotifyConfig {
   enabled: boolean;
   onlyWhenInteractive: boolean;
   title: string;
   body: string;
-  channels: {
-    terminal: boolean;
-    desktop: boolean;
-    bell: boolean;
-    sound: boolean;
+  channels: NotificationChannels;
+  permissionPrompt: {
+    enabled: boolean;
+    title: string;
+    body: string;
+    channels: NotificationChannels;
   };
   terminal: {
     backend: TerminalBackend;
@@ -68,6 +76,12 @@ const DEFAULT_CONFIG: NotifyConfig = {
     desktop: true,
     bell: true,
     sound: false,
+  },
+  permissionPrompt: {
+    enabled: false,
+    title: "Pi permission request",
+    body: "{surface}: {value}",
+    channels: { terminal: false, desktop: true, bell: false, sound: true },
   },
   terminal: {
     backend: "auto",
@@ -147,6 +161,14 @@ function mergeConfig(base: NotifyConfig, overrides: Partial<NotifyConfig>): Noti
     channels: {
       ...base.channels,
       ...overrides.channels,
+    },
+    permissionPrompt: {
+      ...base.permissionPrompt,
+      ...overrides.permissionPrompt,
+      channels: {
+        ...base.permissionPrompt.channels,
+        ...overrides.permissionPrompt?.channels,
+      },
     },
     terminal: {
       ...base.terminal,
@@ -337,36 +359,88 @@ async function playSound(
 }
 
 export default function notifyExtension(pi: ExtensionAPI) {
+  let currentCtx: ExtensionContext | undefined;
+  const captureCtx = (_event: unknown, ctx: ExtensionContext) => {
+    currentCtx = ctx;
+  };
+  pi.on("session_start", captureCtx);
+  pi.on("before_agent_start", captureCtx);
+
   pi.on("agent_settled", async (_event, ctx) => {
+    currentCtx = ctx;
     const config = loadConfig(ctx);
-    if (!config.enabled) return;
-    if (config.onlyWhenInteractive && !ctx.hasUI) return;
-
-    const tasks: Array<Promise<unknown>> = [];
-
-    if (config.channels.terminal) {
-      sendTerminalNotification(
-        config.title,
-        config.body,
-        detectTerminalBackend(config),
-        shouldWrapForTmux(config),
-      );
-    }
-
-    if (config.channels.desktop) {
-      tasks.push(sendDesktopNotification(config.title, config.body, detectDesktopBackend(config)));
-    }
-
-    if (config.channels.bell) {
-      ringBell();
-    }
-
-    if (config.channels.sound) {
-      tasks.push(playSound(config, detectSoundBackend(config)));
-    }
-
-    if (tasks.length > 0) {
-      await Promise.allSettled(tasks);
-    }
+    if (!config.enabled || (config.onlyWhenInteractive && !ctx.hasUI)) return;
+    await deliverNotification(config, config.title, config.body, config.channels);
   });
+
+  // pi-sandbox uses ctx.ui.select() rather than broadcasting a permission event.
+  // Match the escalation header without sending the command, path, or reason.
+  pi.on("ui_prompt_start", async (event, ctx) => {
+    if (event.kind !== "select" || !event.title || !ctx.hasUI) return;
+    const header = event.title.split("\n", 1)[0];
+    const match =
+      /^Sandbox escalation: allow this (command|operation) under "(workspace-write|danger-full-access)"\?$/.exec(
+        header,
+      );
+    if (!match) return;
+    await handlePermissionPrompt(
+      { surface: "sandbox", value: `${match[1]} under "${match[2]}"` },
+      ctx,
+    );
+  });
+
+  // This broadcast is only emitted when pi-permission-system is installed.
+  pi.events.on("permissions:ui_prompt", (raw) => {
+    if (currentCtx) void handlePermissionPrompt(raw, currentCtx);
+  });
+}
+
+async function handlePermissionPrompt(raw: unknown, ctx: ExtensionContext): Promise<void> {
+  const config = loadConfig(ctx);
+  const prompt = config.permissionPrompt;
+  if (!config.enabled || !prompt.enabled || (config.onlyWhenInteractive && !ctx.hasUI)) return;
+
+  const event = (raw ?? {}) as {
+    surface?: unknown;
+    value?: unknown;
+    request?: { matchedPattern?: unknown } | null;
+  };
+  const stringOrEmpty = (value: unknown) => (typeof value === "string" ? value : "");
+  const vars: Record<string, string> = {
+    surface: stringOrEmpty(event.surface),
+    value: stringOrEmpty(event.value),
+    pattern: stringOrEmpty(event.request?.matchedPattern),
+  };
+  const render = (template: string) =>
+    template.replace(/\{(\w+)\}/g, (match, key: string) =>
+      Object.hasOwn(vars, key) ? vars[key] : match,
+    );
+
+  await deliverNotification(config, render(prompt.title), render(prompt.body), prompt.channels);
+}
+
+async function deliverNotification(
+  config: NotifyConfig,
+  title: string,
+  body: string,
+  channels: NotificationChannels,
+): Promise<void> {
+  const tasks: Array<Promise<unknown>> = [];
+
+  if (channels.terminal) {
+    // Rendered prompt text can contain control characters from tool arguments.
+    const stripControls = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    sendTerminalNotification(
+      stripControls(title),
+      stripControls(body),
+      detectTerminalBackend(config),
+      shouldWrapForTmux(config),
+    );
+  }
+  if (channels.desktop) {
+    tasks.push(sendDesktopNotification(title, body, detectDesktopBackend(config)));
+  }
+  if (channels.bell) ringBell();
+  if (channels.sound) tasks.push(playSound(config, detectSoundBackend(config)));
+  if (tasks.length > 0) await Promise.allSettled(tasks);
 }

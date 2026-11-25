@@ -17,7 +17,21 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
   const toolRendererResolvers = [];
   const execCalls = [];
   const sentUserMessages = [];
+  const listeners = new Map();
+  const events = {
+    listeners,
+    on(channel, handler) {
+      const set = listeners.get(channel) ?? new Set();
+      set.add(handler);
+      listeners.set(channel, set);
+      return () => set.delete(handler);
+    },
+    emit(channel, data) {
+      for (const handler of listeners.get(channel) ?? []) handler(data);
+    },
+  };
   const pi = {
+    events,
     on(eventName, handler) {
       handlers.set(eventName, handler);
     },
@@ -51,5 +65,6 @@ export function createExtensionHarness({ execImpl, getSettings } = {}) {
     toolRendererResolvers,
     execCalls,
     sentUserMessages,
+    events,
   };
 }
