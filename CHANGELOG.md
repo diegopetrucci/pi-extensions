@@ -2,6 +2,11 @@
 
 Notable user-facing changes to this package are listed here, newest first.
 
+## [0.1.89] - 2026-11-27
+
+- Bundles the extension updates in this release: Pi 1.7.0 support, permission-aware approval prompts (`permission-gate`, `dirty-repo-guard`, `confirm-destructive`), refreshed model preference ladders (`oracle`, `contrarian`, `code-reviewer`), `context-inspector` bash truncation reporting, and the `illustrations-to-explain-things` codemode image fallback.
+- Development baseline moves to Pi 1.7.0 (automated checks only; no fleet certification claim).
+
 ## [0.1.88] - 2026-11-22
 
 - Bundles the extension updates in this release: Pi 1.6.0 support, GPT-6.2 in `fast` and the model preference ladders (`oracle`, `contrarian`, `code-reviewer`), and `review` git timeout reporting.

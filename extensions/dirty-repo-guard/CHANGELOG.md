@@ -2,6 +2,10 @@
 
 Notable user-facing changes to this package are listed here, newest first.
 
+## [0.1.15] - 2026-11-27
+
+- Approval prompts now report as permission requests (`blockedKind: "permission"`) so terminals with program status can show them as such; Pi older than 1.6.1 ignores the field.
+
 ## [0.1.14] - 2026-11-17
 
 - First release to ship a package changelog, so Pi 1.5.0+ shows release notes after an update.
