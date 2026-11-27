@@ -91,8 +91,8 @@ test("dirty-repo-guard prompts for dirty repo actions and respects the user choi
     {
       hasUI: true,
       ui: {
-        async select(prompt, options) {
-          prompts.push({ prompt, options });
+        async select(prompt, options, dialogOptions) {
+          prompts.push({ prompt, options, dialogOptions });
           return "No, let me commit first";
         },
         notify(message, level) {
@@ -106,6 +106,7 @@ test("dirty-repo-guard prompts for dirty repo actions and respects the user choi
   assert.deepEqual(prompts[0], {
     prompt: "You have 2 uncommitted file(s). new session anyway?",
     options: ["Yes, proceed anyway", "No, let me commit first"],
+    dialogOptions: { blockedKind: "permission" },
   });
   assert.deepEqual(notifications, [{ message: "Commit your changes first", level: "warning" }]);
 
@@ -125,8 +126,8 @@ test("dirty-repo-guard prompts for dirty repo actions and respects the user choi
       {
         hasUI: true,
         ui: {
-          async select(prompt, options) {
-            allowPrompts.push({ prompt, options });
+          async select(prompt, options, dialogOptions) {
+            allowPrompts.push({ prompt, options, dialogOptions });
             return "Yes, proceed anyway";
           },
           notify() {},
@@ -142,8 +143,8 @@ test("dirty-repo-guard prompts for dirty repo actions and respects the user choi
       {
         hasUI: true,
         ui: {
-          async select(prompt, options) {
-            allowPrompts.push({ prompt, options });
+          async select(prompt, options, dialogOptions) {
+            allowPrompts.push({ prompt, options, dialogOptions });
             return "Yes, proceed anyway";
           },
           notify() {},
@@ -157,10 +158,12 @@ test("dirty-repo-guard prompts for dirty repo actions and respects the user choi
     {
       prompt: "You have 2 uncommitted file(s). switch session anyway?",
       options: ["Yes, proceed anyway", "No, let me commit first"],
+      dialogOptions: { blockedKind: "permission" },
     },
     {
       prompt: "You have 2 uncommitted file(s). fork anyway?",
       options: ["Yes, proceed anyway", "No, let me commit first"],
+      dialogOptions: { blockedKind: "permission" },
     },
   ]);
 });

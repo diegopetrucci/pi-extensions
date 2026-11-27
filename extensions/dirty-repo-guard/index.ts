@@ -35,6 +35,7 @@ async function checkDirtyRepo(
   const choice = await ctx.ui.select(
     `You have ${changedFiles} uncommitted file(s). ${action} anyway?`,
     ["Yes, proceed anyway", "No, let me commit first"],
+    { blockedKind: "permission" },
   );
 
   if (choice !== "Yes, proceed anyway") {

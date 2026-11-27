@@ -150,6 +150,7 @@ type MinimalMessage = {
   cancelled?: boolean;
   truncated?: boolean;
   fullOutputPath?: string;
+  fullOutputError?: string;
   excludeFromContext?: boolean;
 };
 
@@ -643,6 +644,8 @@ function analyzeToolResult(
           noteParts.push("Result was truncated before entering context.");
         if (typeof message.details.fullOutputPath === "string")
           noteParts.push(`Full output: ${message.details.fullOutputPath}`);
+        if (typeof message.details.fullOutputError === "string")
+          noteParts.push(`Full output not saved: ${message.details.fullOutputError}`);
       }
       if (nestedNote) noteParts.push(nestedNote);
       addTextSegment(state, "toolResults", `Tool result: ${toolName}`, block.text, {
@@ -676,8 +679,12 @@ function bashExecutionToModelText(message: MinimalMessage): string {
   else if (message.exitCode !== null && message.exitCode !== undefined && message.exitCode !== 0) {
     text += `\n\nCommand exited with code ${message.exitCode}`;
   }
-  if (message.truncated && message.fullOutputPath) {
-    text += `\n\n[Output truncated. Full output: ${message.fullOutputPath}]`;
+  if (message.truncated) {
+    if (message.fullOutputPath)
+      text += `\n\n[Output truncated. Full output: ${message.fullOutputPath}]`;
+    else if (message.fullOutputError)
+      text += `\n\n[Output truncated. Could not save the full output: ${message.fullOutputError}]`;
+    else text += "\n\n[Output truncated]";
   }
   return text;
 }
