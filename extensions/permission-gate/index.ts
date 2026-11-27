@@ -34,7 +34,7 @@ type ConfirmationContext = {
     select(
       prompt: string,
       choices: string[],
-      dialogOptions?: { signal?: AbortSignal },
+      dialogOptions?: { signal?: AbortSignal; blockedKind?: "permission" },
     ): Promise<string | undefined>;
   };
 };
@@ -710,7 +710,10 @@ async function requestConfirmation(
   }
 
   try {
-    const choice = await ctx.ui.select(prompt, ["Yes", "No"], { signal: ctx.signal });
+    const choice = await ctx.ui.select(prompt, ["Yes", "No"], {
+      signal: ctx.signal,
+      blockedKind: "permission",
+    });
     if (ctx.signal?.aborted) {
       return { block: true, reason: "Confirmation cancelled" };
     }

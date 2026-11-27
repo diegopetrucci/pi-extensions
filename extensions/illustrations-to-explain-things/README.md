@@ -10,6 +10,7 @@ The skill helps the agent turn one key judgment, process, structure, state, or m
 - Shot lists for longer essays or Notion pages
 - Visual metaphors for workflows, methods, structures, and states
 - Focused image-generation prompts with style and QA constraints
+- Image generation via `image_gen` (Codex) or, in Pi, the `codemode` tool with an image model (OpenRouter or Radius); otherwise prompts only
 
 ## Install
 

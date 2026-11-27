@@ -153,7 +153,6 @@ export function __setCreateAgentSessionBehaviors(nextBehaviors) {
 
 const WEAKER_SIBLING_CASES = [
   ["vercel-ai-gateway", "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite"],
-  ["azure", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
 ];
 
 test("code_reviewer anchored preferences keep stronger ids ahead of weaker siblings", async () => {

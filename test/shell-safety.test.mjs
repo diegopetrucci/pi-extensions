@@ -483,6 +483,7 @@ test("permission-gate passes Pi dialog cancellation through and fails closed on 
   );
 
   assert.equal(dialogOptions.signal, controller.signal);
+  assert.equal(dialogOptions.blockedKind, "permission");
   assert.deepEqual(cancelled, { block: true, reason: "Confirmation cancelled" });
 
   const rejected = await toolCallHandler(

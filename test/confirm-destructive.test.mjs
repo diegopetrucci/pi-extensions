@@ -185,8 +185,8 @@ test("confirm-destructive confirms before forking and respects the selected choi
   const ctx = {
     hasUI: true,
     ui: {
-      async select(prompt, options) {
-        prompts.push({ prompt, options });
+      async select(prompt, options, dialogOptions) {
+        prompts.push({ prompt, options, dialogOptions });
         return answers.shift();
       },
       notify(message, level) {
@@ -201,10 +201,12 @@ test("confirm-destructive confirms before forking and respects the selected choi
     {
       prompt: "Fork from entry abcdef12?",
       options: ["Yes, create fork", "No, stay in current session"],
+      dialogOptions: { blockedKind: "permission" },
     },
     {
       prompt: "Fork from entry abcdef12?",
       options: ["Yes, create fork", "No, stay in current session"],
+      dialogOptions: { blockedKind: "permission" },
     },
   ]);
   assert.deepEqual(notifications, [{ message: "Fork cancelled", level: "info" }]);

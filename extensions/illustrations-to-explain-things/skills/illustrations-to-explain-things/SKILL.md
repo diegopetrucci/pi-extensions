@@ -59,6 +59,8 @@ Default to 4-8 images. For very short pieces, 1-3 may be enough. Even for long p
 
 If the user clearly asks you to generate, output, or make images, do not pause for confirmation. Use the built-in `image_gen` tool and generate each image separately. Do not combine multiple concepts into one image.
 
+If no `image_gen` tool is available (for example in Pi), use the `codemode` tool instead: pick a model from `models.getAvailableOfType("image")`, call `models.generateImages(model, { input: [{ type: "text", text: prompt }] }, { aspectRatio: "16:9" })`, check `result.stopReason === "stop"`, and attach each `image` block from `result.output` with `image(block)`. Pi saves attached images to temp files named in the result; copy them as described in step 5. This requires codemode to be enabled (for example `defaultTools` with `+codemode`) and an available image model (OpenRouter or Radius in Pi 1.7.0). If neither `image_gen` nor a usable codemode image model is available, say so and output the prompts instead.
+
 Each image should express only one core structure. The prompt must include:
 
 - 16:9 landscape article illustration

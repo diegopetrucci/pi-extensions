@@ -844,3 +844,61 @@ test("context-inspector report data handles unknown usage, estimator overage, pr
     providerDelta.notes.some((note) => note.includes("unattributed provider/serialization delta")),
   );
 });
+
+test("context-inspector mirrors Pi bash truncation notes for all branches", () => {
+  const bashSegment = (extra) => {
+    const { segments } = analyzeEntries(
+      [
+        {
+          type: "message",
+          id: "bash-t",
+          timestamp: "2024-01-01T00:00:00.000Z",
+          message: {
+            role: "bashExecution",
+            timestamp: Date.parse("2024-01-01T00:00:00.000Z"),
+            command: "yes",
+            output: "y",
+            truncated: true,
+            ...extra,
+          },
+        },
+      ],
+      false,
+    );
+    return segments.find((segment) => segment.category === "bash");
+  };
+  const text = (segment) => JSON.stringify(segment);
+
+  assert.match(
+    text(bashSegment({ fullOutputPath: "/tmp/full.txt", fullOutputError: "ignored" })),
+    /\[Output truncated\. Full output: \/tmp\/full\.txt\]/,
+  );
+  assert.match(
+    text(bashSegment({ fullOutputError: "disk full" })),
+    /\[Output truncated\. Could not save the full output: disk full\]/,
+  );
+  assert.match(text(bashSegment({})), /\[Output truncated\]/);
+});
+
+test("context-inspector notes fullOutputError on tool results", () => {
+  const { segments } = analyzeEntries(
+    [
+      {
+        type: "message",
+        id: "tr-err",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        message: {
+          role: "toolResult",
+          timestamp: Date.parse("2024-01-01T00:00:00.000Z"),
+          toolName: "bash",
+          toolCallId: "call-1",
+          content: [{ type: "text", text: "out" }],
+          details: { truncation: { truncated: true }, fullOutputError: "disk full" },
+        },
+      },
+    ],
+    false,
+  );
+  const seg = segments.find((s) => s.category === "toolResults");
+  assert.match(seg.note, /Full output not saved: disk full/);
+});

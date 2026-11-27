@@ -64,7 +64,7 @@ test("Pi 1.5.0 Gemini 4 Argon and Mistral Large 4 lead their provider ladders", 
     for (const provider of ["google", "google-vertex", "opencode-go"]) {
       assert.equal(firstCatalogMatchId(provider, preferences[provider]), "gemini-4-argon");
     }
-    assert.equal(firstCatalogMatchId("mistral", preferences.mistral), "mistral-large-4-0-8");
+    assert.equal(firstCatalogMatchId("mistral", preferences.mistral), "mistral-large-4");
   }
 });
 
@@ -161,22 +161,59 @@ test("trailing-space catalog matching checks model IDs instead of display names"
   );
 });
 
-test("Pi 1.4.0 keeps live OpenRouter Kimi K2 Thinking directly after K2.6", () => {
+test("Pi 1.7.0 drops the retired OpenRouter Kimi K2 Thinking preference", () => {
   const pattern = "moonshotai/kimi-k2-thinking";
-  assert.equal(firstCatalogMatch("openrouter", [pattern]), pattern);
+  assert.equal(firstCatalogMatch("openrouter", [pattern]), undefined);
   for (const role of ["oracle", "contrarian"]) {
     const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
-    const k26Index = preferences.openrouter.indexOf("moonshotai/kimi-k2.6");
-    assert.notEqual(k26Index, -1, `${role} is missing the live Kimi K2.6 preference`);
-    assert.equal(
-      preferences.openrouter[k26Index + 1],
-      pattern,
-      `${role} changed Kimi K2 Thinking order`,
+    assert.equal(preferences.openrouter.includes(pattern), false, `${role} kept ${pattern}`);
+    assert.equal(preferences["vercel-ai-gateway"].includes(pattern), false);
+  }
+});
+
+test("Pi 1.7.0 approved ladder additions keep their ordering", () => {
+  const above = (ladder, upper, lower, label) => {
+    const u = ladder.indexOf(upper);
+    const l = ladder.indexOf(lower);
+    assert.notEqual(u, -1, `${label} is missing ${upper}`);
+    assert.equal(u + 1, l, `${label}: ${upper} must sit directly above ${lower}`);
+  };
+  const qwen = {
+    "qwen-token-plan": ["qwen4-max", "qwen3.8-max"],
+    "qwen-token-plan-cn": ["qwen4-max", "qwen3.8-max"],
+    "qwen-token-plan-individual": ["qwen4-max", "qwen3.8-max"],
+    "qwen-token-plan-individual-cn": ["qwen4-max", "qwen3.8-max"],
+    "opencode-go": ["qwen4-max ", "qwen3.8-max "],
+    "vercel-ai-gateway": ["alibaba/qwen4-max ", "alibaba/qwen3.8-max "],
+    together: ["Qwen/Qwen4-Max", "Qwen/Qwen3.7-Max"],
+  };
+  for (const role of ["oracle", "contrarian", "code-reviewer"]) {
+    const preferences = extractConst(`extensions/${role}/index.ts`, "PROVIDER_MODEL_PREFERENCES");
+    assert.deepEqual(
+      preferences["ant-ling"],
+      ["Ling-3.1-flash ", "Ling-3.2-flash ", "Ling-3.0-flash "],
+      `${role} ant-ling order`,
     );
+    for (const provider of ["zai", "zai-coding-cn"]) {
+      above(preferences[provider], "glm-5.4 ", "glm-5.3 ", `${role}/${provider}`);
+    }
+    for (const [provider, [upper, lower]] of Object.entries(qwen)) {
+      if (!preferences[provider]?.includes(qwen[provider][1])) continue;
+      above(preferences[provider], upper, lower, `${role}/${provider}`);
+    }
+    above(preferences.together, "zai-org/GLM-5.3 ", "zai-org/GLM-5.3-Flash", `${role}/together`);
+    if (role !== "code-reviewer") {
+      above(preferences.opencode, "kimi-k3.1-pro ", "kimi-k3", `${role}/opencode`);
+    }
+    for (const provider of ["opencode-go"]) {
+      assert.equal(
+        preferences[provider].some((p) => p.includes("longcat-2.5")),
+        false,
+      );
+    }
     assert.equal(
-      preferences["vercel-ai-gateway"].includes(pattern),
+      preferences.fireworks.some((p) => /qwen4-max|glm-5p3/.test(p)),
       false,
-      `${role} must keep the removed Vercel Kimi K2 Thinking preference absent`,
     );
   }
 });
@@ -210,14 +247,11 @@ test("selected Pi 0.84.3 and 0.84.4 frontier additions stay represented in curat
   const expectedPatterns = {
     "amazon-bedrock": ["openai.gpt-5.6-sol", "xai.grok-4.6"],
     baseten: ["zai-org/GLM-5.3 "],
-    "cloudflare-ai-gateway": [
-      "workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813",
-      "workers-ai/@cf/zai-org/glm-5.3 ",
-    ],
-    "cloudflare-workers-ai": ["@cf/deepseek-ai/deepseek-v4-pro-0813", "@cf/zai-org/glm-5.3 "],
+    "cloudflare-ai-gateway": ["workers-ai/@cf/zai-org/glm-5.3 "],
+    "cloudflare-workers-ai": ["@cf/zai-org/glm-5.3 "],
     nvidia: ["nvidia/nemotron-3-ultra-550b-a55b"],
     openrouter: ["z-ai/glm-5.3 "],
-    together: ["zai-org/GLM-5.3-Flash"],
+    together: ["zai-org/GLM-5.3 ", "zai-org/GLM-5.3-Flash"],
     "vercel-ai-gateway": ["zai/glm-5.3 "],
   };
 
@@ -306,11 +340,10 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "gpt-5.6-luna",
       "deepseek-v4-pro",
       "glm-5.3 ",
+      "qwen4-max ",
       "qwen3.8-max ",
       "qwen3.7-plus",
       "mimo-v2.6-pro",
-      "mimo-v2.5-pro",
-      "mimo-v2.5",
       "minimax-m3",
       "kimi-k3.1-pro ",
       "kimi-k3",
@@ -349,15 +382,15 @@ test("Pi 1.4.0 dead-entry cleanup preserves the approved survivor order", () => 
       "glm-5.3-flash",
     ],
     together: [
-      "deepseek-ai/DeepSeek-V4-Pro",
       "moonshotai/Kimi-K3.1-Pro",
       "moonshotai/Kimi-K3",
+      "zai-org/GLM-5.3 ",
       "zai-org/GLM-5.3-Flash",
       "zai-org/GLM-5.2",
+      "Qwen/Qwen4-Max",
       "Qwen/Qwen3.7-Max",
       "Qwen/Qwen3.6-Plus",
       "MiniMaxAI/MiniMax-M3",
-      "openai/gpt-oss-120b",
     ],
   };
   for (const role of ["oracle", "contrarian"]) {
@@ -598,14 +631,7 @@ const CODE_REVIEWER_GPT6_CATALOG_CASES = [
   },
   {
     provider: "github-copilot",
-    modelIds: [
-      "gpt-5.6-luna",
-      "gpt-6-luna",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-6-sol",
-      "gpt-6-astra",
-    ],
+    modelIds: ["gpt-5.6-luna", "gpt-6-luna", "gpt-5.6-sol", "gpt-6-sol", "gpt-6-astra"],
     expected: "gpt-6-astra",
   },
   {
@@ -899,7 +925,8 @@ test("direct, Copilot, and Radius ladders keep Astra above Sol/Luna with GPT-5.6
       astra: "gpt-6-astra",
       sol: "gpt-6-sol",
       luna: "gpt-6-luna",
-      fallbacks: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+      // Pi 1.7.0 dropped github-copilot/gpt-5.6-terra from the built-in catalog.
+      fallbacks: ["gpt-5.6-sol", "gpt-5.6-luna"],
     },
     {
       provider: "openai",
@@ -1102,7 +1129,12 @@ test("Pi 1.5.0 ranks exact GPT-6.1 Terra below every Sol and above GPT-5.6 Terra
       const ladder = preferences[provider];
       assert.ok(ladder, `${role} is missing ${provider}`);
       const terra56 = ladder.findIndex((pattern) => /gpt-5\.6-terra(-pro)?$/.test(pattern));
-      assert.notEqual(terra56, -1, `${role}/${provider} lost its GPT-5.6 Terra entry`);
+      // Pi 1.7.0 dropped github-copilot/gpt-5.6-terra from the catalog, so its ladder has none.
+      if (provider === "github-copilot") {
+        assert.equal(terra56, -1, `${role}/${provider} kept a stale GPT-5.6 Terra entry`);
+      } else {
+        assert.notEqual(terra56, -1, `${role}/${provider} lost its GPT-5.6 Terra entry`);
+      }
       const terra61 = terraPatterns.map((pattern) => ladder.indexOf(pattern));
       assert.ok(
         terra61.every((index) => index !== -1),
@@ -1117,7 +1149,12 @@ test("Pi 1.5.0 ranks exact GPT-6.1 Terra below every Sol and above GPT-5.6 Terra
         .filter((index) => index !== -1);
       assert.ok(sols.length > 0);
       assert.ok(Math.max(...sols) < terra61[0], `${role}/${provider}: Sol must precede 6.1 Terra`);
-      assert.ok(terra61.at(-1) < terra56, `${role}/${provider}: 6.1 Terra must precede 5.6 Terra`);
+      if (terra56 !== -1) {
+        assert.ok(
+          terra61.at(-1) < terra56,
+          `${role}/${provider}: 6.1 Terra must precede 5.6 Terra`,
+        );
+      }
     }
     // Exact-ID patterns must not select :batch / -fast aliases.
     for (const [provider, id] of [
